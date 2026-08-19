@@ -86,11 +86,27 @@ if ($Install) {
     $target = Join-Path $env:LOCALAPPDATA 'vsdbgmcp\bin'
     New-Item -ItemType Directory -Force $target | Out-Null
 
+    # An agent that is connected right now holds this exe open, and Windows will not
+    # let a running image be overwritten. It will let one be renamed, though, so move
+    # the old files aside and write the new ones beside them. The running agent keeps
+    # using what it already loaded until it restarts.
+    Get-ChildItem $target -File -Filter '*.superseded' -ErrorAction SilentlyContinue |
+        ForEach-Object { try { Remove-Item $_.FullName -Force } catch { } }
+
+    foreach ($file in Get-ChildItem $target -File -ErrorAction SilentlyContinue) {
+        try { Rename-Item $file.FullName ($file.Name + '.superseded') -Force }
+        catch { }
+    }
+
     try {
         Copy-Item "$root\src\VsDbgMcp.Shim\bin\$Configuration\net10.0\*" $target -Recurse -Force
     }
     catch {
-        throw "Could not copy the shim to $target. Close any agent using it and try again.`n$_"
+        throw "Could not copy the shim to $target.`n$_"
+    }
+
+    if (Get-ChildItem $target -File -Filter '*.superseded' -ErrorAction SilentlyContinue) {
+        Write-Host "an agent is still running the previous shim; it picks this up on restart" -ForegroundColor Yellow
     }
 
     $exe = Join-Path $target 'vsdbgmcp.exe'

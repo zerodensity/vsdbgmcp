@@ -38,6 +38,11 @@ namespace VsDbgMcp.Shim
                 return 0;
             }
 
+            // Closing stdin is the ordinary way this process ends. Watching the client
+            // as well covers the ways that do not close it: being killed outright, or
+            // replacing its own image during an update.
+            ParentWatch.ExitWhenParentDoes();
+
             var sessions = new SessionManager(options.Cwd);
 
             var builder = Host.CreateApplicationBuilder();
