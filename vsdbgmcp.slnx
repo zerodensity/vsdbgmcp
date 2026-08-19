@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/VsDbgMcp.Core/VsDbgMcp.Core.csproj" />
+    <Project Path="src/VsDbgMcp.Host/VsDbgMcp.Host.csproj" />
+    <Project Path="src/VsDbgMcp.Shim/VsDbgMcp.Shim.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/VsDbgMcp.Tests/VsDbgMcp.Tests.csproj" />
+  </Folder>
+</Solution>

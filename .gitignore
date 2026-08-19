@@ -1,0 +1,12 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+artifacts/
+TestResults/
+*.binlog
+
+# C++ fixture build output
+x64/
+*.vcxproj.user

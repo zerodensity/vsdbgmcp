@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+  <Extern href="stdidcmd.h" />
+  <Extern href="vsshlids.h" />
+
+  <Commands package="guidVsDbgMcpPackage">
+    <Buttons>
+      <!--
+        Extensions > Debugger MCP Server. The Extensions menu is the old Add-Ins menu
+        renamed, which is why the symbols still say ADDIN.
+      -->
+      <Button guid="guidVsDbgMcpCommandSet" id="cmdidShowStatusWindow" priority="0x0100" type="Button">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_ADDIN_BUILTIN" />
+        <Strings>
+          <ButtonText>Debugger MCP Server</ButtonText>
+          <CommandName>Extensions.DebuggerMcpServer</CommandName>
+        </Strings>
+      </Button>
+
+      <!-- And where tool windows are normally looked for. -->
+      <Button guid="guidVsDbgMcpCommandSet" id="cmdidShowStatusWindowFromView" priority="0x0100" type="Button">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_WNDO_OTRWNDWS1" />
+        <Strings>
+          <ButtonText>Debugger MCP Server</ButtonText>
+          <CommandName>View.DebuggerMcpServer</CommandName>
+        </Strings>
+      </Button>
+    </Buttons>
+  </Commands>
+
+  <Symbols>
+    <GuidSymbol name="guidVsDbgMcpPackage" value="{a7c33584-60a6-4a88-b454-83e5383271eb}" />
+    <GuidSymbol name="guidVsDbgMcpCommandSet" value="{ffc9b256-3f52-42fd-a224-b984438ea432}">
+      <IDSymbol name="cmdidShowStatusWindow" value="0x0100" />
+      <IDSymbol name="cmdidShowStatusWindowFromView" value="0x0101" />
+    </GuidSymbol>
+  </Symbols>
+
+</CommandTable>

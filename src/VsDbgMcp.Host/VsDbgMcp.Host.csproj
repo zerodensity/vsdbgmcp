@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Deliberately the legacy project format, not SDK style.
+
+  The VSIX packaging tasks are .NET Framework assemblies, so only the MSBuild that
+  ships with Visual Studio can run them - and that MSBuild can only resolve
+  Microsoft.NET.Sdk when the .NET SDK component is installed alongside the extension
+  development workload, which is not something an extension should require of whoever
+  builds it. This format needs no SDK resolver at all.
+
+  The shared contracts are compiled in from VsDbgMcp.Core rather than referenced, so
+  one assembly loads into devenv instead of two.
+-->
+<Project ToolsVersion="17.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{3F1D6B2E-9C4A-4E17-B0A6-5E9C21A7D480}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>VsDbgMcp.Host</RootNamespace>
+    <AssemblyName>VsDbgMcp.Host</AssemblyName>
+    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+    <MinimumVisualStudioVersion>17.0</MinimumVisualStudioVersion>
+    <LangVersion>latest</LangVersion>
+    <RestoreProjectStyle>PackageReference</RestoreProjectStyle>
+
+    <!--
+      VSTHRD010 warns about touching single-threaded types off the UI thread. It fires
+      on lambdas, because it analyses each one as its own context and cannot see that
+      the enclosing helper already switched threads.
+
+      The invariant is structural here: every automation call in this assembly goes
+      through DebugHost.UI or ProjectSystem.UI, which await SwitchToMainThreadAsync and
+      install the message filter before invoking the body. Nothing touches the DTE by
+      any other path. The rest of the VSTHRD rules stay on.
+    -->
+    <NoWarn>$(NoWarn);VSTHRD010</NoWarn>
+
+    <!-- Opt in to the packaging targets; the build tools package leaves this off by default. -->
+    <VSSDKBuildToolsAutoSetup>true</VSSDKBuildToolsAutoSetup>
+    <GeneratePkgDefFile>true</GeneratePkgDefFile>
+    <UseCodebase>true</UseCodebase>
+    <IncludeAssemblyInVSIXContainer>true</IncludeAssemblyInVSIXContainer>
+    <IncludeDebugSymbolsInVSIXContainer>false</IncludeDebugSymbolsInVSIXContainer>
+    <IncludeCopyLocalReferencesInVSIXContainer>false</IncludeCopyLocalReferencesInVSIXContainer>
+    <CopyBuildOutputToOutputDirectory>true</CopyBuildOutputToOutputDirectory>
+    <CreateVsixContainer>true</CreateVsixContainer>
+    <DeployExtension>false</DeployExtension>
+    <DeployVSTemplates>false</DeployVSTemplates>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.Design" />
+    <Reference Include="System.Xaml" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="WindowsBase" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="Activity.cs" />
+    <Compile Include="BreakpointTable.cs" />
+    <Compile Include="ConsoleBridge.cs" />
+    <Compile Include="DebugEventSink.cs" />
+    <Compile Include="DebugHost.cs" />
+    <Compile Include="DebugHost.Inspection.cs" />
+    <Compile Include="DebugHost.Io.cs" />
+    <Compile Include="ExpressionEval.cs" />
+    <Compile Include="FocusGuard.cs" />
+    <Compile Include="FrameReader.cs" />
+    <Compile Include="InstanceDirectory.cs" />
+    <Compile Include="MessageFilter.cs" />
+    <Compile Include="NativeReader.cs" />
+    <Compile Include="PipeServer.cs" />
+    <Compile Include="ProcessIdentity.cs" />
+    <Compile Include="ProjectSystem.cs" />
+    <Compile Include="StatusWindow.cs" />
+    <Compile Include="VsDbgMcpPackage.cs" />
+    <Compile Include="WindowCapture.cs" />
+    <Compile Include="WorkspaceProbe.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\VsDbgMcp.Core\Names.cs" Link="Core\Names.cs" />
+    <Compile Include="..\VsDbgMcp.Core\InstanceFile.cs" Link="Core\InstanceFile.cs" />
+    <Compile Include="..\VsDbgMcp.Core\InstanceRecord.cs" Link="Core\InstanceRecord.cs" />
+    <Compile Include="..\VsDbgMcp.Core\PathUtil.cs" Link="Core\PathUtil.cs" />
+    <Compile Include="..\VsDbgMcp.Core\Router.cs" Link="Core\Router.cs" />
+    <Compile Include="..\VsDbgMcp.Core\Contracts\Dtos.cs" Link="Core\Contracts\Dtos.cs" />
+    <Compile Include="..\VsDbgMcp.Core\Contracts\IDebugHost.cs" Link="Core\Contracts\IDebugHost.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="source.extension.vsixmanifest">
+      <SubType>Designer</SubType>
+    </None>
+    <VSCTCompile Include="VSCommandTable.vsct">
+      <ResourceName>Menus.ctmenu</ResourceName>
+      <SubType>Designer</SubType>
+    </VSCTCompile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.14.40265" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="17.13.2126">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+
+  <!-- VSToolsPath is set by the build tools package to its own tools folder. -->
+  <Import Project="$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets" Condition="'$(VSToolsPath)' != ''" />
+</Project>
