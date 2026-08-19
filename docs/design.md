@@ -70,10 +70,17 @@ Not the reverse. This is what makes the configuration global: there is no port
 or URL for the client to know, it works with clients that speak only stdio, and
 several clients can attach to the same VS instance independently.
 
-It also makes process lifetime trivial. The shim is a child of the MCP client
-and dies with it. The extension lives and dies with devenv. The named pipe
-drops when either end goes away. Nothing can be orphaned, so nothing needs to
-be reaped.
+It also keeps process lifetime simple. The shim is a child of the MCP client and
+ends when it does; the extension lives and dies with devenv; the named pipe
+drops when either end goes away.
+
+Closing stdin is what normally ends the shim, but it is not enough on its own.
+A client that is killed outright, or that replaces its own image during an
+update, never closes it — one was found still running against a parent that had
+become `claude.exe.old.<timestamp>`, holding its files open and a connection to
+Visual Studio that nothing was driving. So the shim also watches its parent
+process directly, which is the one signal that survives every way a client can
+disappear.
 
 ### MCP lives in the shim, not in devenv
 
