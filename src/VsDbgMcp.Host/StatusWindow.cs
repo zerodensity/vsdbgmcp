@@ -1,8 +1,10 @@
 using System;
 using System.Globalization;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Media;
 using Microsoft.VisualStudio.Shell;
 
@@ -29,6 +31,7 @@ namespace VsDbgMcp.Host
 
         readonly TextBlock _headline = new TextBlock();
         readonly TextBlock _detail = new TextBlock();
+        readonly TextBlock _setup = new TextBlock();
         readonly Button _pause = new Button();
         readonly CheckBox _guard = new CheckBox();
         readonly StackPanel _rows = new StackPanel();
@@ -38,6 +41,9 @@ namespace VsDbgMcp.Host
 
         /// <summary>The newest entry already drawn, so a redraw adds only what is new.</summary>
         long _drawn;
+
+        /// <summary>Set once the shim is on disk, so a redraw stops going to the disk.</summary>
+        bool _shimFound;
 
         public StatusControl()
         {
@@ -52,6 +58,11 @@ namespace VsDbgMcp.Host
             _detail.Margin = new Thickness(0, 0, 0, 8);
             _detail.TextWrapping = TextWrapping.Wrap;
             _detail.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
+
+            _setup.Opacity = 0.75;
+            _setup.Margin = new Thickness(0, 0, 0, 8);
+            _setup.TextWrapping = TextWrapping.Wrap;
+            _setup.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
 
             _pause.MinWidth = 76;
             _pause.Margin = new Thickness(0, 0, 6, 0);
@@ -83,9 +94,10 @@ namespace VsDbgMcp.Host
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 Content = _rows
             };
-            Grid.SetRow(scroller, 3);
+            Grid.SetRow(scroller, 4);
 
             var grid = new Grid { Margin = new Thickness(10) };
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -93,9 +105,11 @@ namespace VsDbgMcp.Host
 
             Grid.SetRow(_headline, 0);
             Grid.SetRow(_detail, 1);
-            Grid.SetRow(buttons, 2);
+            Grid.SetRow(_setup, 2);
+            Grid.SetRow(buttons, 3);
             grid.Children.Add(_headline);
             grid.Children.Add(_detail);
+            grid.Children.Add(_setup);
             grid.Children.Add(buttons);
             grid.Children.Add(scroller);
 
@@ -144,6 +158,48 @@ namespace VsDbgMcp.Host
 
             _pause.Content = Activity.Paused ? "Resume" : "Pause";
             _guard.IsChecked = Activity.GuardFocus;
+            RefreshSetup();
+        }
+
+        /// <summary>
+        /// What to put in the agent's configuration. It is one absolute path, set once
+        /// and globally, so the only thing the reader needs from this panel is a way to
+        /// get that path onto the clipboard without retyping it.
+        /// </summary>
+        void RefreshSetup()
+        {
+            if (_shimFound) return;
+
+            _setup.Inlines.Clear();
+            _shimFound = File.Exists(Names.ShimExe);
+
+            if (!_shimFound)
+            {
+                _setup.Inlines.Add(new Run("The shim is not on disk yet - restart Visual Studio.")
+                {
+                    Foreground = FailedBrush
+                });
+                return;
+            }
+
+            _setup.Inlines.Add(new Run("Agent setup:  "));
+            _setup.Inlines.Add(CopyLink("copy command",
+                "claude mcp add -s user vsdbg -- \"" + Names.ShimExe + "\""));
+            _setup.Inlines.Add(new Run("   ·   "));
+            _setup.Inlines.Add(CopyLink("copy path", Names.ShimExe));
+        }
+
+        static Hyperlink CopyLink(string text, string value)
+        {
+            var link = new Hyperlink(new Run(text)) { ToolTip = value };
+            link.Click += (s, e) =>
+            {
+                // Another process can hold the clipboard open. Losing a copy is not
+                // worth taking Visual Studio's UI down over.
+                try { Clipboard.SetText(value); }
+                catch (ExternalException) { }
+            };
+            return link;
         }
 
         /// <summary>

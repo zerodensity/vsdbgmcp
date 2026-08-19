@@ -65,6 +65,13 @@ namespace VsDbgMcp.Host
             _debugger = await GetServiceAsync(typeof(SVsShellDebugger)) as IVsDebugger;
             _pane = CreateOutputPane(await GetServiceAsync(typeof(SVsOutputWindow)) as IVsOutputWindow);
 
+            // Copying the shim out is file work, and nothing in this process waits on
+            // it: the agent launches the shim, not us.
+            JoinableTaskFactory.RunAsync(async () =>
+            {
+                Log(await Task.Run(() => ShimStaging.Run()));
+            }).FileAndForget("vsdbgmcp/stage-shim");
+
             _eventSink = new DebugEventSink(Log);
             _debugHost = new DebugHost(this, _dte, _solution, _debugger, _eventSink, JoinableTaskFactory, Log);
             _projectSystem = new ProjectSystem(this, _dte, _solution, JoinableTaskFactory, Log);

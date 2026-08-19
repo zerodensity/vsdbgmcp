@@ -96,6 +96,7 @@
     <Compile Include="PipeServer.cs" />
     <Compile Include="ProcessIdentity.cs" />
     <Compile Include="ProjectSystem.cs" />
+    <Compile Include="ShimStaging.cs" />
     <Compile Include="StatusWindow.cs" />
     <Compile Include="VsDbgMcpPackage.cs" />
     <Compile Include="WindowCapture.cs" />
@@ -110,6 +111,15 @@
     <Compile Include="..\VsDbgMcp.Core\Router.cs" Link="Core\Router.cs" />
     <Compile Include="..\VsDbgMcp.Core\Contracts\Dtos.cs" Link="Core\Contracts\Dtos.cs" />
     <Compile Include="..\VsDbgMcp.Core\Contracts\IDebugHost.cs" Link="Core\Contracts\IDebugHost.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Resources\icon.png">
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+    <Content Include="Resources\preview.png">
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
   </ItemGroup>
 
   <ItemGroup>
@@ -134,4 +144,41 @@
 
   <!-- VSToolsPath is set by the build tools package to its own tools folder. -->
   <Import Project="$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets" Condition="'$(VSToolsPath)' != ''" />
+
+  <!--
+    The shim, published self-contained by build.ps1 before this project builds. It rides
+    inside the VSIX and is copied out to a stable path on startup: the folder Visual
+    Studio installs an extension into is regenerated on every update, and an agent's
+    configuration names the shim by absolute path.
+
+    Collected in a target rather than as Content items, because assemblies listed as
+    Content join {CandidateAssemblyFiles} in the reference search path, and the shim's
+    copies of System.Memory and Microsoft.CSharp then get resolved in place of the ones
+    this project is meant to compile against.
+  -->
+  <Target Name="BundleShim" AfterTargets="GetVsixSourceItems">
+    <ItemGroup>
+      <_ShimFile Include="$(MSBuildProjectDirectory)\..\..\artifacts\shim\**\*" Exclude="$(MSBuildProjectDirectory)\..\..\artifacts\shim\**\*.pdb" />
+      <VSIXSourceItem Include="@(_ShimFile)">
+        <VSIXSubPath>shim\%(_ShimFile.RecursiveDir)</VSIXSubPath>
+      </VSIXSourceItem>
+    </ItemGroup>
+
+    <Error Condition="'@(_ShimFile)' == ''"
+           Text="No shim to bundle. Run build.ps1, which publishes it to artifacts\shim before building the extension." />
+  </Target>
+
+  <!--
+    The licence the installer shows. It has to be named LICENSE.txt inside the package,
+    and the repository keeps one canonical LICENSE at the root, so copy it into place
+    rather than keep a second copy that can drift.
+  -->
+  <Target Name="BundleLicense" AfterTargets="GetVsixSourceItems">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\..\LICENSE"
+          DestinationFiles="$(IntermediateOutputPath)LICENSE.txt"
+          SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <VSIXSourceItem Include="$(IntermediateOutputPath)LICENSE.txt" />
+    </ItemGroup>
+  </Target>
 </Project>

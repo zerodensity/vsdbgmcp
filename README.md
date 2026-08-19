@@ -2,54 +2,55 @@
 
 Drives the Visual Studio debugger from an AI agent, over the Model Context Protocol.
 
-Debug-first. C++ is a first-class target: data breakpoints, disassembly, crash dumps,
-symbol diagnostics, and the debuggee's own console. Several Visual Studio windows can be
-driven from one agent session.
+C++ is a first-class target: data breakpoints, disassembly, crash dumps, symbol
+diagnostics, and the debuggee's own console. Several Visual Studio windows can be driven
+from one agent session.
 
-Not built yet as a release — see [status](#status).
+## What it does
 
-## Why
+`wait` blocks on the debugger's own stopping events and reports why execution stopped —
+which breakpoint, which exception, a step completing, the process exiting. `build` and
+`launch` block to completion for the same reason, so nothing has to poll for a state
+change.
 
-Three things that are hard to get from an IDE automation server, and that this exists to
-provide:
+The agent launches the shim in its working directory; the shim finds the Visual Studio
+that has the matching solution open and connects. No ports and no per-project
+configuration. When the match is ambiguous the error names the candidates and the exact
+value to pass.
 
-**Waiting works.** `wait` blocks on the debugger's own events and reports *why* execution
-stopped — which breakpoint, which exception, a step completing, the process exiting.
-Nothing here asks an agent to poll for a state change, and `build` and `launch` block to
-completion for the same reason.
-
-**One configuration, every window.** The shim is launched by the agent in its workspace,
-finds the Visual Studio that has the matching solution open, and connects. No ports, no
-per-project setup. When the choice is ambiguous the error names the candidates and the
-exact value to pass, so the next call succeeds.
-
-**C++ gets real tools.** A breakpoint that will never bind says so and says why. `triage`
-answers a crash in one call. `bp_set` can watch an address for writes. `console_read`
-reaches the debuggee's own stdout.
+For C++: a breakpoint that cannot bind says so and why, `triage` collects a crash in one
+call, `bp_set` can watch an address for writes, and `console_read` reads the debuggee's
+own stdout.
 
 ## Install
 
-Build both halves and copy the shim somewhere stable:
+Install the extension and restart Visual Studio. It carries the shim and copies it to
+`%LOCALAPPDATA%\vsdbgmcp\bin` on startup; there is nothing else to download and no .NET
+runtime to install.
+
+Then register that path with the agent once, globally:
 
 ```powershell
-.\build.ps1 -Install
+claude mcp add -s user vsdbg -- "$env:LOCALAPPDATA\vsdbgmcp\bin\vsdbgmcp.exe"
 ```
 
-Install the extension by double-clicking `src\VsDbgMcp.Host\bin\Release\VsDbgMcp.Host.vsix`
-and restarting Visual Studio, then register the shim with your agent once, globally:
+Restart the agent afterwards. Every repository and every Visual Studio window works from
+that one entry. The panel shows the same command with the path already resolved, and
+copies it to the clipboard.
+
+The shim gets a path of its own rather than staying inside the extension because Visual
+Studio regenerates an extension's folder on every update, and the path in the agent's
+configuration has to outlive that.
+
+### Building it
 
 ```powershell
-claude mcp add -s user vsdbg -- "%LOCALAPPDATA%\vsdbgmcp\bin\vsdbgmcp.exe"
+.\build.ps1
 ```
-
-That is the whole setup. Every repository and every Visual Studio window works from it.
-
-`-Install` matters: an agent keeps the shim running, and a running executable cannot be
-overwritten, so pointing your client straight at the build output means the next
-rebuild fails while anything is connected.
 
 Requires Visual Studio 2022 or 2026 with the *Visual Studio extension development*
-workload to build, and the .NET 10 SDK.
+workload, and the .NET 10 SDK. `build.ps1 -Install` copies the shim straight to where the
+extension stages it, for working on the shim without reinstalling the extension.
 
 ## How it fits together
 
@@ -64,12 +65,12 @@ VS extension (VSIX, inside devenv)      IDebugHost + IProjectSystem
 ```
 
 The client spawns the shim and the shim finds Visual Studio, not the other way round.
-That is what removes the port from the configuration, and it means nothing can be
-orphaned: the shim dies with its client, the extension with devenv.
+That is what removes the port from the configuration, and it bounds the lifetimes: the
+shim dies with its client, the extension with devenv.
 
 MCP lives in the shim rather than inside `devenv.exe`, so the code loaded into Visual
-Studio is COM interop and a pipe — no dependency of ours competes with Visual Studio's
-own assembly versions, and the tool surface can change without reinstalling anything.
+Studio is COM interop and a pipe. No dependency of ours competes with Visual Studio's own
+assembly versions, and the tool surface can change without reinstalling anything.
 
 Each running instance publishes `%LOCALAPPDATA%\vsdbgmcp\inst-<pid>.json` with its pipe
 name, a token, and the workspace it has open. There is no daemon; the directory is the
@@ -77,9 +78,7 @@ registry, and dead entries are pruned when anyone looks.
 
 Full reasoning is in [docs/design.md](docs/design.md).
 
-## Seeing what the agent is doing
-
-Something driving your debugger from outside should be visible from inside, and stoppable.
+## The panel
 
 **Extensions → Debugger MCP Server** opens a docked panel (also under View → Other
 Windows). It appears on its own the first time an agent attaches, without taking focus,
@@ -89,6 +88,8 @@ and shows:
 Listening, 1 client attached
 DebugTarget#100424  ·  break
 vsdbgmcp-100424
+
+Agent setup:  copy command  ·  copy path
 
 [Pause]  [x] Don't steal focus  [Clear]
 
@@ -102,28 +103,26 @@ v 16:02:31  eval         5 ms   mesh.refCount
   16:02:12  client connected
 ```
 
-Each call folds open to show **exactly what the agent was given back** — the same text,
-not a re-rendering — and carries the argument worth reading beside its name: which
-expression, which file and line, which process. The reply is selectable so you can copy
-out of it.
+Each call folds open to show the text the agent was given back, not a re-rendering, and
+carries the argument worth reading beside its name: which expression, which file and
+line, which process. The reply is selectable.
 
-- **Pause** is a kill switch. Every tool then refuses with an explanation telling the
-  agent a person stopped it, until Resume.
+- **Pause** stops every tool. They then refuse with an explanation saying a person
+  stopped them, until Resume.
 - **Don't steal focus** puts the window you were using back in front when an *agent*
   starts, resumes or steps the program, instead of letting Visual Studio come forward.
-  Stops you cause yourself are never touched: the guard arms only on an agent command
-  that resumes execution, fires once, and disarms when the program next stops. Without
-  that distinction it would pull focus away from you every time you pressed F10.
-- The list is the last 200 calls, newest first, with how long each took; failures are
-  marked in red. Unfolding one is what the reader chooses, so opening a few and leaving
-  them open survives whatever the agent does next.
+  Stops you cause yourself are not affected: the guard arms only on an agent command that
+  resumes execution, fires once, and disarms when the program next stops. Without that
+  distinction it would pull focus away every time you pressed F10.
+- The list holds the last 200 calls, newest first, with how long each took; failures are
+  marked in red. Rows left unfolded stay unfolded as new calls arrive.
 
 There is also a `vsdbgmcp` pane in the Output window carrying the pipe name, client
 connections, and anything that went wrong inside the extension.
 
 ## Tools
 
-43 of them. Every one answers a question rather than mirroring a debugger window.
+43 of them.
 
 | | |
 |---|---|
@@ -136,27 +135,27 @@ connections, and anything that went wrong inside the extension.
 | **debuggee I/O** | `console_read` `console_send` `output` |
 | **build** | `build` `build_cancel` `build_output` `config` `startup_project` |
 
-A few worth knowing about:
+Notes on a few:
 
-- **`wait`** — the one that matters. Pass `instance: "any"` to return as soon as *any*
-  connected window stops, which is how you debug a client and a server at once.
-- **`eval`** — refuses to call functions unless you pass `allowSideEffects`. The native
-  evaluator will really run them, and an agent inspecting `v.size()` should not be able
-  to change the program by accident. Format specifiers go in `format`, not spliced into
-  the expression.
+- **`wait`** — `instance: "any"` returns as soon as any connected window stops, which is
+  how to debug a client and a server at once.
+- **`eval`** — refuses to call functions unless `allowSideEffects` is passed, because the
+  native evaluator really runs them and an agent inspecting `v.size()` should not change
+  the program by accident. Format specifiers go in `format`, not spliced into the
+  expression.
 - **`bp_set`** — with `dataExpression`, a data breakpoint: break when the memory at an
-  address changes. The best tool there is for finding what corrupts a value.
+  address changes.
 - **`watch_set`** — pins expressions whose values then come back with every `wait` and
   every `status`, instead of several `eval` calls at each stop.
-- **`triage`** — after a crash: exception record, faulting stack, registers, memory at
-  the fault address, and which modules were missing symbols. One call.
-- **`threads`** — every thread's top frames, grouped, so a deadlock is one call away.
-  It spans **every process in the session**, named and split, which is how you find the
-  thread ids of a launcher when the editor it started is the one that stopped.
-- **`select`** — switch to another thread *or another process*, by pid or part of its
-  name. `stack`, `eval`, `vars`, `registers` and `memory` all follow it across the
-  process boundary. The choice lasts until the program next runs, because a frame does
-  not survive its thread resuming.
+- **`triage`** — after a crash: exception record, faulting stack, registers, memory at the
+  fault address, and which modules were missing symbols. One call.
+- **`threads`** — every thread's top frames, grouped. It spans every process in the
+  session, named and split, which is how to find the thread ids of a launcher when the
+  editor it started is the one that stopped.
+- **`select`** — switch to another thread or another process, by pid or part of its name.
+  `stack`, `eval`, `vars`, `registers` and `memory` follow it across the process
+  boundary. The choice lasts until the program next runs, because a frame does not
+  survive its thread resuming.
 
 ## Layout
 
@@ -165,7 +164,9 @@ src/VsDbgMcp.Core    contracts and routing, no Visual Studio references
 src/VsDbgMcp.Shim    the .NET 10 executable the agent launches
 src/VsDbgMcp.Host    the extension; compiles Core's sources in rather than referencing
 tests/               routing, discovery, events, and the shim end to end
+marketplace/         listing text and publish manifest
 docs/design.md       why it is shaped this way
+docs/releasing.md    how to cut and publish a release
 ```
 
 `build.ps1` drives two toolchains because the halves need different ones: the shim and
@@ -174,39 +175,36 @@ Studio, since the VSIX packaging tasks are .NET Framework assemblies.
 
 ## Status
 
-Working, and exercised against a real debuggee.
-
-58 automated tests cover routing, discovery, the event bus, and the whole shim path —
+72 automated tests cover routing, discovery, the event bus, and the whole shim path —
 discovery file, named pipe, JSON-RPC, rendering — against a stand-in for the extension.
 
-Beyond that, the following were driven by hand against Visual Studio 2026 debugging a
-native C++ program (`tests/fixtures/cpp`), which is where the interesting failures live:
+The following were driven by hand against Visual Studio 2026 debugging a native C++
+program (`tests/fixtures/cpp`):
 
 - launch, breakpoint hit reported by `wait` with its id, step, run-to, set-next, exit
   with its code
 - an unhandled access violation reaching `wait` as `stopped: exception 0xC0000005 …
   unhandled`, and `triage` answering it in one call, registers included
-- a **data breakpoint** catching a buffer overwrite, stopping in `memset` with the
-  offending line one frame up, and `select` then showing `0xdeadbeef` had become
-  `0xdeadbe41`
+- a data breakpoint catching a buffer overwrite, stopping in `memset` with the offending
+  line one frame up, and `select` then showing `0xdeadbeef` had become `0xdeadbe41`
 - `eval` refusing `Upload(mesh, 1)` by default and running it with `allowSideEffects`,
-  with `mesh.refCount` going 1 → 2 as proof it really executed
+  with `mesh.refCount` going 1 → 2
 - natvis summaries (`{name="terrain" vertices={ size=4 } refCount=1 }`), format
   specifiers, `expand` on a `std::vector` showing its elements
 - `console_read` returning the debuggee's own stdout, `output` showing the Debug pane's
   PDB messages, registers, memory, disassembly with source interleaved, thread grouping,
   freeze/thaw, build with structured errors, and routing by working directory
-- **two processes in one session**: `threads` listing 8 threads across both with each
-  group named, `stack` on a thread in the process that did not stop, `select` by pid
-  switching evaluation into it, and an unknown id answering with every thread that does
-  exist and which process it is in
+- two processes in one session: `threads` listing 8 threads across both with each group
+  named, `stack` on a thread in the process that did not stop, `select` by pid switching
+  evaluation into it, and an unknown id answering with every thread that does exist and
+  which process it is in
 
 Known gaps:
 
 - **`exceptions_set` does not work.** `DTE.Debugger.ExceptionGroups` returns nothing on
-  Visual Studio 2026, so there is no category to configure. The tool says so plainly
-  rather than pretending. Making it work means going to the debug engine directly, the
-  same way expression evaluation already does.
+  Visual Studio 2026, so there is no category to configure. The tool reports that rather
+  than pretending. Making it work means going to the debug engine directly, the same way
+  expression evaluation already does.
 - **Solution filters cannot be named.** Visual Studio reports the `.sln` a `.slnf`
   filters and this SDK exposes no property for the filter itself, so two windows holding
   the same solution under different filters are told apart by process id. Routing still
@@ -217,9 +215,12 @@ Known gaps:
   anonymous namespace does not bind as `Corrupt`; the reply says it did not bind and
   where to look.
 - **CMake and Open Folder workspaces** are not supported for build or launch. `attach`
-  works regardless, so the inspection surface is available there today.
+  works regardless, so the inspection surface is available there.
 - `capture` needs a window; a console program has none, and it says so.
+- **Only clients in the same Windows session can use this**, because the client has to
+  spawn the shim. WSL, dev containers and remote agents cannot. See the HTTP transport
+  entry in [docs/design.md](docs/design.md#13-deferred).
 
 ## Licence
 
-MIT.
+MIT — see [LICENSE](LICENSE).

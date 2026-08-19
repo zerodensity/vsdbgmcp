@@ -29,6 +29,15 @@ namespace VsDbgMcp
         public static string InstanceFile(int pid) =>
             Path.Combine(InstanceDir, InstanceFilePrefix + pid + InstanceFileSuffix);
 
+        /// <summary>
+        /// Where the extension stages the shim. An agent names the shim by absolute
+        /// path, and Visual Studio regenerates the extension's own folder on every
+        /// update, so the path an agent is configured with cannot be that one.
+        /// </summary>
+        public static string ShimDir => Path.Combine(InstanceDir, "bin");
+
+        public static string ShimExe => Path.Combine(ShimDir, Product + ".exe");
+
         public static string PipeName(int pid) => Product + "-" + pid;
     }
 

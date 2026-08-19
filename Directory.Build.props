@@ -5,8 +5,10 @@
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <Product>vsdbgmcp</Product>
-    <Company>vsdbgmcp</Company>
-    <Version>0.2.0</Version>
+    <Company>Zero Density</Company>
+
+    <!-- Must match the Identity version in source.extension.vsixmanifest; build.ps1 checks. -->
+    <Version>0.1.0</Version>
     <NeutralLanguage>en-US</NeutralLanguage>
     <EnableDefaultNoneItems>false</EnableDefaultNoneItems>
   </PropertyGroup>

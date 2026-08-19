@@ -82,6 +82,34 @@ Visual Studio that nothing was driving. So the shim also watches its parent
 process directly, which is the one signal that survives every way a client can
 disappear.
 
+### How the shim gets there
+
+The shim rides inside the VSIX and the extension copies it to
+`%LOCALAPPDATA%\vsdbgmcp\bin` when it loads. Installing the extension is the
+whole installation.
+
+The path matters more than it looks. An agent's configuration names the shim by
+absolute path, written once and globally, and Visual Studio installs extensions
+into a folder it regenerates on every update — so that path cannot be the one
+inside the extension without breaking at the next version. It cannot be a
+package manager either: `dotnet tool` would be the natural channel for a .NET
+executable, but it needs the .NET SDK, and the audience this is built for is C++
+developers whose Visual Studio has no .NET workload at all. For the same reason
+the shim is published self-contained rather than framework-dependent: a machine
+with Visual Studio and no .NET runtime still gets a working shim, at the cost of
+about 35 MB of package.
+
+Three rules keep the copy honest:
+
+- **Never downgrade.** Two Visual Studio versions stage to the same directory, so
+  the copy only happens when the bundled build is newer than what is there.
+  Otherwise the older installation would clobber the newer one on every launch.
+- **The executable goes last.** Until it does, an agent launching mid-copy finds
+  either the previous shim or nothing, never a half-written one.
+- **A running shim is renamed, not overwritten.** Windows will not overwrite a
+  loaded image but will rename one, so the old file moves aside and is deleted on
+  a later start once nothing holds it.
+
 ### MCP lives in the shim, not in devenv
 
 - **Dependency isolation.** Anything loaded into `devenv.exe` competes with
@@ -546,6 +574,25 @@ Visual Studio's own behaviour, which is where the last three live.
   keeps a second adapter out of the highest-risk area until the core is proven.
   `attach()` works regardless, so a CMake user can build outside VS and still
   get the whole inspection surface on day one.
+- **An HTTP transport on the shim, alongside stdio.** Today a client has to be able
+  to spawn a Windows executable, which rules out WSL, dev containers and agents
+  on another machine. The shim is where this belongs rather than the extension:
+  it is net10, so `ModelContextProtocol.AspNetCore` loads there and cannot load
+  into devenv at all, and the tool classes are transport-agnostic — `Program.cs`
+  names the transport in one line and the tools in eight more. `--cwd` and
+  `--instance` already exist, which is what an HTTP server needs, having no
+  working directory of its own to route from.
+
+  Three things have to come with it. A bound port is reachable by every local
+  process including browsers, so 127.0.0.1 only, `Origin` validation, and the
+  discovery token required in a header — not optional, and not defaulted on.
+  Nothing spawns an HTTP server, so `ParentWatch` no longer bounds its life and
+  it needs an idle timeout or it becomes the orphan problem again. And ASP.NET
+  Core inflates a self-contained publish, so the HTTP-capable build probably
+  ships separately rather than enlarging the VSIX for everyone.
+
+  Deferred rather than dropped: it is purely additive. No contract changes, no
+  tool changes, and nothing about it gets harder by waiting.
 - Managed-specific tooling: TPL task lists, async call stacks.
 - Approval mode for destructive tools.
 - Memory writes.
