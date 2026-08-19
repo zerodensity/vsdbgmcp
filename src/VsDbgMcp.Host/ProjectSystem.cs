@@ -73,29 +73,17 @@ namespace VsDbgMcp.Host
             _log = log ?? (_ => { });
         }
 
-        async Task<T> UIAsync<T>(Func<T> body, [CallerMemberName] string caller = null)
+        async Task<T> UIAsync<T>(Func<T> body)
         {
             if (Activity.Paused) throw new InvalidOperationException(Activity.PausedMessage);
 
             await _jtf.SwitchToMainThreadAsync();
             MessageFilter.EnsureInstalled();
 
-            var started = Stopwatch.StartNew();
-            var failed = false;
-            try
-            {
-                return body();
-            }
-            catch
-            {
-                failed = true;
-                throw;
-            }
-            finally
-            {
-                started.Stop();
-                Activity.Record(DebugHost.Name(caller), null, (int)started.ElapsedMilliseconds, failed);
-            }
+            // Not recorded here, for the same reason as the debug host: the shim reports
+            // the call once it has the reply. Recording here too listed every build tool
+            // twice, once with its output and once without.
+            return body();
         }
 
         void EnsureBuildEvents()
