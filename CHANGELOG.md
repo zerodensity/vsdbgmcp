@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2
+
+- The icon keeps the D's square corners, which is how the Zero Density mark draws them,
+  and widens the arrow's shaft.
+
 ## 0.1.1
 
 - The icon is now drawn from the Zero Density mark: a breakpoint in the counter of the

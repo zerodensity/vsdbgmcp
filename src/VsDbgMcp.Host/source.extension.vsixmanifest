@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
-    <Identity Id="VsDbgMcp.Host.189cc2cf-8b3a-4a49-aa1a-91bdfb08b736" Version="0.1.1" Language="en-US" Publisher="Zero Density" />
+    <Identity Id="VsDbgMcp.Host.189cc2cf-8b3a-4a49-aa1a-91bdfb08b736" Version="0.1.2" Language="en-US" Publisher="Zero Density" />
     <DisplayName>VS Debugger MCP</DisplayName>
     <Description xml:space="preserve">Exposes the Visual Studio debugger to AI agents over the Model Context Protocol. Debug-first, with C++ as a first-class target: data breakpoints, disassembly, crash dumps, symbol diagnostics, and event-driven waits. Several Visual Studio windows can be driven from one agent session.</Description>
     <MoreInfo>https://github.com/zerodensity/vsdbgmcp</MoreInfo>

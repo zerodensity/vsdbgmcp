@@ -8,7 +8,7 @@
     <Company>Zero Density</Company>
 
     <!-- Must match the Identity version in source.extension.vsixmanifest; build.ps1 checks. -->
-    <Version>0.1.1</Version>
+    <Version>0.1.2</Version>
     <NeutralLanguage>en-US</NeutralLanguage>
     <EnableDefaultNoneItems>false</EnableDefaultNoneItems>
   </PropertyGroup>
