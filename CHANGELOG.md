@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- The icon is now drawn from the Zero Density mark: a breakpoint in the counter of the
+  O, and a step arrow running from behind it into the wedge the D already carries.
+
 ## 0.1.0
 
 First public release.
