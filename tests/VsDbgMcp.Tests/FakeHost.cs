@@ -98,6 +98,20 @@ namespace VsDbgMcp.Tests
             return Task.FromResult(Names.ContractVersion.ToString());
         }
 
+        /// <summary>What the panel would have been told.</summary>
+        public List<CallReport> Reports { get; } = new List<CallReport>();
+
+        public Task ReportCallAsync(CallReport report)
+        {
+            lock (_gate) Reports.Add(report);
+            return Task.CompletedTask;
+        }
+
+        public CallReport ReportFor(string tool)
+        {
+            lock (_gate) return Reports.LastOrDefault(r => r.Tool == tool);
+        }
+
         public Task<HostStatus> GetStatusAsync(CancellationToken ct = default)
         {
             Record(nameof(GetStatusAsync));

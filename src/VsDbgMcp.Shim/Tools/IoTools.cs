@@ -38,7 +38,7 @@ namespace VsDbgMcp.Shim.Tools
                 if (string.IsNullOrEmpty(text) && string.IsNullOrEmpty(keys)) return "Give text or keys.";
                 var result = await link.Debug.ConsoleSendAsync(text, keys, ct).ConfigureAwait(false);
                 return Render.Op(result, "Sent.");
-            });
+            }, text ?? keys);
 
         [McpServerTool(Name = "output", ReadOnly = true)]
         [Description("Read a Visual Studio output pane. The Debug pane is where native diagnostics land: module loads, 'cannot find or open the PDB file', first-chance exception notices, and everything the program writes with OutputDebugString. Check it whenever symbols or breakpoints behave oddly. Filter with a regular expression to keep the reply small.")]
@@ -56,6 +56,6 @@ namespace VsDbgMcp.Shim.Tools
 
                 var header = result.Truncated ? "(showing last " + result.Lines + " lines)\n" : "";
                 return header + result.Text;
-            });
+            }, pattern == null ? pane : pane + " ~ " + pattern);
     }
 }

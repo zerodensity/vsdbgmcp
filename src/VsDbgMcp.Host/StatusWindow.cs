@@ -10,7 +10,8 @@ namespace VsDbgMcp.Host
 {
     /// <summary>
     /// The panel. Shows that the server is listening, who is attached, and every call an
-    /// agent has made - and offers a way to stop it.
+    /// agent has made - with what it asked and what it got back - and offers a way to
+    /// stop it.
     /// </summary>
     [Guid("350ab7fd-e060-4321-ae93-7c4492e67cb3")]
     public sealed class StatusWindow : ToolWindowPane
@@ -24,11 +25,19 @@ namespace VsDbgMcp.Host
 
     sealed class StatusControl : UserControl
     {
+        const int MaxRows = 200;
+
         readonly TextBlock _headline = new TextBlock();
         readonly TextBlock _detail = new TextBlock();
         readonly Button _pause = new Button();
         readonly CheckBox _guard = new CheckBox();
-        readonly ItemsControl _activity = new ItemsControl();
+        readonly StackPanel _rows = new StackPanel();
+
+        static readonly FontFamily Mono = new FontFamily("Consolas, Cascadia Mono, Courier New");
+        static readonly SolidColorBrush FailedBrush = new SolidColorBrush(Color.FromRgb(0xD1, 0x34, 0x38));
+
+        /// <summary>The newest entry already drawn, so a redraw adds only what is new.</summary>
+        long _drawn;
 
         public StatusControl()
         {
@@ -46,7 +55,7 @@ namespace VsDbgMcp.Host
 
             _pause.MinWidth = 76;
             _pause.Margin = new Thickness(0, 0, 6, 0);
-            _pause.Click += (s, e) => { Activity.SetPaused(!Activity.Paused); Refresh(); };
+            _pause.Click += (s, e) => { Activity.SetPaused(!Activity.Paused); RefreshHeader(); };
 
             _guard.Content = "Don't steal focus";
             _guard.ToolTip =
@@ -72,7 +81,7 @@ namespace VsDbgMcp.Host
             {
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                Content = _activity
+                Content = _rows
             };
             Grid.SetRow(scroller, 3);
 
@@ -96,16 +105,16 @@ namespace VsDbgMcp.Host
             // whenever this tab stops being the visible one, so unsubscribing there
             // without re-subscribing would leave the panel frozen after the first time
             // someone clicked another tab.
-            Loaded += (s, e) => { Activity.Changed += OnChanged; Refresh(); };
+            Loaded += (s, e) => { Activity.Changed += OnChanged; Redraw(); };
             Unloaded += (s, e) => Activity.Changed -= OnChanged;
-            Refresh();
+            Redraw();
         }
 
         void OnChanged()
         {
             if (Dispatcher.CheckAccess())
             {
-                Refresh();
+                Redraw();
                 return;
             }
 
@@ -117,11 +126,11 @@ namespace VsDbgMcp.Host
             // This is a WPF control marshalling to its own dispatcher, which cannot
             // deadlock against anything and is what Dispatcher exists for.
 #pragma warning disable VSTHRD001, VSTHRD110
-            Dispatcher.BeginInvoke(new Action(Refresh));
+            Dispatcher.BeginInvoke(new Action(Redraw));
 #pragma warning restore VSTHRD001, VSTHRD110
         }
 
-        void Refresh()
+        void RefreshHeader()
         {
             _headline.Text = Activity.Paused
                 ? "Paused - the agent cannot touch the debugger"
@@ -135,24 +144,124 @@ namespace VsDbgMcp.Host
 
             _pause.Content = Activity.Paused ? "Resume" : "Pause";
             _guard.IsChecked = Activity.GuardFocus;
-
-            _activity.Items.Clear();
-            foreach (var entry in Activity.Recent(200)) _activity.Items.Add(Row(entry));
-
-            if (_activity.Items.Count == 0)
-                _activity.Items.Add(Dim("Nothing yet. Calls an agent makes will appear here."));
         }
 
-        static UIElement Row(ActivityEntry entry)
+        /// <summary>
+        /// Adds the rows that appeared since last time, newest at the top.
+        ///
+        /// Rebuilding the list wholesale would be simpler and would also collapse every
+        /// row the reader had unfolded, every time an agent made another call.
+        /// </summary>
+        void Redraw()
+        {
+            RefreshHeader();
+
+            var fresh = Activity.Since(_drawn);
+            if (fresh.Count == 0)
+            {
+                // A Clear resets the log, so the panel has to notice it went backwards.
+                if (_rows.Children.Count > 0 && Activity.Recent(1).Count == 0)
+                {
+                    _rows.Children.Clear();
+                    _drawn = 0;
+                    ShowEmpty();
+                }
+                return;
+            }
+
+            RemoveEmpty();
+
+            foreach (var entry in fresh)
+            {
+                _rows.Children.Insert(0, Row(entry));
+                _drawn = entry.Id;
+            }
+
+            while (_rows.Children.Count > MaxRows) _rows.Children.RemoveAt(_rows.Children.Count - 1);
+        }
+
+        void ShowEmpty()
+        {
+            var block = new TextBlock
+            {
+                Text = "Nothing yet. Calls an agent makes will appear here.",
+                Opacity = 0.6,
+                TextWrapping = TextWrapping.Wrap,
+                Tag = "empty"
+            };
+            block.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
+            _rows.Children.Add(block);
+        }
+
+        void RemoveEmpty()
+        {
+            for (var i = _rows.Children.Count - 1; i >= 0; i--)
+            {
+                if (_rows.Children[i] is FrameworkElement e && (string)e.Tag == "empty")
+                    _rows.Children.RemoveAt(i);
+            }
+        }
+
+        /// <summary>
+        /// A call with something to show folds open; one without stays a plain line, so
+        /// there is no chevron promising a reply that does not exist.
+        /// </summary>
+        UIElement Row(ActivityEntry entry)
+        {
+            var header = Header(entry);
+            if (!entry.HasResult) return header;
+
+            var expander = new Expander
+            {
+                Header = header,
+                Margin = new Thickness(0, 1, 0, 1),
+                Content = Body(entry.Result)
+            };
+            expander.SetResourceReference(ForegroundProperty, VsBrushes.ToolWindowTextKey);
+            return expander;
+        }
+
+        StackPanel Header(ActivityEntry entry)
         {
             var line = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 1, 0, 1) };
 
             line.Children.Add(Cell(entry.When.ToString("HH:mm:ss", CultureInfo.InvariantCulture), 62, 0.55));
-            line.Children.Add(Cell(entry.Tool, 150, 1.0, entry.Failed));
-            line.Children.Add(Cell(Duration(entry.Milliseconds), 70, 0.55));
-            if (!string.IsNullOrEmpty(entry.Detail)) line.Children.Add(Cell(entry.Detail, 0, 0.75));
+            line.Children.Add(Cell(entry.Tool, 118, 1.0, entry.Failed));
+            line.Children.Add(Cell(Duration(entry.Milliseconds), 62, 0.55));
+            if (!string.IsNullOrEmpty(entry.Detail)) line.Children.Add(Cell(Shorten(entry.Detail), 0, 0.8));
 
             return line;
+        }
+
+        UIElement Body(string result)
+        {
+            // A read-only text box rather than a label, because the first thing anyone
+            // wants from a reply on screen is to copy part of it.
+            var text = new TextBox
+            {
+                Text = result,
+                IsReadOnly = true,
+                IsReadOnlyCaretVisible = true,
+                BorderThickness = new Thickness(0),
+                Background = Brushes.Transparent,
+                FontFamily = Mono,
+                FontSize = 12,
+                TextWrapping = TextWrapping.NoWrap,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                MaxHeight = 320,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Margin = new Thickness(18, 2, 0, 6)
+            };
+
+            text.SetResourceReference(ForegroundProperty, VsBrushes.ToolWindowTextKey);
+            return text;
+        }
+
+        static string Shorten(string detail)
+        {
+            const int limit = 60;
+            if (detail.Length <= limit) return detail;
+            return detail.Substring(0, limit) + "...";
         }
 
         static string Duration(int ms)
@@ -168,21 +277,15 @@ namespace VsDbgMcp.Host
             {
                 Text = text,
                 Opacity = opacity,
-                FontFamily = new FontFamily("Consolas, Cascadia Mono, Courier New"),
-                FontSize = 12
+                FontFamily = Mono,
+                FontSize = 12,
+                VerticalAlignment = VerticalAlignment.Center
             };
 
             if (width > 0) block.Width = width;
-            if (failed) block.Foreground = new SolidColorBrush(Color.FromRgb(0xD1, 0x34, 0x38));
+            if (failed) block.Foreground = FailedBrush;
             else block.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
 
-            return block;
-        }
-
-        static UIElement Dim(string text)
-        {
-            var block = new TextBlock { Text = text, Opacity = 0.6, TextWrapping = TextWrapping.Wrap };
-            block.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
             return block;
         }
     }

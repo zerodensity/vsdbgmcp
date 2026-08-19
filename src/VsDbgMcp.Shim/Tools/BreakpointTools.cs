@@ -52,7 +52,7 @@ namespace VsDbgMcp.Shim.Tools
 
                 var info = await link.Debug.BreakpointSetAsync(request, ct).ConfigureAwait(false);
                 return Render.Breakpoint(info);
-            });
+            }, dataExpression ?? function ?? (file == null ? null : System.IO.Path.GetFileName(file) + ":" + line));
 
         [McpServerTool(Name = "bp_list", ReadOnly = true)]
         [Description("List every breakpoint with its bind state and hit count. Unbound ones are marked and carry the reason they did not bind.")]
@@ -75,7 +75,7 @@ namespace VsDbgMcp.Shim.Tools
             {
                 var result = await link.Debug.BreakpointRemoveAsync(id, ct).ConfigureAwait(false);
                 return Render.Op(result, "Removed.");
-            });
+            }, "#" + id);
 
         [McpServerTool(Name = "bp_enable")]
         [Description("Enable or disable a breakpoint without removing it, so its condition and hit count survive.")]
@@ -88,7 +88,7 @@ namespace VsDbgMcp.Shim.Tools
             {
                 var result = await link.Debug.BreakpointEnableAsync(id, enabled, ct).ConfigureAwait(false);
                 return Render.Op(result, enabled ? "Enabled." : "Disabled.");
-            });
+            }, "#" + id);
 
         [McpServerTool(Name = "exceptions_set")]
         [Description("Choose when the debugger breaks on an exception. Break on 'thrown' to stop at the throw site even when something catches it, which is how you find the origin of a swallowed failure. Break on 'unhandled' for the default behaviour, or 'never' to ignore it. Call with no code to list the current settings.")]
@@ -118,6 +118,6 @@ namespace VsDbgMcp.Shim.Tools
                     BreakOn = breakOn
                 }, ct).ConfigureAwait(false);
                 return Render.Op(result, "Exception setting updated.");
-            });
+            }, code);
     }
 }

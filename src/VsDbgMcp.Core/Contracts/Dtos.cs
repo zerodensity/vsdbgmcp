@@ -66,6 +66,28 @@ namespace VsDbgMcp.Contracts
         public string Mode { get; set; }
     }
 
+    /// <summary>
+    /// One tool call, as it happened, for the panel inside Visual Studio.
+    ///
+    /// Reported by the shim rather than recorded in the extension because the text an
+    /// agent was given only exists on that side. Showing anything else would mean
+    /// rendering the same result twice and showing the person something the agent
+    /// never saw.
+    /// </summary>
+    public sealed class CallReport
+    {
+        public string Tool { get; set; }
+
+        /// <summary>The part of the request worth reading: an expression, a file and line.</summary>
+        public string Arguments { get; set; }
+
+        /// <summary>What the agent was given back, capped.</summary>
+        public string Result { get; set; }
+
+        public int Milliseconds { get; set; }
+        public bool Failed { get; set; }
+    }
+
     public sealed class OutputEvent
     {
         public string InstanceId { get; set; }

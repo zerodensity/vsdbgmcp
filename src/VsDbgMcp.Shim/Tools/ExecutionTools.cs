@@ -89,7 +89,7 @@ namespace VsDbgMcp.Shim.Tools
 
                 var stop = await Sessions.Events.WaitAsync(link.Id, TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
                 return stop == null ? "Step issued; the debuggee has not stopped yet." : Render.Stop(stop);
-            });
+            }, kind);
 
         [McpServerTool(Name = "run_to")]
         [Description("Run until execution reaches a file and line, without leaving a breakpoint behind. Blocks until it arrives or the program stops somewhere else first.")]
@@ -106,7 +106,7 @@ namespace VsDbgMcp.Shim.Tools
 
                 var stop = await Sessions.Events.WaitAsync(link.Id, TimeSpan.FromSeconds(60), ct).ConfigureAwait(false);
                 return stop == null ? "Running; has not reached the location yet." : Render.Stop(stop);
-            });
+            }, System.IO.Path.GetFileName(file) + ":" + line);
 
         [McpServerTool(Name = "set_next", Destructive = true)]
         [Description("Move the instruction pointer to another line in the current function without executing what lies between. Skips code or re-runs it. Destructive: it can leave the program in a state it could never reach on its own.")]
@@ -119,6 +119,6 @@ namespace VsDbgMcp.Shim.Tools
             {
                 var result = await link.Debug.SetNextAsync(file, line, ct).ConfigureAwait(false);
                 return Render.Op(result, "Instruction pointer moved.");
-            });
+            }, System.IO.Path.GetFileName(file) + ":" + line);
     }
 }

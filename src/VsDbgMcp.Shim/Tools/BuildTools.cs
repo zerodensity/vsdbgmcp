@@ -30,7 +30,7 @@ namespace VsDbgMcp.Shim.Tools
                 var result = await link.Project.BuildAsync(normalized, project, configuration, platform, ct)
                     .ConfigureAwait(false);
                 return Render.Build(result);
-            });
+            }, project == null ? mode : mode + " " + project);
 
         [McpServerTool(Name = "build_cancel")]
         [Description("Cancel a build that is in progress. Use this when a build is taking far longer than it should rather than waiting out the timeout.")]
@@ -63,7 +63,7 @@ namespace VsDbgMcp.Shim.Tools
             [Description("New value such as 'Debug|x64'. Omit to read the current one.")] string set = null,
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
             CancellationToken ct = default)
-            => On(instance, ct, async link => await link.Project.ConfigurationAsync(set, ct).ConfigureAwait(false));
+            => On(instance, ct, async link => await link.Project.ConfigurationAsync(set, ct).ConfigureAwait(false), set);
 
         [McpServerTool(Name = "startup_project")]
         [Description("Get or set the project that launch starts. Call with no argument to see the current one along with the projects available.")]

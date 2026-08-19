@@ -13,8 +13,9 @@ namespace VsDbgMcp
         /// <summary>
         /// Bumped when IDebugHost or IProjectSystem change shape.
         /// 2: threads and selection carry the process they belong to.
+        /// 3: the shim reports each call so the panel can show what was returned.
         /// </summary>
-        public const int ContractVersion = 2;
+        public const int ContractVersion = 3;
 
         public const string InstanceFilePrefix = "inst-";
         public const string InstanceFileSuffix = ".json";

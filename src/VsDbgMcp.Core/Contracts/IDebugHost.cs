@@ -13,6 +13,12 @@ namespace VsDbgMcp.Contracts
     {
         Task<string> HandshakeAsync(int shimContractVersion, string token);
 
+        /// <summary>
+        /// Tells the extension what an agent just did, so the panel can show it. One way:
+        /// the caller does not wait for this and a failure here must never affect a tool.
+        /// </summary>
+        Task ReportCallAsync(CallReport report);
+
         Task<HostStatus> GetStatusAsync(CancellationToken ct = default);
 
         // Session

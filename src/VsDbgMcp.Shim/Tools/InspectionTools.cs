@@ -28,7 +28,7 @@ namespace VsDbgMcp.Shim.Tools
                 var list = await link.Debug.ThreadsAsync(Math.Max(1, Math.Min(depth, 20)), process, ct)
                     .ConfigureAwait(false);
                 return Render.Threads(list);
-            });
+            }, process);
 
         [McpServerTool(Name = "stack", ReadOnly = true)]
         [Description("The call stack of one thread, deepest call first. Omit the thread to use the current one. Only works in break mode.")]
@@ -41,7 +41,7 @@ namespace VsDbgMcp.Shim.Tools
             {
                 var frames = await link.Debug.StackAsync(thread, Math.Max(1, count), ct).ConfigureAwait(false);
                 return Render.Frames(frames);
-            });
+            }, thread?.ToString());
 
         [McpServerTool(Name = "select")]
         [Description("Choose the thread, process and stack frame that eval, vars, registers, memory and stack operate on. In a session holding several processes this is how you look at one other than the one that stopped - pass a process by name or pid to switch to it, or a thread id from 'threads'. The choice lasts until the program next runs, because a frame does not survive its thread resuming.")]
@@ -55,7 +55,7 @@ namespace VsDbgMcp.Shim.Tools
             {
                 var result = await link.Debug.SelectAsync(thread, frame, process, ct).ConfigureAwait(false);
                 return Render.Op(result, "Selected.");
-            });
+            }, process ?? thread?.ToString());
 
         [McpServerTool(Name = "freeze")]
         [Description("Freeze or thaw a thread. Freezing every thread but one and stepping is how you isolate a race: the suspect runs alone and the interleaving stops changing under you.")]
@@ -68,7 +68,7 @@ namespace VsDbgMcp.Shim.Tools
             {
                 var result = await link.Debug.FreezeAsync(thread, frozen, ct).ConfigureAwait(false);
                 return Render.Op(result, frozen ? "Frozen." : "Thawed.");
-            });
+            }, thread.ToString());
 
         [McpServerTool(Name = "eval", ReadOnly = true)]
         [Description("Evaluate an expression in the current frame, through the same visualizers the debugger uses, so a std::vector prints as its elements. Function calls are refused by default: the native evaluator would really run them and change the program. Set allowSideEffects only when you intend that.")]
@@ -93,7 +93,7 @@ namespace VsDbgMcp.Shim.Tools
                     FrameIndex = frame
                 }, ct).ConfigureAwait(false);
                 return Render.Evals(results);
-            });
+            }, expression);
 
         [McpServerTool(Name = "vars", ReadOnly = true)]
         [Description("Variables in the current frame. Returns one level by default; large containers report that they have children rather than printing thousands of elements. Use expand on the reference to go deeper.")]
@@ -108,7 +108,7 @@ namespace VsDbgMcp.Shim.Tools
                 var nodes = await link.Debug.VarsAsync(scope, Math.Max(1, Math.Min(depth, 5)), filter, ct)
                     .ConfigureAwait(false);
                 return Render.Vars(nodes);
-            });
+            }, scope);
 
         [McpServerTool(Name = "expand", ReadOnly = true)]
         [Description("Expand one variable or expression by the reference that vars or eval returned, so you pay for only the part of a large structure you actually need.")]
@@ -122,7 +122,7 @@ namespace VsDbgMcp.Shim.Tools
                 var nodes = await link.Debug.ExpandAsync(reference, Math.Max(1, Math.Min(depth, 5)), ct)
                     .ConfigureAwait(false);
                 return Render.Vars(nodes);
-            });
+            }, reference);
 
         [McpServerTool(Name = "watch_set")]
         [Description("Pin a set of expressions. Their values come back with every wait and every status, so a debugging loop does not need a handful of eval calls at each stop. Replaces the whole set; pass an empty list to clear it.")]
@@ -135,7 +135,7 @@ namespace VsDbgMcp.Shim.Tools
                 var list = expressions ?? Array.Empty<string>();
                 var result = await link.Debug.WatchSetAsync(list, ct).ConfigureAwait(false);
                 return Render.Op(result, list.Length == 0 ? "Watches cleared." : "Watching " + list.Length + " expressions.");
-            });
+            }, expressions == null ? null : string.Join(", ", expressions));
 
         [McpServerTool(Name = "memory", ReadOnly = true)]
         [Description("Read raw memory as hex and ASCII. Takes an address or any expression that evaluates to one, so 'buffer' or '&obj' work as well as '0x7ff6...'.")]
@@ -150,7 +150,7 @@ namespace VsDbgMcp.Shim.Tools
                 var result = await link.Debug.MemoryAsync(address, Math.Max(1, Math.Min(size, 4096)), format, ct)
                     .ConfigureAwait(false);
                 return Render.Memory(result);
-            });
+            }, address);
 
         [McpServerTool(Name = "registers", ReadOnly = true)]
         [Description("CPU registers for the current frame. Native debugging only. Useful when there are no symbols, or when reading the exception record after a crash.")]
@@ -206,6 +206,6 @@ namespace VsDbgMcp.Shim.Tools
             {
                 var list = await link.Debug.ModulesAsync(filter, ct).ConfigureAwait(false);
                 return Render.Modules(list);
-            });
+            }, filter);
     }
 }

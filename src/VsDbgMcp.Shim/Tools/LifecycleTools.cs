@@ -46,7 +46,7 @@ namespace VsDbgMcp.Shim.Tools
                     NoDebug = noDebug
                 }, ct).ConfigureAwait(false);
                 return Render.Op(result, "Launched.");
-            });
+            }, args ?? project);
 
         [McpServerTool(Name = "attach")]
         [Description("Attach the debugger to a running process, by process id or by a regular expression matched against process names. If the expression matches more than one process the call fails and lists the matches, so a second call can name the right pid.")]
@@ -60,7 +60,7 @@ namespace VsDbgMcp.Shim.Tools
                 var result = await link.Debug.AttachAsync(new AttachRequest { Pid = pid, NameRegex = nameRegex }, ct)
                     .ConfigureAwait(false);
                 return Render.Op(result, "Attached.");
-            });
+            }, nameRegex ?? pid?.ToString());
 
         [McpServerTool(Name = "detach")]
         [Description("Detach the debugger and leave the process running. Pass a pid to detach from one process of a multi-process session.")]
@@ -131,6 +131,6 @@ namespace VsDbgMcp.Shim.Tools
             {
                 var result = await link.Debug.OpenDumpAsync(path, ct).ConfigureAwait(false);
                 return Render.Op(result, "Dump opened.");
-            });
+            }, path);
     }
 }

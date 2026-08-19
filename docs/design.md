@@ -469,14 +469,26 @@ first time an agent attaches, without taking focus.
 **Pause is a kill switch.** Every tool checks it and refuses with an explanation
 saying a person stopped it, so an agent gets a reason rather than a hang.
 
-Both the audit trail and the kill switch work because every tool already passes
-through one helper on its way to the UI thread. That is the same choke point
-that switches threads and installs the message filter, which is why there is one
-place to record what happened and one place to refuse.
+The kill switch works because every tool already passes through one helper on its
+way to the UI thread — the same choke point that switches threads and installs
+the message filter, which is why there is one place to refuse.
 
-Method names are translated to the tool names an agent actually called: the
-panel is read by someone deciding whether to let this continue, so it should say
-what was asked for rather than which method answered.
+**The audit trail is reported by the shim, not recorded in the extension.** The
+text an agent was given only exists on the shim side, so anything the extension
+assembled itself would be a second rendering of the same result — and would show
+the reader something the agent never saw. The shim reports each call once it has
+the reply, one way and never awaited, so a report that cannot be delivered costs
+a panel entry and nothing else. Against an older extension with no method to
+receive it, the tools keep working and the outputs simply do not appear.
+
+That also removes a guess: the shim knows the tool name as the agent typed it,
+so the panel no longer has to reconstruct `bp_set` from `BreakpointSetAsync`.
+
+Each entry folds open to show the reply, and carries the one argument worth
+reading beside the name — the expression, the file and line, the process. A row
+without a reply stays a plain line rather than offering a chevron that opens on
+nothing. Rows are added incrementally rather than redrawn, because a redraw would
+collapse everything the reader had opened every time an agent made another call.
 
 ## 11. Security
 

@@ -114,22 +114,10 @@ namespace VsDbgMcp.Host
             // keyboard caused, taking focus away from them mid-step.
             if (ResumesExecution.Contains(Name(caller))) FocusGuard.Arm();
 
-            var started = Stopwatch.StartNew();
-            var failed = false;
-            try
-            {
-                return body();
-            }
-            catch
-            {
-                failed = true;
-                throw;
-            }
-            finally
-            {
-                started.Stop();
-                Activity.Record(Name(caller), null, (int)started.ElapsedMilliseconds, failed);
-            }
+            // Not recorded here: the shim reports the call once it has the reply, which is
+            // the only place the text the agent was given exists. Recording here as well
+            // would list everything twice, once without its result.
+            return body();
         }
 
         Task<OpResult> UIOpAsync(Func<OpResult> body, [CallerMemberName] string caller = null) =>
@@ -219,6 +207,19 @@ namespace VsDbgMcp.Host
         {
             var version = _server?.Handshake(shimContractVersion, token) ?? Names.ContractVersion.ToString();
             return Task.FromResult(version);
+        }
+
+        /// <summary>
+        /// Deliberately does not go through the UI thread helper: it touches nothing in
+        /// Visual Studio, and routing it through the same path that records calls would
+        /// have it record itself.
+        /// </summary>
+        public Task ReportCallAsync(CallReport report)
+        {
+            if (report != null)
+                Activity.Record(report.Tool, report.Arguments, report.Milliseconds, report.Failed, report.Result);
+
+            return Task.CompletedTask;
         }
 
         // ---------------------------------------------------------------- status

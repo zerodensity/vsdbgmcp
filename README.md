@@ -87,19 +87,25 @@ and shows:
 
 ```
 Listening, 1 client attached
-DebugTarget#100424  ·  design
+DebugTarget#100424  ·  break
 vsdbgmcp-100424
 
 [Pause]  [x] Don't steal focus  [Clear]
 
-16:02:59  stop
-16:02:54  bp_list      2 ms
-16:02:49  threads      5 ms
-16:02:31  eval         5 ms
-16:02:18  launch      84 ms
-16:02:12  status       3 ms
-16:02:12  client connected
+> 16:02:59  stop
+> 16:02:54  bp_list      2 ms
+> 16:02:49  threads      5 ms
+v 16:02:31  eval         5 ms   mesh.refCount
+      mesh.refCount = 1  (int)
+> 16:02:18  launch      84 ms
+> 16:02:12  status       3 ms
+  16:02:12  client connected
 ```
+
+Each call folds open to show **exactly what the agent was given back** — the same text,
+not a re-rendering — and carries the argument worth reading beside its name: which
+expression, which file and line, which process. The reply is selectable so you can copy
+out of it.
 
 - **Pause** is a kill switch. Every tool then refuses with an explanation telling the
   agent a person stopped it, until Resume.
@@ -109,7 +115,8 @@ vsdbgmcp-100424
   that resumes execution, fires once, and disarms when the program next stops. Without
   that distinction it would pull focus away from you every time you pressed F10.
 - The list is the last 200 calls, newest first, with how long each took; failures are
-  marked in red.
+  marked in red. Unfolding one is what the reader chooses, so opening a few and leaving
+  them open survives whatever the agent does next.
 
 There is also a `vsdbgmcp` pane in the Output window carrying the pipe name, client
 connections, and anything that went wrong inside the extension.
