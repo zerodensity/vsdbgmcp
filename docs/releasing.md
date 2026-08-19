@@ -6,14 +6,23 @@
    `Directory.Build.props`. They live in two files that cannot see each other, so
    `build.ps1` fails the build when they disagree.
 2. Add the entry to `CHANGELOG.md`.
-3. `.\build.ps1`
+3. Push a `v`-prefixed tag:
 
-   It runs the tests, publishes the shim self-contained for `win-x64`, builds the VSIX,
-   and then looks inside the package for `shim/vsdbgmcp.exe`, both images and
-   `LICENSE.txt`. All of that arrives through packaging metadata that otherwise fails
-   silently, which is why it is checked rather than assumed.
-4. Tag, and attach `src/VsDbgMcp.Host/bin/Release/VsDbgMcp.Host.vsix` to a GitHub
-   release.
+   ```powershell
+   git tag v0.1.0
+   git push origin v0.1.0
+   ```
+
+   That is what cuts a release; nothing else does. `.github/workflows/release.yml`
+   checks the tag against the manifest, builds, and publishes a GitHub release carrying
+   `vsdbgmcp-<version>.vsix` with this version's changelog entry as the notes. It fails
+   rather than publishing if the tag and the manifest disagree, or if `CHANGELOG.md` has
+   no entry for the version.
+
+To build locally instead, `.\build.ps1` does the same work: tests, the self-contained
+`win-x64` shim, the VSIX, and then a look inside the package for `shim/vsdbgmcp.exe`,
+both images and `LICENSE.txt`. All of that arrives through packaging metadata that
+otherwise fails silently, which is why it is checked rather than assumed.
 
 ## Publish to the Marketplace
 
@@ -24,6 +33,8 @@ the rest.
 [marketplace.visualstudio.com/manage](https://marketplace.visualstudio.com/manage) — the
 categories, overview and Q&A setting are only editable there, and the extension is not
 public until you pick **Make Public** afterwards.
+
+Take the `.vsix` from the GitHub release the tag produced.
 
 **After that**, from a Developer PowerShell:
 

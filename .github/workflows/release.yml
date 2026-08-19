@@ -1,0 +1,76 @@
+name: release
+
+# Tagging is what cuts a release. Pushing v0.1.0 builds the package and publishes
+# it; nothing else does.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      # The tag is what people install from, so it has to agree with what the
+      # package claims about itself. build.ps1 already refuses to build when the
+      # manifest and Directory.Build.props disagree; this closes the loop on the
+      # tag, before anything is published under the wrong number.
+      - name: Check the tag against the manifest
+        id: version
+        shell: pwsh
+        run: |
+          $manifest = [xml](Get-Content src/VsDbgMcp.Host/source.extension.vsixmanifest)
+          $version = $manifest.PackageManifest.Metadata.Identity.Version
+          $tagged = '${{ github.ref_name }}'.TrimStart('v')
+
+          if ($tagged -ne $version) {
+            throw "tag ${{ github.ref_name }} does not match manifest version $version"
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      # Also verifies the package really contains the shim, both images and the
+      # licence, which is the part that fails silently.
+      - name: Build
+        shell: pwsh
+        run: .\build.ps1 -Configuration Release
+
+      - name: Name the package after its version
+        id: package
+        shell: pwsh
+        run: |
+          $path = "artifacts/release/vsdbgmcp-${{ steps.version.outputs.version }}.vsix"
+          New-Item -ItemType Directory -Force (Split-Path $path) | Out-Null
+          Copy-Item src/VsDbgMcp.Host/bin/Release/VsDbgMcp.Host.vsix $path
+          "path=$path" >> $env:GITHUB_OUTPUT
+
+      - name: Take the notes from the changelog
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $sections = (Get-Content CHANGELOG.md -Raw) -split '(?m)^##\s+'
+          $section = $sections |
+              Where-Object { $_ -match "^$([regex]::Escape($version))\s" } |
+              Select-Object -First 1
+
+          if (-not $section) { throw "CHANGELOG.md has no entry for $version" }
+
+          ($section -split "`n", 2)[1].Trim() | Set-Content release-notes.md -Encoding utf8
+
+      - name: Publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create '${{ github.ref_name }}' '${{ steps.package.outputs.path }}' `
+            --title 'vsdbgmcp ${{ steps.version.outputs.version }}' `
+            --notes-file release-notes.md
