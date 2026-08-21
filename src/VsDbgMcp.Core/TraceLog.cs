@@ -34,6 +34,14 @@ namespace VsDbgMcp
             public int MaxPerSecond;
             public DateTime SecondStarted;
             public int InThisSecond;
+            public DateTime StartedUtc;
+
+            /// <summary>
+            /// False once a record has arrived without a time. Records read back out of
+            /// the Debug pane are in the order they happened and nothing more, so a
+            /// stream carrying one cannot claim to know when any of them arrived.
+            /// </summary>
+            public bool Timed = true;
         }
 
         readonly Dictionary<int, Stream> _streams = new Dictionary<int, Stream>();
@@ -43,12 +51,16 @@ namespace VsDbgMcp
         /// Begins collecting for a breakpoint, throwing away anything kept for it
         /// before. Setting a tracepoint again means measuring from now.
         /// </summary>
-        public void Start(int breakpointId, int maxPerSecond)
+        public void Start(int breakpointId, int maxPerSecond, DateTime startedUtc)
         {
             if (breakpointId <= 0) return;
             lock (_gate)
             {
-                _streams[breakpointId] = new Stream { MaxPerSecond = maxPerSecond > 0 ? maxPerSecond : 0 };
+                _streams[breakpointId] = new Stream
+                {
+                    MaxPerSecond = maxPerSecond > 0 ? maxPerSecond : 0,
+                    StartedUtc = startedUtc
+                };
             }
         }
 
@@ -80,6 +92,8 @@ namespace VsDbgMcp
                 // Counted before the cap, so a record's hit number stays the number of
                 // the hit that produced it and a gap in the numbers shows what was lost.
                 stream.Arrived++;
+
+                if (whenUtc == default(DateTime)) stream.Timed = false;
 
                 // The cap makes the stream readable. It cannot make the tracepoint
                 // cheaper: the program has already paid for this record by the time it
@@ -126,6 +140,8 @@ namespace VsDbgMcp
 
                 result.Collected = stream.Arrived;
                 result.Dropped = stream.Dropped;
+                result.StartedUtc = stream.StartedUtc;
+                result.Timed = stream.Timed;
 
                 var skip = tail > 0 && stream.Records.Count > tail ? stream.Records.Count - tail : 0;
                 foreach (var record in stream.Records)

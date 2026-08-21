@@ -12,9 +12,9 @@ return.
 - A breakpoint that will not bind because its source file was written after the module
   was built says so, rather than reporting no code at that location. `modules` carries
   each binary's build time, and a filtered result says how many modules it filtered.
-- Tracepoints can keep their records out of the Debug pane: `bp_set(logMessage: ...,
-  collect: true)` buffers them per breakpoint and `trace_read` returns that one
-  breakpoint's records, each stamped with the time it arrived and which hit it was.
+- Tracepoints can be read on their own: `bp_set(logMessage: ..., collect: true)` keeps a
+  breakpoint's records apart from everything else the program logs, and `trace_read`
+  returns them numbered, in order, with the rate they arrived at.
 - `bp_set` evaluates each `{expr}` in a tracepoint message once and reports which will
   work, or says it could not check because the debuggee is not stopped there.
 - `bp_set` takes `everyNthHit`, which is the debug engine's own hit filter, and

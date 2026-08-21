@@ -14,7 +14,7 @@ asked for, and why.
 |---|---|---|
 | 1 | Refuse evaluation when the target is not stopped | One refusal at the frame lookup, and `pause` blocks |
 | 2 | Report source/PDB mismatch as the bind failure it is | Reported from build times, not PDB checksums |
-| 3 | Tracepoints get their own sink, timestamped and counted | `bp_set(collect: true)` and `trace_read` |
+| 3 | Tracepoints get their own sink, timestamped and counted | `bp_set(collect: true)` and `trace_read`, undated on VS 2026 |
 | 4 | Validate tracepoint expressions at bind time | Evaluated once, or told plainly it could not check |
 | 5 | Mark which locals are readable in optimized frames | Unreadable marked, shared slots marked, liveness not attempted |
 | 6 | `typeModule` for expressions | `typeModule` on `eval` and `expand` |
@@ -79,15 +79,29 @@ It is the obvious next move if this one proves too coarse.
 ## 3 and 4. Tracepoints
 
 Visual Studio writes tracepoint records to the Debug pane, mixed in with everything the
-program logs. A collected tracepoint now marks its message with the breakpoint's id, the
-event sink pulls the marked records back out of the output stream, and `trace_read`
-returns that one breakpoint's records. No new Visual Studio API — the sink already
-received those events.
+program logs. A collected tracepoint now marks its message with the breakpoint's id, and
+`trace_read` returns that one breakpoint's records, numbered and in order.
 
-Each record carries the time it arrived and which hit it was. The hit number is counted
-**before** the rate cap, so a gap in the numbering is what makes a dropped record
-visible. `trace_read` computes the rate, which is the question the report was reduced to
-guessing at.
+**This was built on an assumption that turned out to be false, and live testing is what
+caught it.** The first version listened for the records on the debug event callback, the
+way debuggee output arrives. That callback only carries what the *program* writes.
+Visual Studio prints a tracepoint's message itself, so the callback never fired and the
+buffer was always empty — while the records sat in the pane the whole time, marker and
+all. Every unit test passed, because they fed the buffer directly; the one assumption
+that needed a real Visual Studio was the one that was wrong.
+
+The pane is therefore the only place a record exists. Where the pane is a text buffer it
+is watched and each record is timed as it lands. Visual Studio 2026's is not, so there
+the records are recovered from the pane's text afterwards — complete and in order, but
+undated. `trace_read` says which of the two it is; an undated stream reports its rate
+over the whole collection rather than pretending to time individual records.
+
+A clock read inside the tracepoint message would restore per-record times, and was
+rejected: evaluating an expression on every hit is exactly the overhead item 3 was
+complaining about, so it would corrupt the measurement it exists to provide.
+
+The hit number is counted **before** the rate cap, so a gap in the numbering is what
+makes a dropped record visible.
 
 **Rate limiting, split honestly.** `everyNthHit` maps onto the debug engine's own hit
 filter, so the message and its expressions are built one time in N — though the thread
@@ -130,6 +144,14 @@ total failure the error belongs to the form the caller actually wrote. Two shape
 rewrite. Casts whose operand is not a plain literal or identifier — `((T*)p + 1)->m`,
 `((T*)f(p))->m` — are deliberately declined, because dereferencing the front of those
 binds to the wrong half. A wrong rewrite is worse than no rewrite.
+
+**It reaches an address, not a local.** `((T*)0xADDR)->M` resolves. Naming a local
+instead — `((T*)state)->M` — does not, because the qualifier sends every name in the
+expression to that module, and the local belongs to the frame rather than to it. The
+caller reads the local first and passes the address it held, which is half the work the
+item set out to remove rather than all of it. Closing the gap means evaluating the
+operand unqualified and splicing its address in, which is worth doing and has not been
+done.
 
 ## 7. Waiting for a module
 
@@ -188,11 +210,22 @@ the faulting expression, and `eval` calling functions under `allowSideEffects`.
 
 ## Verification
 
-211 automated tests, up from 72. The shim, the extension and the VSIX all build.
+215 automated tests, up from 72. The shim, the extension and the VSIX all build.
 
-None of this has been driven against a live debuggee yet. The parts that decide
-something are pure and tested — which expression forms to try, which values are fill,
-whether a source file outran its binary, what a trace buffer keeps, how the event streams
-separate. The parts that need a real debug engine have not been seen happen: a tracepoint
-record actually arriving, `dbgHitCountTypeMultiple` on a live tracepoint, a breakpoint
-failing to bind on a stale file, two locals sharing a slot.
+All eight were then driven by hand against Visual Studio 2026 debugging
+`tests/fixtures/cpp`, which is what the second module and the optimized frame in that
+fixture are for. What that found:
+
+- Reading a running debuggee refuses and names the state; `pause` returns the stop.
+- A breakpoint set after editing its file names the staleness, with both timestamps.
+- Bind-time checking reports `{id} = 1`, `{g_state} = 0` and `identifier "nosuchvar" is
+  undefined`, before a single record.
+- `typeModule` reads a field of a type only the plugin's symbols describe.
+- Waiting on a module returns on the live load, with its path and symbol state.
+- A field of a deleted object reads `-572662307`, labelled freed heap. In decimal that
+  is the case nobody spots unaided, and it is the one the report's double free turned on.
+- An optimized frame marks a local the compiler kept nothing for as unreadable.
+- Tracepoint collection was broken, and is the subject of its own note above.
+
+Two things still have not been seen happen: two optimized locals sharing a slot, because
+no frame in the fixture produced one, and `dbgHitCountTypeMultiple` on a live tracepoint.

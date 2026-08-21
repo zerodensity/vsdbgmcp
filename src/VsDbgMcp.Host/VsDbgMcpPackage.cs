@@ -38,12 +38,14 @@ namespace VsDbgMcp.Host
         IVsSolution _solution;
         IVsShell _shell;
         IVsDebugger _debugger;
+        IVsOutputWindow _outputWindow;
         IVsOutputWindowPane _pane;
 
         PipeServer _server;
         DebugHost _debugHost;
         ProjectSystem _projectSystem;
         DebugEventSink _eventSink;
+        TracePaneWatch _traceWatch;
 
         uint _solutionCookie;
         uint _debuggerCookie;
@@ -63,7 +65,8 @@ namespace VsDbgMcp.Host
             _solution = await GetServiceAsync(typeof(SVsSolution)) as IVsSolution;
             _shell = await GetServiceAsync(typeof(SVsShell)) as IVsShell;
             _debugger = await GetServiceAsync(typeof(SVsShellDebugger)) as IVsDebugger;
-            _pane = CreateOutputPane(await GetServiceAsync(typeof(SVsOutputWindow)) as IVsOutputWindow);
+            _outputWindow = await GetServiceAsync(typeof(SVsOutputWindow)) as IVsOutputWindow;
+            _pane = CreateOutputPane(_outputWindow);
 
             // Copying the shim out is file work, and nothing in this process waits on
             // it: the agent launches the shim, not us.
@@ -156,6 +159,26 @@ namespace VsDbgMcp.Host
             _panelShown = true;
             ShowStatusWindow(activate: false);
         }
+
+        /// <summary>
+        /// Starts timing tracepoint records, if it is not already. Called when a
+        /// tracepoint begins collecting rather than at startup, because the Debug pane
+        /// does not exist until something has been debugged.
+        /// </summary>
+        internal bool EnsureTraceWatch()
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (_eventSink == null) return false;
+
+            if (_traceWatch == null) _traceWatch = new TracePaneWatch(_eventSink.Trace, Log);
+            return _traceWatch.EnsureAttached(_outputWindow);
+        }
+
+        /// <summary>
+        /// Hands the Debug pane's text to the watcher, for a Visual Studio where it
+        /// could not attach and the records have to be recovered afterwards.
+        /// </summary>
+        internal void PumpTrace(string paneText) => _traceWatch?.PumpFromText(paneText);
 
         IVsOutputWindowPane CreateOutputPane(IVsOutputWindow window)
         {
@@ -284,6 +307,7 @@ namespace VsDbgMcp.Host
                     Activity.Changed -= OnActivityChanged;
                     InstanceFile.Remove(_pid);
                     _eventSink?.Unadvise(_debugger);
+                    _traceWatch?.Dispose();
 
                     ThreadHelper.JoinableTaskFactory.Run(async () =>
                     {

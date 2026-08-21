@@ -321,19 +321,35 @@ namespace VsDbgMcp.Shim
             sb.Append(" of ").Append(t.Collected).Append(" records");
             if (t.Dropped > 0) sb.Append(", ").Append(t.Dropped).Append(" dropped by the per-second cap");
 
-            var span = (t.Records[t.Records.Count - 1].Time - t.Records[0].Time).TotalSeconds;
-            if (t.Records.Count > 1 && span > 0)
+            // Timed records give a rate across the ones in hand. Untimed ones still give
+            // one, from everything collected since the tracepoint was set, which is the
+            // question a rate was wanted for.
+            var span = t.Timed
+                ? (t.Records[t.Records.Count - 1].Time - t.Records[0].Time).TotalSeconds
+                : (DateTime.UtcNow - t.StartedUtc).TotalSeconds;
+            var over = t.Timed ? t.Records.Count - 1 : t.Collected;
+
+            if (over > 0 && span > 0)
             {
-                sb.Append("  ").Append(((t.Records.Count - 1) / span).ToString("0.0", CultureInfo.InvariantCulture));
+                sb.Append("  ").Append((over / span).ToString("0.0", CultureInfo.InvariantCulture));
                 sb.Append("/s over ").Append(span.ToString("0.###", CultureInfo.InvariantCulture)).Append('s');
             }
             sb.AppendLine();
 
             foreach (var r in t.Records)
             {
-                sb.Append("  ").Append(r.Time.ToLocalTime().ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture));
-                sb.Append("  #").Append(r.Hit.ToString(CultureInfo.InvariantCulture).PadRight(7));
+                sb.Append("  ");
+                if (t.Timed)
+                    sb.Append(r.Time.ToLocalTime().ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)).Append("  ");
+                sb.Append('#').Append(r.Hit.ToString(CultureInfo.InvariantCulture).PadRight(7));
                 sb.AppendLine(r.Text);
+            }
+
+            if (!t.Timed)
+            {
+                sb.AppendLine("These records were read back out of the Debug pane, which keeps their order " +
+                              "and not their times, so the rate above is over the whole collection rather " +
+                              "than across the records shown.");
             }
 
             if (!string.IsNullOrEmpty(t.Message)) sb.AppendLine(t.Message);

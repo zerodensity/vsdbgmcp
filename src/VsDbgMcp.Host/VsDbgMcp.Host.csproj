@@ -98,6 +98,7 @@
     <Compile Include="ProjectSystem.cs" />
     <Compile Include="ShimStaging.cs" />
     <Compile Include="StatusWindow.cs" />
+    <Compile Include="TracePaneWatch.cs" />
     <Compile Include="VsDbgMcpPackage.cs" />
     <Compile Include="WindowCapture.cs" />
     <Compile Include="WorkspaceProbe.cs" />

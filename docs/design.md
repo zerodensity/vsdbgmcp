@@ -375,16 +375,25 @@ Not a longer tool list — a different one.
   the expression string.
 - **Data breakpoints.** `bp_set` with an address or expression and a size. C++
   only, and the best single tool for memory corruption.
-- **Tracepoints with a sink of their own.** `bp_set(logMessage: ..., collect:
-  true)` marks its records with the breakpoint's id, the event sink pulls them
-  back out of the debug output stream, and `trace_read` returns that one
-  breakpoint's records with a timestamp and a hit number on each. In the shared
-  Debug pane a tracepoint on a hot path buries the program's own logging and
-  leaves cadence to be guessed at from how the two interleave. Each `{expr}` is
-  also evaluated once at bind time, because an expression that will not evaluate
-  otherwise announces itself only after a thousand records have said so — and
-  only where the tracepoint sits, since anywhere else the answer would be about
-  the debugger's position rather than the expression.
+- **Tracepoints with a stream of their own.** `bp_set(logMessage: ..., collect:
+  true)` marks its records with the breakpoint's id, and `trace_read` returns
+  that one breakpoint's records, numbered and in order, with the rate they
+  arrived at. In the shared Debug pane a tracepoint on a hot path buries the
+  program's own logging and leaves cadence to be guessed at from how the two
+  interleave.
+
+  Visual Studio prints a tracepoint's record itself rather than raising it as
+  debuggee output, so the debug event callback never sees one; the pane is the
+  only place a record exists. Where that pane is a text buffer it is watched and
+  each record is timed as it lands. Where it is not — Visual Studio 2026 among
+  them — the records are recovered from its text afterwards: complete and in
+  order, but undated, and the reply says which of the two it is rather than
+  presenting a guess as a measurement.
+
+  Each `{expr}` is also evaluated once at bind time, because an expression that
+  will not evaluate otherwise announces itself only after a thousand records have
+  said so — and only where the tracepoint sits, since anywhere else the answer
+  would be about the debugger's position rather than the expression.
 - **Allocator fills are named where they appear.** `0xdddddddddddddddd` in a
   value, or a run of it in a `memory` dump, is called freed heap, and the same
   for the rest of the table. Only a whole number that is nothing but the fill

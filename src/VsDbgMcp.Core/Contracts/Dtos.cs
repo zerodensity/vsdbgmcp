@@ -247,6 +247,18 @@ namespace VsDbgMcp.Contracts
         /// <summary>Records the per-second cap threw away.</summary>
         public long Dropped { get; set; }
 
+        /// <summary>UTC, when this tracepoint started collecting. The span since is what
+        /// gives a rate when the records themselves are not timed.</summary>
+        public DateTime StartedUtc { get; set; }
+
+        /// <summary>
+        /// Whether each record carries the moment it arrived. Visual Studio prints a
+        /// tracepoint's record to the Debug pane itself rather than raising it as an
+        /// event, so on a Visual Studio whose pane cannot be watched the records are
+        /// recovered from the pane afterwards: correct, in order, and undated.
+        /// </summary>
+        public bool Timed { get; set; } = true;
+
         /// <summary>Set when there is nothing to return, saying why.</summary>
         public string Message { get; set; }
     }

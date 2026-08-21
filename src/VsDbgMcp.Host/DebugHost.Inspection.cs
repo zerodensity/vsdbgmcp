@@ -71,7 +71,15 @@ namespace VsDbgMcp.Host
                         : request.LogMessage;
                     tracepoint.BreakWhenHit = false;
 
-                    if (request.Collect) _sink.Trace.Start(id, request.MaxPerSecond);
+                    if (request.Collect)
+                    {
+                        _sink.Trace.Start(id, request.MaxPerSecond, DateTime.UtcNow);
+
+                        // Visual Studio writes a tracepoint's record to the Debug pane
+                        // itself, so the pane is where it has to be picked up and the
+                        // moment it lands there is the only time it can be stamped.
+                        _package.EnsureTraceWatch();
+                    }
                 }
 
                 var info = Describe(created, LoadedModules());
@@ -352,8 +360,41 @@ namespace VsDbgMcp.Host
         /// The records are already in this process, collected as they arrived. Nothing
         /// here asks Visual Studio anything, so nothing here can be stale.
         /// </summary>
-        public Task<TraceResult> TraceReadAsync(int id, int tail, CancellationToken ct = default) =>
-            UIAsync(() => _sink.Trace.Read(id, tail));
+        public Task<TraceResult> TraceReadAsync(int id, int tail, CancellationToken ct = default) => UIAsync(() =>
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            // Where the pane cannot be watched as it fills, the records are still in it.
+            // Reading them now is what makes this work at all on such a Visual Studio;
+            // where the watch did attach this finds nothing new and costs a string.
+            _package.PumpTrace(DebugPaneText());
+            return _sink.Trace.Read(id, tail);
+        });
+
+        /// <summary>
+        /// The whole Debug pane as text, or null if the shell will not hand it over.
+        /// The shell refuses while it is busy writing, and a tracepoint that is being
+        /// read is one that is being written to.
+        /// </summary>
+        string DebugPaneText()
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            return Read<string>(() =>
+            {
+                foreach (OutputWindowPane candidate in _dte.ToolWindows.OutputWindow.OutputWindowPanes)
+                {
+                    if (candidate.Name.IndexOf("Debug", StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+                    var selection = candidate.TextDocument.Selection;
+                    selection.StartOfDocument(false);
+                    selection.EndOfDocument(true);
+                    var text = selection.Text;
+                    selection.StartOfDocument(false);
+                    return text;
+                }
+                return null;
+            }, null, "the Debug pane");
+        }
 
         public Task<OpResult> BreakpointEnableAsync(int id, bool enabled, CancellationToken ct = default) => UIOpAsync(() =>
         {

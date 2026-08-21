@@ -155,10 +155,12 @@ Notes on a few:
   address changes. With `logMessage`, a tracepoint: each `{expr}` in the message is
   evaluated once when the breakpoint is set, so an expression that will never work says
   so before it has logged a thousand records saying it.
-- **`trace_read`** — a tracepoint set with `collect: true` keeps its records in a buffer
-  of its own, each stamped with the time it arrived and which hit it was. That is what
+- **`trace_read`** — a tracepoint set with `collect: true` gets a stream of its own,
+  numbered and in order, with a rate over the time it has been collecting. That is what
   makes a 50 Hz callback readable, and what answers "how often does this run" without
-  inferring it from how records interleave in the Debug pane.
+  inferring it from how records interleave in the Debug pane. Visual Studio writes those
+  records to the Debug pane itself, so where the pane cannot be watched as it fills they
+  are recovered from it afterwards and carry no individual times; the reply says so.
 - **`modules`** — also reports when each binary was built, and marks a module whose
   source has been edited since. That is the breakpoint that binds nowhere for a reason
   neither the module list nor the PDB messages will show you.
@@ -195,7 +197,7 @@ Studio, since the VSIX packaging tasks are .NET Framework assemblies.
 
 ## Status
 
-211 automated tests cover routing, discovery, the event bus, and the whole shim path —
+215 automated tests cover routing, discovery, the event bus, and the whole shim path —
 discovery file, named pipe, JSON-RPC, rendering — against a stand-in for the extension,
 plus the pure decisions: which expression forms to try against a module, which values are
 allocator fill, whether a source file outran its binary, and what a tracepoint buffer
@@ -222,10 +224,9 @@ program (`tests/fixtures/cpp`):
   evaluation into it, and an unknown id answering with every thread that does exist and
   which process it is in
 
-The eight changes in [docs/iteration_1.md](docs/iteration_1.md) have not been driven by
-hand yet. Their pure parts are covered by tests; the parts that need a live debug engine —
-a tracepoint record actually arriving, a breakpoint failing to bind on a stale file, two
-locals sharing a slot — have not been seen happen.
+The eight changes in [docs/iteration_1.md](docs/iteration_1.md) were driven by hand the
+same way, against the same fixture. One thing there has still not been seen happen: two
+optimized locals sharing a slot, because no frame in the fixture produced one.
 
 Known gaps:
 
@@ -239,6 +240,10 @@ Known gaps:
   refuses to guess between them.
 - **A data breakpoint listed by `bp_list` shows less than `bp_set` returned** — the
   address it watches is not readable back from the automation model.
+- **`typeModule` needs an address, not a local.** `((T*)0xADDR)->M` resolves; naming a
+  local instead of the address does not, because the qualifier sends every name in the
+  expression to that module and the local is not in it. Read the local first, then pass
+  the address it holds.
 - **A function breakpoint must match how the symbol is actually named.** `Corrupt` in an
   anonymous namespace does not bind as `Corrupt`; the reply says it did not bind and
   where to look.

@@ -187,7 +187,7 @@ namespace VsDbgMcp.Tests
                     })
                     .ToList();
 
-                if (request.Collect) _trace.Start(info.Id, request.MaxPerSecond);
+                if (request.Collect) _trace.Start(info.Id, request.MaxPerSecond, DateTime.UtcNow);
             }
 
             return Task.FromResult(info);

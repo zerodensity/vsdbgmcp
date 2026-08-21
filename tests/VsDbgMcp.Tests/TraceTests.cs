@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using VsDbgMcp.Contracts;
 using VsDbgMcp.Shim;
 using Xunit;
@@ -53,7 +54,7 @@ namespace VsDbgMcp.Tests
         public void Records_carry_the_time_they_arrived_and_which_hit_they_were()
         {
             var log = new TraceLog();
-            log.Start(7, 0);
+            log.Start(7, 0, DateTime.UtcNow);
 
             Assert.True(log.Add(7, "first", Noon));
             Assert.True(log.Add(7, "second", Noon.AddMilliseconds(20)));
@@ -69,7 +70,7 @@ namespace VsDbgMcp.Tests
         public void A_callback_that_never_stops_cannot_grow_the_buffer_forever()
         {
             var log = new TraceLog();
-            log.Start(7, 0);
+            log.Start(7, 0, DateTime.UtcNow);
 
             for (var i = 1; i <= TraceLog.Capacity + 500; i++)
                 log.Add(7, "tick " + i, Noon.AddMilliseconds(i * 20));
@@ -88,7 +89,7 @@ namespace VsDbgMcp.Tests
         public void A_tail_returns_the_newest_records()
         {
             var log = new TraceLog();
-            log.Start(7, 0);
+            log.Start(7, 0, DateTime.UtcNow);
             for (var i = 1; i <= 10; i++) log.Add(7, "tick " + i, Noon.AddMilliseconds(i * 20));
 
             var result = log.Read(7, 3);
@@ -102,7 +103,7 @@ namespace VsDbgMcp.Tests
         public void The_per_second_cap_drops_records_and_counts_what_it_dropped()
         {
             var log = new TraceLog();
-            log.Start(7, 2);
+            log.Start(7, 2, DateTime.UtcNow);
 
             for (var i = 1; i <= 5; i++) log.Add(7, "tick " + i, Noon.AddMilliseconds(i * 10));
             log.Add(7, "next second", Noon.AddSeconds(2));
@@ -121,10 +122,10 @@ namespace VsDbgMcp.Tests
         public void Setting_a_tracepoint_again_measures_from_now()
         {
             var log = new TraceLog();
-            log.Start(7, 0);
+            log.Start(7, 0, DateTime.UtcNow);
             log.Add(7, "before", Noon);
 
-            log.Start(7, 0);
+            log.Start(7, 0, DateTime.UtcNow);
 
             var result = log.Read(7, 0);
             Assert.Empty(result.Records);
@@ -135,7 +136,7 @@ namespace VsDbgMcp.Tests
         public void Reading_an_id_that_is_not_collecting_names_the_ones_that_are()
         {
             var log = new TraceLog();
-            log.Start(9, 0);
+            log.Start(9, 0, DateTime.UtcNow);
             log.Add(9, "tick", Noon);
 
             var result = log.Read(3, 0);
@@ -157,7 +158,7 @@ namespace VsDbgMcp.Tests
         public void A_removed_breakpoint_stops_collecting()
         {
             var log = new TraceLog();
-            log.Start(7, 0);
+            log.Start(7, 0, DateTime.UtcNow);
             log.Forget(7);
 
             Assert.False(log.IsCollecting(7));
@@ -278,6 +279,84 @@ namespace VsDbgMcp.Tests
             Assert.Contains("{n}", text);
             Assert.DoesNotContain("{n} =", text);
             Assert.Contains("not checked: the debuggee is not stopped", text);
+        }
+
+        // Visual Studio prints a tracepoint's record to the Debug pane itself instead of
+        // raising it as debuggee output, and on Visual Studio 2026 that pane is not a
+        // text buffer that can be watched. Records are then recovered from the pane after
+        // the fact, which keeps their order and loses their times. These cover what that
+        // costs, because the difference is easy to paper over by accident.
+
+        [Fact]
+        public void A_record_with_no_time_makes_the_whole_stream_untimed()
+        {
+            var log = new TraceLog();
+            log.Start(7, 0, DateTime.UtcNow);
+
+            log.Add(7, "first", default(DateTime));
+            log.Add(7, "second", default(DateTime));
+
+            var result = log.Read(7, 0);
+
+            Assert.False(result.Timed);
+            Assert.Equal(2, result.Collected);
+            Assert.Equal(new long[] { 1, 2 }, result.Records.Select(r => r.Hit).ToArray());
+        }
+
+        [Fact]
+        public void A_stream_that_was_timed_stays_timed()
+        {
+            var log = new TraceLog();
+            log.Start(7, 0, DateTime.UtcNow);
+
+            log.Add(7, "first", new DateTime(2026, 8, 21, 12, 0, 0, DateTimeKind.Utc));
+
+            Assert.True(log.Read(7, 0).Timed);
+        }
+
+        [Fact]
+        public void Untimed_records_are_rendered_without_a_time_and_say_why()
+        {
+            var text = Render.Trace(new TraceResult
+            {
+                BreakpointId = 7,
+                Collected = 2,
+                Timed = false,
+                StartedUtc = DateTime.UtcNow.AddSeconds(-4),
+                Records = new List<TraceRecord>
+                {
+                    new TraceRecord { Hit = 1, Text = "worker 1" },
+                    new TraceRecord { Hit = 2, Text = "worker 2" }
+                }
+            });
+
+            // 00:00:00.000 is what a default DateTime renders as, and printing it would
+            // read as a measurement rather than the absence of one.
+            Assert.DoesNotContain("00:00:00", text);
+            Assert.Contains("read back out of the Debug pane", text);
+            Assert.Contains("#1", text);
+            Assert.Contains("worker 2", text);
+        }
+
+        [Fact]
+        public void A_timed_stream_still_prints_each_record_s_time()
+        {
+            var start = new DateTime(2026, 8, 21, 12, 0, 0, DateTimeKind.Utc);
+            var text = Render.Trace(new TraceResult
+            {
+                BreakpointId = 7,
+                Collected = 2,
+                Timed = true,
+                StartedUtc = start,
+                Records = new List<TraceRecord>
+                {
+                    new TraceRecord { Hit = 1, Text = "worker 1", Time = start },
+                    new TraceRecord { Hit = 2, Text = "worker 2", Time = start.AddSeconds(1) }
+                }
+            });
+
+            Assert.DoesNotContain("read back out of the Debug pane", text);
+            Assert.Contains("/s over", text);
         }
     }
 }
