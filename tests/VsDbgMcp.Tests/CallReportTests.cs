@@ -90,7 +90,7 @@ namespace VsDbgMcp.Tests
         public async Task The_argument_worth_reading_comes_with_it()
         {
             await new InspectionTools(_sessions)
-                .Eval("mesh.refCount", null, false, false, false, 0, null, CancellationToken.None);
+                .Eval("mesh.refCount", null, false, false, false, null, 0, null, CancellationToken.None);
             await Settle();
 
             var report = _host.ReportFor("eval");

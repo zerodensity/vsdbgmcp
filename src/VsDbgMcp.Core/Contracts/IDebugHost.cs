@@ -51,8 +51,8 @@ namespace VsDbgMcp.Contracts
         Task<OpResult> SelectAsync(int? threadId, int? frameIndex, string process, CancellationToken ct = default);
         Task<OpResult> FreezeAsync(int threadId, bool frozen, CancellationToken ct = default);
         Task<List<EvalResult>> EvalAsync(EvalOptions options, CancellationToken ct = default);
-        Task<List<VarNode>> VarsAsync(string scope, int depth, string filter, CancellationToken ct = default);
-        Task<List<VarNode>> ExpandAsync(string reference, int depth, CancellationToken ct = default);
+        Task<List<VarNode>> VarsAsync(string scope, int depth, string filter, bool sharedAddresses, CancellationToken ct = default);
+        Task<List<VarNode>> ExpandAsync(string reference, int depth, string typeModule, CancellationToken ct = default);
         Task<OpResult> WatchSetAsync(string[] expressions, CancellationToken ct = default);
         Task<MemoryResult> MemoryAsync(string addressOrExpression, int size, string format, CancellationToken ct = default);
         Task<List<RegisterInfo>> RegistersAsync(string group, CancellationToken ct = default);

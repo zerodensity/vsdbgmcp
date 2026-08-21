@@ -235,6 +235,12 @@ namespace VsDbgMcp.Contracts
         /// <summary>Evaluate on every thread and return one row each.</summary>
         public bool AllThreads { get; set; }
 
+        /// <summary>
+        /// Look type names up in this module instead of the one the frame is in. Needed
+        /// whenever the expression casts to a type the current module does not define.
+        /// </summary>
+        public string TypeModule { get; set; }
+
         public int TimeoutMs { get; set; } = 5000;
     }
 
@@ -258,6 +264,20 @@ namespace VsDbgMcp.Contracts
         public bool HasChildren { get; set; }
         public string Ref { get; set; }
         public List<VarNode> Children { get; set; }
+
+        /// <summary>
+        /// False when the engine could not read the variable here, which in an optimized
+        /// frame usually means the compiler kept nothing to read. Value then holds the
+        /// engine's reason instead of a value.
+        /// </summary>
+        public bool Readable { get; set; } = true;
+
+        /// <summary>
+        /// Other variables in the same frame reading the same address. An optimized frame
+        /// hands several names one slot, and without this the reply cannot be told apart
+        /// from two variables that genuinely hold the same pointer.
+        /// </summary>
+        public List<string> SameAddressAs { get; set; }
     }
 
     public sealed class ModuleInfo

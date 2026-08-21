@@ -144,7 +144,13 @@ Notes on a few:
 - **`eval`** — refuses to call functions unless `allowSideEffects` is passed, because the
   native evaluator really runs them and an agent inspecting `v.size()` should not change
   the program by accident. Format specifiers go in `format`, not spliced into the
-  expression.
+  expression, and a type that lives in another module goes in `typeModule` for the same
+  reason: `((T*)0xADDR)->Member` with `typeModule: "Foo.dll"` resolves without anyone
+  having to know how the debugger wants that written.
+- **`vars`** — in an optimized build, marks a variable the compiler kept nothing for as
+  not readable, and marks variables reading the same address with each other's names.
+  Without that, a slot the optimizer handed to two locals reads as an ordinary value of
+  both.
 - **`bp_set`** — with `dataExpression`, a data breakpoint: break when the memory at an
   address changes.
 - **`watch_set`** — pins expressions whose values then come back with every `wait` and

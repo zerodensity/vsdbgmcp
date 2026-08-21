@@ -316,6 +316,10 @@ namespace VsDbgMcp.Shim
             if (nodes == null || nodes.Count == 0) return "  (nothing in scope)";
             var sb = new StringBuilder();
             Walk(sb, nodes, indent);
+
+            if (nodes.Any(n => n.SameAddressAs != null && n.SameAddressAs.Count > 0))
+                sb.AppendLine().Append("Two names on one address usually mean the optimizer reused a slot, not two live variables.");
+
             return sb.ToString().TrimEnd();
         }
 
@@ -326,6 +330,9 @@ namespace VsDbgMcp.Shim
                 sb.Append(new string(' ', 2 + indent * 2));
                 sb.Append(n.Name).Append(" = ").Append(n.Value);
                 if (!string.IsNullOrEmpty(n.Type)) sb.Append("  (").Append(n.Type).Append(')');
+                if (!n.Readable) sb.Append("  -- not readable here");
+                if (n.SameAddressAs != null && n.SameAddressAs.Count > 0)
+                    sb.Append("  -- same address as ").Append(string.Join(", ", n.SameAddressAs));
                 if (n.HasChildren && (n.Children == null || n.Children.Count == 0))
                     sb.Append("  ... expand ").Append(n.Ref);
                 sb.AppendLine();

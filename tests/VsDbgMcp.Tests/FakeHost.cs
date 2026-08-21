@@ -283,8 +283,8 @@ namespace VsDbgMcp.Tests
             "  nosEditor.exe (4001): 100, 101\n" +
             "  nosLauncher.exe (4002): 200";
         public Task<OpResult> FreezeAsync(int threadId, bool frozen, CancellationToken ct = default) => Ok();
-        public Task<List<VarNode>> VarsAsync(string scope, int depth, string filter, CancellationToken ct = default) => Task.FromResult(new List<VarNode>());
-        public Task<List<VarNode>> ExpandAsync(string reference, int depth, CancellationToken ct = default) => Task.FromResult(new List<VarNode>());
+        public Task<List<VarNode>> VarsAsync(string scope, int depth, string filter, bool sharedAddresses, CancellationToken ct = default) => Task.FromResult(new List<VarNode>());
+        public Task<List<VarNode>> ExpandAsync(string reference, int depth, string typeModule, CancellationToken ct = default) => Task.FromResult(new List<VarNode>());
         public Task<OpResult> WatchSetAsync(string[] expressions, CancellationToken ct = default) => Ok();
         public Task<MemoryResult> MemoryAsync(string addressOrExpression, int size, string format, CancellationToken ct = default) => Task.FromResult(new MemoryResult());
         public Task<List<RegisterInfo>> RegistersAsync(string group, CancellationToken ct = default) => Task.FromResult(new List<RegisterInfo>());

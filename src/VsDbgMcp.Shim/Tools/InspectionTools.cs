@@ -78,6 +78,7 @@ namespace VsDbgMcp.Shim.Tools
             [Description("Bypass visualizers and show the raw layout, the ',!' specifier.")] bool raw = false,
             [Description("Allow the expression to call functions, which executes code in the debuggee.")] bool allowSideEffects = false,
             [Description("Evaluate on every thread and group the results. Use this to compare one value across a worker pool.")] bool allThreads = false,
+            [Description("Look type names up in this module, by file name, for example 'MyPlugin.dll'. Pass it when a cast fails with 'identifier X is undefined' because the type belongs to a module other than the one the frame is in. Write the expression the way you would normally; nothing else about it changes.")] string typeModule = null,
             [Description("Frame index to evaluate in. Defaults to the selected frame.")] int frame = 0,
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
             CancellationToken ct = default)
@@ -90,22 +91,24 @@ namespace VsDbgMcp.Shim.Tools
                     Raw = raw,
                     AllowSideEffects = allowSideEffects,
                     AllThreads = allThreads,
+                    TypeModule = typeModule,
                     FrameIndex = frame
                 }, ct).ConfigureAwait(false);
                 return Render.Evals(results);
             }, expression);
 
         [McpServerTool(Name = "vars", ReadOnly = true)]
-        [Description("Variables in the current frame. Returns one level by default; large containers report that they have children rather than printing thousands of elements. Use expand on the reference to go deeper.")]
+        [Description("Variables in the current frame. Returns one level by default; large containers report that they have children rather than printing thousands of elements. Use expand on the reference to go deeper. In an optimized build a variable the compiler kept nothing for is marked as not readable, and variables reading the same address are marked with each other's names, so a slot the compiler handed to two locals does not read as an ordinary value of both.")]
         public Task<string> Vars(
             [Description("locals, args, autos, or watch.")] string scope = "locals",
             [Description("How many levels to expand. Keep this small; depth costs tokens fast.")] int depth = 1,
             [Description("Only return variables whose name contains this text.")] string filter = null,
+            [Description("Mark variables that read the same address. Costs an extra engine call per variable, so turn it off in a frame with hundreds of locals or when the frame is not optimized.")] bool sharedAddresses = true,
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
             CancellationToken ct = default)
             => On(instance, ct, async link =>
             {
-                var nodes = await link.Debug.VarsAsync(scope, Math.Max(1, Math.Min(depth, 5)), filter, ct)
+                var nodes = await link.Debug.VarsAsync(scope, Math.Max(1, Math.Min(depth, 5)), filter, sharedAddresses, ct)
                     .ConfigureAwait(false);
                 return Render.Vars(nodes);
             }, scope);
@@ -115,11 +118,12 @@ namespace VsDbgMcp.Shim.Tools
         public Task<string> Expand(
             [Description("Reference from a previous vars or eval reply.")] string reference,
             [Description("How many levels to expand.")] int depth = 1,
+            [Description("Look type names up in this module, by file name, for example 'MyPlugin.dll'. Pass it when the reference casts to a type that belongs to a module other than the one the frame is in.")] string typeModule = null,
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
             CancellationToken ct = default)
             => On(instance, ct, async link =>
             {
-                var nodes = await link.Debug.ExpandAsync(reference, Math.Max(1, Math.Min(depth, 5)), ct)
+                var nodes = await link.Debug.ExpandAsync(reference, Math.Max(1, Math.Min(depth, 5)), typeModule, ct)
                     .ConfigureAwait(false);
                 return Render.Vars(nodes);
             }, reference);

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Debugger.Interop;
 using VsDbgMcp.Contracts;
@@ -32,6 +33,10 @@ namespace VsDbgMcp.Host
             enum_DEBUGPROP_INFO_FLAGS.DEBUGPROP_INFO_FULLNAME |
             enum_DEBUGPROP_INFO_FLAGS.DEBUGPROP_INFO_ATTRIB |
 
+            // The property object itself, needed to expand a row and to ask the engine
+            // where the value lives. Some engines fill it either way; asking is free.
+            enum_DEBUGPROP_INFO_FLAGS.DEBUGPROP_INFO_PROP |
+
             // Without this a struct reads back as "{...}" and the visualizer summary -
             // the whole reason natvis exists - never reaches the caller.
             enum_DEBUGPROP_INFO_FLAGS.DEBUGPROP_INFO_VALUE_AUTOEXPAND;
@@ -52,9 +57,9 @@ namespace VsDbgMcp.Host
                 return result;
             }
 
-            var text = Decorate(options.Expression, options.Format, options.Raw);
-            if (context.ParseText(text, enum_PARSEFLAGS.PARSE_EXPRESSION, 10,
-                    out var expression, out var parseError, out _) != VSConstants.S_OK || expression == null)
+            var expression = Parse(context, options.Expression, options.TypeModule,
+                options.Format, options.Raw, out var parseError);
+            if (expression == null)
             {
                 result.Error = string.IsNullOrEmpty(parseError) ? "could not parse the expression" : parseError;
                 return result;
@@ -87,6 +92,29 @@ namespace VsDbgMcp.Host
         }
 
         /// <summary>
+        /// Parses the expression, trying each way of naming the module in turn. The native
+        /// parser resolves identifiers, so a type the module does not have fails here
+        /// rather than during evaluation, which is what makes trying more than one form
+        /// both cheap and honest. The error left behind belongs to the last form, the one
+        /// the caller actually wrote.
+        /// </summary>
+        static IDebugExpression2 Parse(IDebugExpressionContext2 context, string expression,
+            string typeModule, string format, bool raw, out string error)
+        {
+            error = null;
+            foreach (var form in ModuleQualifier.Forms(expression, typeModule))
+            {
+                var text = Decorate(form, format, raw);
+                if (context.ParseText(text, enum_PARSEFLAGS.PARSE_EXPRESSION, 10,
+                        out var parsed, out error, out _) == VSConstants.S_OK && parsed != null)
+                {
+                    return parsed;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
         /// Format specifiers are appended here rather than being spliced into the
         /// expression by the caller, so a model never has to know the syntax.
         /// </summary>
@@ -104,7 +132,8 @@ namespace VsDbgMcp.Host
             return text;
         }
 
-        public static List<VarNode> Scope(IDebugStackFrame2 frame, string scope, int depth, string filter)
+        public static List<VarNode> Scope(IDebugStackFrame2 frame, string scope, int depth, string filter,
+            bool sharedAddresses)
         {
             var nodes = new List<VarNode>();
             if (frame == null) return nodes;
@@ -116,6 +145,7 @@ namespace VsDbgMcp.Host
                 return nodes;
             }
 
+            var properties = new List<IDebugProperty2>();
             foreach (var info in Drain(enumerator, 500))
             {
                 if (!string.IsNullOrEmpty(filter) &&
@@ -128,9 +158,75 @@ namespace VsDbgMcp.Host
                 var node = ToNode(info);
                 if (depth > 1 && node.HasChildren) node.Children = Children(info.pProperty, depth - 1);
                 nodes.Add(node);
+                properties.Add(info.pProperty);
             }
 
+            if (sharedAddresses) MarkSharedAddresses(nodes, properties);
             return nodes;
+        }
+
+        /// <summary>
+        /// Names in this frame that read the same address, marked on each other. An
+        /// optimized build gives several variables one slot, and a value that is really
+        /// another variable's is otherwise indistinguishable from this one's.
+        ///
+        /// An extra engine call per variable, which is why the caller can turn it off.
+        /// </summary>
+        static void MarkSharedAddresses(List<VarNode> nodes, List<IDebugProperty2> properties)
+        {
+            var byAddress = new Dictionary<string, List<VarNode>>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < nodes.Count; i++)
+            {
+                var address = AddressOf(properties[i]);
+                if (string.IsNullOrEmpty(address)) continue;
+
+                if (!byAddress.TryGetValue(address, out var sharing))
+                {
+                    sharing = new List<VarNode>();
+                    byAddress[address] = sharing;
+                }
+                sharing.Add(nodes[i]);
+            }
+
+            foreach (var sharing in byAddress.Values)
+            {
+                if (sharing.Count < 2) continue;
+
+                foreach (var node in sharing)
+                {
+                    node.SameAddressAs = new List<string>();
+                    foreach (var other in sharing)
+                    {
+                        if (!ReferenceEquals(other, node)) node.SameAddressAs.Add(other.Name);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// The address this value refers to, or null when it refers to none. Scalars held
+        /// in a register have no address, so they simply do not take part.
+        /// </summary>
+        static string AddressOf(IDebugProperty2 property)
+        {
+            if (property == null) return null;
+
+            try
+            {
+                if (property.GetMemoryContext(out var context) != VSConstants.S_OK || context == null) return null;
+
+                var info = new CONTEXT_INFO[1];
+                if (context.GetInfo(enum_CONTEXT_INFO_FIELDS.CIF_ADDRESSABSOLUTE, info) != VSConstants.S_OK)
+                    return null;
+
+                return info[0].bstrAddressAbsolute;
+            }
+            catch (COMException)
+            {
+                // Engines differ on what a property without an address does; none of them
+                // are worth failing the whole frame over.
+                return null;
+            }
         }
 
         /// <summary>
@@ -138,18 +234,15 @@ namespace VsDbgMcp.Host
         /// stateless means there is no handle table to grow, invalidate across stops,
         /// or leak.
         /// </summary>
-        public static List<VarNode> Expand(IDebugStackFrame2 frame, string reference, int depth)
+        public static List<VarNode> Expand(IDebugStackFrame2 frame, string reference, int depth, string typeModule)
         {
             var nodes = new List<VarNode>();
             if (frame == null) return nodes;
 
             if (frame.GetExpressionContext(out var context) != VSConstants.S_OK || context == null) return nodes;
 
-            if (context.ParseText(reference, enum_PARSEFLAGS.PARSE_EXPRESSION, 10, out var expression, out _, out _)
-                    != VSConstants.S_OK || expression == null)
-            {
-                return nodes;
-            }
+            var expression = Parse(context, reference, typeModule, null, false, out _);
+            if (expression == null) return nodes;
 
             if (expression.EvaluateSync(enum_EVALFLAGS.EVAL_NOSIDEEFFECTS | enum_EVALFLAGS.EVAL_NOFUNCEVAL,
                     5000, null, out var property) != VSConstants.S_OK || property == null)
@@ -198,7 +291,12 @@ namespace VsDbgMcp.Host
             Value = info.bstrValue,
             Type = info.bstrType,
             HasChildren = (info.dwAttrib & enum_DBG_ATTRIB_FLAGS.DBG_ATTRIB_OBJ_IS_EXPANDABLE) != 0,
-            Ref = info.bstrFullName
+            Ref = info.bstrFullName,
+
+            // The engine says so when it has no value to give - optimized away, or not in
+            // scope yet. Dropping that leaves the reason sitting in the value field
+            // looking like one.
+            Readable = (info.dwAttrib & enum_DBG_ATTRIB_FLAGS.DBG_ATTRIB_VALUE_ERROR) == 0
         };
 
         static DEBUG_PROPERTY_INFO ReadInfo(IDebugProperty2 property)

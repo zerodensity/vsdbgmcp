@@ -238,10 +238,10 @@ namespace VsDbgMcp.Tests
         {
             var tools = new InspectionTools(_sessions);
 
-            var refused = await tools.Eval("v.size()", null, false, false, false, 0, null, CancellationToken.None);
+            var refused = await tools.Eval("v.size()", null, false, false, false, null, 0, null, CancellationToken.None);
             Assert.Contains("allowSideEffects", refused);
 
-            var allowed = await tools.Eval("v.size()", null, false, true, false, 0, null, CancellationToken.None);
+            var allowed = await tools.Eval("v.size()", null, false, true, false, null, 0, null, CancellationToken.None);
             Assert.Contains("42", allowed);
         }
 
@@ -249,7 +249,7 @@ namespace VsDbgMcp.Tests
         public async Task Evaluating_across_threads_groups_equal_values()
         {
             var text = await new InspectionTools(_sessions)
-                .Eval("m_state", null, false, false, true, 0, null, CancellationToken.None);
+                .Eval("m_state", null, false, false, true, null, 0, null, CancellationToken.None);
 
             // Two threads share a value and one differs; the odd one out should stand out.
             Assert.Contains("10, 11", text);

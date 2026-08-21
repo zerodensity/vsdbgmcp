@@ -481,16 +481,16 @@ namespace VsDbgMcp.Host
             return results;
         });
 
-        public Task<List<VarNode>> VarsAsync(string scope, int depth, string filter, CancellationToken ct = default) => UIAsync(() =>
+        public Task<List<VarNode>> VarsAsync(string scope, int depth, string filter, bool sharedAddresses, CancellationToken ct = default) => UIAsync(() =>
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            return ExpressionEval.Scope(CurrentFrame(0), scope, depth, filter);
+            return ExpressionEval.Scope(CurrentFrame(0), scope, depth, filter, sharedAddresses);
         });
 
-        public Task<List<VarNode>> ExpandAsync(string reference, int depth, CancellationToken ct = default) => UIAsync(() =>
+        public Task<List<VarNode>> ExpandAsync(string reference, int depth, string typeModule, CancellationToken ct = default) => UIAsync(() =>
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            return ExpressionEval.Expand(CurrentFrame(0), reference, depth);
+            return ExpressionEval.Expand(CurrentFrame(0), reference, depth, typeModule);
         });
 
         // ---------------------------------------------------------------- native
