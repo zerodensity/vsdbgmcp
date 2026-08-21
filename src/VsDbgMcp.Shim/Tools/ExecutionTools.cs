@@ -14,13 +14,27 @@ namespace VsDbgMcp.Shim.Tools
         public ExecutionTools(SessionManager sessions) : base(sessions) { }
 
         [McpServerTool(Name = "wait", ReadOnly = true)]
-        [Description("Block until the debuggee stops, then report why: which breakpoint, which exception, a completed step, or the process exiting. This is the correct way to find out that execution stopped - never call status in a loop. Returns the pinned watch values along with the stop.")]
+        [Description("Block until the debuggee stops, then report why: which breakpoint, which exception, a completed step, or the process exiting. This is the correct way to find out that execution stopped - never call status in a loop. Returns the pinned watch values along with the stop. With for='module:NAME' it waits for a module to load instead.")]
         public async Task<string> Wait(
             [Description("How long to wait before giving up, in seconds. On timeout the program is still running and you can wait again.")] int timeoutSeconds = 30,
+            [Description("What to wait for. Omit it for the next execution stop. 'module:NAME' returns when a module whose name contains NAME loads, which is how to arm breakpoints in a plugin the host has not loaded yet without polling modules or bp_list; it returns straight away if that module already loaded. Waiting for a stop never returns on a module load.")] string @for = null,
             [Description("Instance id. Omit for the session default, or pass 'any' to return as soon as any connected instance stops - useful when debugging two processes in two windows.")] string instance = null,
             CancellationToken ct = default)
         {
             var seconds = Math.Max(1, Math.Min(timeoutSeconds, 600));
+
+            string modulePattern = null;
+            if (!string.IsNullOrWhiteSpace(@for))
+            {
+                const string prefix = "module:";
+                var request = @for.Trim();
+                if (!request.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    return "for must be module:NAME. Omit it to wait for the next execution stop.";
+
+                modulePattern = request.Substring(prefix.Length).Trim();
+                if (modulePattern.Length == 0)
+                    return "module: needs a name to match, for example module:MyPlugin.dll.";
+            }
 
             string target;
             if (string.Equals(instance, "any", StringComparison.OrdinalIgnoreCase))
@@ -40,6 +54,13 @@ namespace VsDbgMcp.Shim.Tools
                 {
                     return ex.Message;
                 }
+            }
+
+            if (modulePattern != null)
+            {
+                var module = await Sessions.Events
+                    .WaitForModuleAsync(target, modulePattern, TimeSpan.FromSeconds(seconds), ct).ConfigureAwait(false);
+                return Render.ModuleLoad(module, modulePattern);
             }
 
             var stop = await Sessions.Events.WaitAsync(target, TimeSpan.FromSeconds(seconds), ct).ConfigureAwait(false);

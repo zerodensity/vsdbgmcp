@@ -83,6 +83,17 @@ namespace VsDbgMcp.Tests
             }
         }
 
+        /// <summary>Pushes a module load the way the debug engine would.</summary>
+        public void RaiseModuleLoad(ModuleLoadEvent module)
+        {
+            List<IShimEvents> targets;
+            lock (_gate) targets = new List<IShimEvents>(_clients);
+            foreach (var client in targets)
+            {
+                try { client.OnModuleLoadAsync(module).GetAwaiter().GetResult(); } catch { }
+            }
+        }
+
         void Record(string name)
         {
             lock (_gate) Calls.Add(name);

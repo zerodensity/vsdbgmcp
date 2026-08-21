@@ -67,6 +67,29 @@ namespace VsDbgMcp.Contracts
     }
 
     /// <summary>
+    /// A module the debuggee has just loaded.
+    ///
+    /// Loading one does not stop execution, so this is not a stop and is never handed
+    /// to a plain wait(). It exists because breakpoints in a plugin sit unbound until
+    /// the host loads it, and the only other way to learn that is to poll.
+    /// </summary>
+    public sealed class ModuleLoadEvent
+    {
+        public string InstanceId { get; set; }
+        public string Name { get; set; }
+        public string Path { get; set; }
+
+        /// <summary>
+        /// Whether symbols came with it. An unbound breakpoint in a module that just
+        /// loaded is usually a missing symbol file rather than a wrong line.
+        /// </summary>
+        public bool SymbolsLoaded { get; set; }
+
+        /// <summary>Why symbols are missing, when they are.</summary>
+        public string SymbolStatus { get; set; }
+    }
+
+    /// <summary>
     /// One tool call, as it happened, for the panel inside Visual Studio.
     ///
     /// Reported by the shim rather than recorded in the extension because the text an

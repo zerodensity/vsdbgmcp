@@ -175,6 +175,24 @@ namespace VsDbgMcp.Shim
             return sb.ToString().TrimEnd();
         }
 
+        public static string ModuleLoad(ModuleLoadEvent e, string pattern)
+        {
+            if (e == null)
+                return "timeout: no module matching \"" + pattern + "\" loaded within the timeout. Still running.";
+
+            var sb = new StringBuilder();
+            sb.Append(e.InstanceId).Append("  module loaded: ").Append(e.Name ?? "?");
+            sb.Append(e.SymbolsLoaded ? "  symbols" : "  NO SYMBOLS");
+            if (!e.SymbolsLoaded && !string.IsNullOrEmpty(e.SymbolStatus))
+                sb.Append("  -- ").Append(e.SymbolStatus);
+            sb.AppendLine();
+
+            if (!string.IsNullOrEmpty(e.Path)) sb.Append("  ").AppendLine(e.Path);
+            sb.AppendLine("Breakpoints in it bind as it loads; bp_list says whether they did.");
+
+            return sb.ToString().TrimEnd();
+        }
+
         public static string Threads(IReadOnlyList<ThreadSummary> threads)
         {
             if (threads == null || threads.Count == 0) return "No threads. The debugger is not in break mode.";

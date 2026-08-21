@@ -277,7 +277,7 @@ pending exception, breakpoints hit, pinned watch values. One cheap call.
 `processes()`, `dump_open(path)`
 
 **Execution** (6)
-`wait(timeout, instance?)`, `go()`, `pause()`, `step(kind, count?)`,
+`wait(timeout, for?, instance?)`, `go()`, `pause()`, `step(kind, count?)`,
 `run_to(file, line)`, `set_next(file, line)`
 
 **Breakpoints** (5)
@@ -338,6 +338,13 @@ callback rather than settling for DTE events.
 Every long operation follows the same rule. `build` blocks to completion.
 `launch` blocks until the process is up or has already stopped. Polling is a
 failure of the tool, not a technique for the agent.
+
+The one thing worth waiting for that is not a stop is a module arriving:
+breakpoints in a plugin sit unbound until its host loads it.
+`wait(for: "module:NAME")` returns on that instead, and answers straight away if
+the module is already loaded. Module loads are buffered in a stream of their own,
+so a `wait` for a stop is never woken by one — the whole agent loop reads a
+returning `wait` as "the debuggee stopped".
 
 ### Evaluation must not silently run the program
 

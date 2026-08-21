@@ -90,6 +90,7 @@ namespace VsDbgMcp.Contracts
     public interface IShimEvents
     {
         Task OnStopAsync(StopEvent stop);
+        Task OnModuleLoadAsync(ModuleLoadEvent module);
         Task OnOutputAsync(OutputEvent output);
         Task OnModeChangedAsync(string instanceId, string mode);
         Task OnWorkspaceChangedAsync(string instanceId);

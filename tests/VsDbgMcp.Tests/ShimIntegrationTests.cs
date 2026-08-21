@@ -104,7 +104,7 @@ namespace VsDbgMcp.Tests
             // Connect first, so the event has somewhere to arrive.
             await new LifecycleTools(_sessions).Status(null, CancellationToken.None);
 
-            var waiting = tools.Wait(10, null, CancellationToken.None);
+            var waiting = tools.Wait(10, instance: null, ct: CancellationToken.None);
 
             await Task.Delay(100);
             _host.RaiseStop(new StopEvent
@@ -169,10 +169,47 @@ namespace VsDbgMcp.Tests
         {
             await new LifecycleTools(_sessions).Status(null, CancellationToken.None);
 
-            var text = await new ExecutionTools(_sessions).Wait(1, null, CancellationToken.None);
+            var text = await new ExecutionTools(_sessions).Wait(1, instance: null, ct: CancellationToken.None);
 
             Assert.Contains("timeout", text);
             Assert.Contains("Still running", text);
+        }
+
+        [Fact]
+        public async Task A_module_load_pushed_by_the_host_satisfies_a_module_wait()
+        {
+            var tools = new ExecutionTools(_sessions);
+
+            // Connect first, so the event has somewhere to arrive.
+            await new LifecycleTools(_sessions).Status(null, CancellationToken.None);
+
+            var waiting = tools.Wait(10, "module:SceneTree", instance: null, ct: CancellationToken.None);
+
+            await Task.Delay(100);
+            _host.RaiseModuleLoad(new ModuleLoadEvent
+            {
+                Name = "UnrealEditor-NOSSceneTreeManager.dll",
+                Path = @"D:\repo\Engine\Binaries\Win64\UnrealEditor-NOSSceneTreeManager.dll",
+                SymbolsLoaded = false,
+                SymbolStatus = "Cannot find or open the PDB file."
+            });
+
+            var text = await waiting;
+
+            Assert.Contains("module loaded: UnrealEditor-NOSSceneTreeManager.dll", text);
+            Assert.Contains("NO SYMBOLS", text);
+            Assert.Contains("Cannot find or open the PDB file.", text);
+        }
+
+        [Fact]
+        public async Task A_module_load_leaves_a_wait_for_a_stop_waiting()
+        {
+            await new LifecycleTools(_sessions).Status(null, CancellationToken.None);
+
+            var waiting = new ExecutionTools(_sessions).Wait(1, instance: null, ct: CancellationToken.None);
+            _host.RaiseModuleLoad(new ModuleLoadEvent { Name = "UnrealEditor-NOSSceneTreeManager.dll" });
+
+            Assert.Contains("timeout", await waiting);
         }
 
         [Fact]
@@ -270,7 +307,7 @@ namespace VsDbgMcp.Tests
 
             await new ExecutionTools(_sessions).Go(null, CancellationToken.None);
 
-            var text = await new ExecutionTools(_sessions).Wait(1, null, CancellationToken.None);
+            var text = await new ExecutionTools(_sessions).Wait(1, instance: null, ct: CancellationToken.None);
             Assert.Contains("timeout", text);
         }
     }

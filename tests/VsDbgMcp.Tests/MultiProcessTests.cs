@@ -140,7 +140,7 @@ namespace VsDbgMcp.Tests
         {
             await new LifecycleTools(_sessions).Status(null, CancellationToken.None);
 
-            var waiting = new ExecutionTools(_sessions).Wait(10, null, CancellationToken.None);
+            var waiting = new ExecutionTools(_sessions).Wait(10, instance: null, ct: CancellationToken.None);
 
             await Task.Delay(100);
             _host.RaiseStop(new StopEvent

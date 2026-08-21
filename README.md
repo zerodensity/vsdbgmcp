@@ -138,7 +138,9 @@ connections, and anything that went wrong inside the extension.
 Notes on a few:
 
 - **`wait`** — `instance: "any"` returns as soon as any connected window stops, which is
-  how to debug a client and a server at once.
+  how to debug a client and a server at once. `for: "module:NAME"` waits for a module to
+  load instead of for a stop, which is how to arm breakpoints in a plugin before its host
+  loads it without polling.
 - **`eval`** — refuses to call functions unless `allowSideEffects` is passed, because the
   native evaluator really runs them and an agent inspecting `v.size()` should not change
   the program by accident. Format specifiers go in `format`, not spliced into the

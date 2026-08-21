@@ -103,6 +103,16 @@ namespace VsDbgMcp.Shim.Session
             return Task.CompletedTask;
         }
 
+        public Task OnModuleLoadAsync(ModuleLoadEvent module)
+        {
+            if (module != null)
+            {
+                module.InstanceId = Id;
+                _bus.PublishModuleLoad(module);
+            }
+            return Task.CompletedTask;
+        }
+
         public Task OnOutputAsync(OutputEvent output) => Task.CompletedTask;
 
         public Task OnModeChangedAsync(string instanceId, string mode)

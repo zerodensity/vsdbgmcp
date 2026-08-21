@@ -80,6 +80,7 @@ namespace VsDbgMcp.Host
             _debugHost.AttachServer(_server);
             _eventSink.StopOccurred += OnStopOccurred;
             _eventSink.OutputOccurred += OnOutputOccurred;
+            _eventSink.ModuleLoaded += OnModuleLoaded;
 
             _server.Start();
 
@@ -227,6 +228,11 @@ namespace VsDbgMcp.Host
         {
             _debugHost?.FillWatches(stop);
             _server?.Broadcast(events => events.OnStopAsync(stop));
+        }
+
+        void OnModuleLoaded(Contracts.ModuleLoadEvent module)
+        {
+            _server?.Broadcast(events => events.OnModuleLoadAsync(module));
         }
 
         void OnOutputOccurred(Contracts.OutputEvent output)

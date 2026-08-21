@@ -31,6 +31,7 @@ namespace VsDbgMcp.Host
 
         public event Action<StopEvent> StopOccurred;
         public event Action<OutputEvent> OutputOccurred;
+        public event Action<ModuleLoadEvent> ModuleLoaded;
 
         /// <summary>The thread that last stopped. Expression evaluation runs against it.</summary>
         public IDebugThread2 CurrentThread { get; private set; }
@@ -181,6 +182,14 @@ namespace VsDbgMcp.Host
                     moduleLoad.GetModule(out module, ref message, ref loaded);
                     if (!string.IsNullOrEmpty(message))
                         OutputOccurred?.Invoke(new OutputEvent { Pane = "Debug", Text = message });
+
+                    // The same event announces unloading, with the flag cleared. Someone
+                    // waiting for a plugin to arrive must not be told it left.
+                    if (loaded != 0)
+                    {
+                        var info = ReadModule(module);
+                        if (info != null) ModuleLoaded?.Invoke(info);
+                    }
                 }
                 return;
             }
@@ -262,6 +271,34 @@ namespace VsDbgMcp.Host
         {
             if (thread == null) return 0;
             return thread.GetThreadId(out var id) == VSConstants.S_OK ? unchecked((int)id) : 0;
+        }
+
+        /// <summary>
+        /// What a waiter needs about the module that just arrived: its name, where it
+        /// came from, and whether symbols came with it.
+        /// </summary>
+        static ModuleLoadEvent ReadModule(IDebugModule2 module)
+        {
+            if (module == null) return null;
+
+            const enum_MODULE_INFO_FIELDS wanted =
+                enum_MODULE_INFO_FIELDS.MIF_NAME |
+                enum_MODULE_INFO_FIELDS.MIF_URL |
+                enum_MODULE_INFO_FIELDS.MIF_FLAGS |
+                enum_MODULE_INFO_FIELDS.MIF_DEBUGMESSAGE;
+
+            var info = new MODULE_INFO[1];
+            if (module.GetInfo(wanted, info) != VSConstants.S_OK) return null;
+
+            var symbols = (info[0].m_dwModuleFlags & enum_MODULE_FLAGS.MODULE_FLAG_SYMBOLS) != 0;
+
+            return new ModuleLoadEvent
+            {
+                Name = info[0].m_bstrName,
+                Path = info[0].m_bstrUrl,
+                SymbolsLoaded = symbols,
+                SymbolStatus = symbols ? null : (Tidy(info[0].m_bstrDebugMessage) ?? "no symbols loaded")
+            };
         }
 
         static ExceptionInfo ReadException(IDebugExceptionEvent2 evt, bool stopping)
