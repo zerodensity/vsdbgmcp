@@ -38,17 +38,35 @@ namespace VsDbgMcp.Host
             if (staged != null && staged >= bundled)
                 return "shim: " + Names.ShimExe + " is already " + staged;
 
-            // The executable goes last. Until it does, an agent launching mid-copy gets
-            // either the previous shim or nothing, never a half-written one.
+            // The executable goes last, and only once everything it runs on is in place.
+            // Until it does, an agent launching mid-copy gets either the previous shim or
+            // nothing, never a half-written one.
+            //
+            // It is also the file this staging is judged by: the version beside it is
+            // what the check above reads next time. Writing a new executable next to
+            // files that would not copy leaves a folder that claims to be current and is
+            // not, and no later start will disagree, so the whole thing waits instead.
             var copied = 0;
+            var locked = 0;
             foreach (var file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
             {
                 if (string.Equals(file, sourceExe, StringComparison.OrdinalIgnoreCase)) continue;
-                copied += Copy(file, Path.Combine(Names.ShimDir, Relative(source, file))) ? 1 : 0;
+                if (Copy(file, Path.Combine(Names.ShimDir, Relative(source, file)))) copied++;
+                else locked++;
             }
-            copied += Copy(sourceExe, Names.ShimExe) ? 1 : 0;
 
-            return "shim: staged " + bundled + " to " + Names.ShimExe + " (" + copied + " files)";
+            if (locked > 0)
+            {
+                return "shim: " + locked + " of " + (copied + locked) + " files are still in use, so " +
+                       Names.ShimExe + " was left at " + (staged == null ? "nothing" : staged.ToString()) +
+                       " rather than claiming " + bundled + ". Restart the agent holding them and " +
+                       "reopen this window.";
+            }
+
+            if (!Copy(sourceExe, Names.ShimExe))
+                return "shim: staged " + copied + " files but could not replace " + Names.ShimExe;
+
+            return "shim: staged " + bundled + " to " + Names.ShimExe + " (" + (copied + 1) + " files)";
         }
 
         static string Relative(string root, string file) =>

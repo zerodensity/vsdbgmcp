@@ -27,6 +27,9 @@ return.
   be armed before its host loads it without polling.
 - Allocator fill patterns are named where they appear: `0xdddddddddddddddd` in a value,
   or a run of it in a `memory` dump, reads as freed heap.
+- Staging the shim no longer installs a new executable beside files it could not
+  replace. That left a folder claiming to be current while running old code, and
+  because the executable is what the next startup checks, it never corrected itself.
 
 ## 0.1.2
 
