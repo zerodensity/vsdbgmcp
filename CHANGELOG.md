@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 Eight changes from a long agent-driven debugging session, recorded in
-[docs/iteration_1.md](docs/iteration_1.md).
+[docs/iteration_1.md](docs/iteration_1.md). The first two change what existing calls
+return.
 
 - `vars`, `expand`, `memory`, `registers`, `disasm` and `eval` refuse to read a debuggee
   that is not stopped, instead of answering from the frame where it last stopped. `pause`
