@@ -384,7 +384,7 @@ namespace VsDbgMcp.Shim
             return sb.ToString().TrimEnd();
         }
 
-        static void Walk(StringBuilder sb, IReadOnlyList<VarNode> nodes, int indent)
+        static void Walk(StringBuilder sb, IReadOnlyList<VarNode> nodes, int indent, List<string> noted = null)
         {
             foreach (var n in nodes)
             {
@@ -396,10 +396,20 @@ namespace VsDbgMcp.Shim
                     sb.Append("  -- same address as ").Append(string.Join(", ", n.SameAddressAs));
                 if (n.HasChildren && (n.Children == null || n.Children.Count == 0))
                     sb.Append("  ... expand ").Append(n.Ref);
+
+                // A fill the line above already reported is not reported again on the way
+                // down, because a parent's value holds the very pointers its children are.
+                var fills = FillPatterns.Notes(n.Value);
+                if (noted != null) fills.RemoveAll(noted.Contains);
+                if (fills.Count > 0)
+                {
+                    sb.Append("  -- ").Append(string.Join("; ", fills));
+                    if (noted != null) fills.AddRange(noted);
+                }
                 sb.AppendLine();
 
                 if (n.Children != null && n.Children.Count > 0)
-                    Walk(sb, n.Children, indent + 1);
+                    Walk(sb, n.Children, indent + 1, fills.Count > 0 ? fills : noted);
             }
         }
 
@@ -414,6 +424,8 @@ namespace VsDbgMcp.Shim
                 var text = r.Expression + " = " + r.Value;
                 if (!string.IsNullOrEmpty(r.Type)) text += "  (" + r.Type + ")";
                 if (r.HasChildren) text += "  ... expand " + r.Ref;
+                var fills = FillPatterns.Notes(r.Value);
+                if (fills.Count > 0) text += "  -- " + string.Join("; ", fills);
                 return text;
             }
 
@@ -421,7 +433,10 @@ namespace VsDbgMcp.Shim
             foreach (var group in results.GroupBy(r => r.IsValid ? r.Value : "!" + r.Error).OrderByDescending(g => g.Count()))
             {
                 var ids = group.Select(r => r.ThreadId?.ToString(CultureInfo.InvariantCulture) ?? "?").ToList();
-                sb.Append("  ").Append(group.Key ?? "(null)").Append("   threads: ");
+                sb.Append("  ").Append(group.Key ?? "(null)");
+                var fills = group.First().IsValid ? FillPatterns.Notes(group.Key) : new List<string>();
+                if (fills.Count > 0) sb.Append("  -- ").Append(string.Join("; ", fills));
+                sb.Append("   threads: ");
                 sb.AppendLine(string.Join(", ", ids.Take(16)) + (ids.Count > 16 ? ", ..." : ""));
             }
             return sb.ToString().TrimEnd();
@@ -466,6 +481,7 @@ namespace VsDbgMcp.Shim
             sb.Append(m.Address).Append("  ").Append(m.Length).AppendLine(" bytes");
             sb.AppendLine(m.Hex);
             if (!string.IsNullOrEmpty(m.Ascii)) sb.AppendLine(m.Ascii);
+            foreach (var run in FillPatterns.Runs(m.Hex)) sb.AppendLine(run);
             return sb.ToString().TrimEnd();
         }
 

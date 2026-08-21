@@ -385,6 +385,10 @@ Not a longer tool list — a different one.
   otherwise announces itself only after a thousand records have said so — and
   only where the tracepoint sits, since anywhere else the answer would be about
   the debugger's position rather than the expression.
+- **Allocator fills are named where they appear.** `0xdddddddddddddddd` in a
+  value, or a run of it in a `memory` dump, is called freed heap, and the same
+  for the rest of the table. Only a whole number that is nothing but the fill
+  counts: a wrong "this was freed" sends the reader further off than silence.
 - **Symbol truth.** `modules()` reports PDB load state and search path. Unbound
   breakpoints report *why*: module not loaded, no symbols, source mismatch.
   This is where native debugging actually fails, and reporting "breakpoint set"
