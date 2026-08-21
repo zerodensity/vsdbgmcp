@@ -324,7 +324,24 @@ namespace VsDbgMcp.Tests
         public Task<MemoryResult> MemoryAsync(string addressOrExpression, int size, string format, CancellationToken ct = default) => Task.FromResult(new MemoryResult());
         public Task<List<RegisterInfo>> RegistersAsync(string group, CancellationToken ct = default) => Task.FromResult(new List<RegisterInfo>());
         public Task<List<DisasmLine>> DisasmAsync(string address, int count, CancellationToken ct = default) => Task.FromResult(new List<DisasmLine>());
-        public Task<List<ModuleInfo>> ModulesAsync(string filter, CancellationToken ct = default) => Task.FromResult(new List<ModuleInfo>());
+        public Task<ModulesResult> ModulesAsync(string filter, CancellationToken ct = default)
+        {
+            var loaded = new List<ModuleInfo>
+            {
+                new ModuleInfo { Name = "engine.dll", Path = @"D:\repo\Engine\out\engine.dll", SymbolsLoaded = true, Built = "2026-08-21 13:05", NewerSource = "mesh.cpp" },
+                new ModuleInfo { Name = "vulkan-1.dll", Path = @"C:\Windows\System32\vulkan-1.dll", SymbolsLoaded = true, Built = "2026-06-02 11:20" },
+                new ModuleInfo { Name = "ucrtbase.dll", Path = @"C:\Windows\System32\ucrtbase.dll", SymbolsLoaded = false, SymbolStatus = "no symbols loaded" }
+            };
+
+            return Task.FromResult(new ModulesResult
+            {
+                Modules = string.IsNullOrEmpty(filter)
+                    ? loaded
+                    : loaded.Where(m => m.Name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0).ToList(),
+                LoadedCount = loaded.Count,
+                Filter = filter
+            });
+        }
         public Task<string> TriageAsync(CancellationToken ct = default) => Task.FromResult("nothing to triage");
         public Task<CaptureResult> CaptureAsync(int[] region, CancellationToken ct = default) => Task.FromResult(new CaptureResult());
         public Task<ConsoleResult> ConsoleReadAsync(int tailLines, CancellationToken ct = default) => Task.FromResult(new ConsoleResult { Text = "hello from the debuggee" });

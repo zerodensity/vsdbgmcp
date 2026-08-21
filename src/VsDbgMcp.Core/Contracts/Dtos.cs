@@ -368,6 +368,34 @@ namespace VsDbgMcp.Contracts
         public string SymbolPath { get; set; }
         public bool IsUserCode { get; set; }
         public int Order { get; set; }
+
+        /// <summary>
+        /// When the binary on disk was last written, ready to show, or empty when the
+        /// path could not be read. Source files edited after this no longer line up
+        /// with the code that is running.
+        /// </summary>
+        public string Built { get; set; }
+
+        /// <summary>
+        /// A source file with a breakpoint in it that was written after this binary
+        /// was built. Null when nothing is known to be newer.
+        /// </summary>
+        public string NewerSource { get; set; }
+    }
+
+    /// <summary>
+    /// The modules a 'modules' call is reporting, and how many were loaded before the
+    /// filter picked from them. A filtered list on its own reads as everything there
+    /// is, which is wrong while a process is still loading its plugins.
+    /// </summary>
+    public sealed class ModulesResult
+    {
+        public List<ModuleInfo> Modules { get; set; } = new List<ModuleInfo>();
+
+        /// <summary>How many modules the process had loaded, before the filter.</summary>
+        public int LoadedCount { get; set; }
+
+        public string Filter { get; set; }
     }
 
     public sealed class MemoryResult

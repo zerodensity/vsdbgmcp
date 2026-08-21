@@ -362,5 +362,18 @@ namespace VsDbgMcp.Tests
             var text = await new ExecutionTools(_sessions).Wait(1, instance: null, ct: CancellationToken.None);
             Assert.Contains("timeout", text);
         }
+
+        [Fact]
+        public async Task A_module_list_carries_build_times_and_what_a_filter_left_out()
+        {
+            var tools = new InspectionTools(_sessions);
+
+            var all = await tools.Modules(null, null, CancellationToken.None);
+            Assert.Contains("built 2026-08-21 13:05", all);
+            Assert.Contains("mesh.cpp was edited after this binary was built", all);
+
+            var filtered = await tools.Modules("vulkan", null, CancellationToken.None);
+            Assert.Contains("1 of 3 loaded modules match 'vulkan'", filtered);
+        }
     }
 }

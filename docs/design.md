@@ -389,10 +389,11 @@ Not a longer tool list — a different one.
   value, or a run of it in a `memory` dump, is called freed heap, and the same
   for the rest of the table. Only a whole number that is nothing but the fill
   counts: a wrong "this was freed" sends the reader further off than silence.
-- **Symbol truth.** `modules()` reports PDB load state and search path. Unbound
-  breakpoints report *why*: module not loaded, no symbols, source mismatch.
-  This is where native debugging actually fails, and reporting "breakpoint set"
-  when it will never bind is worse than reporting nothing.
+- **Symbol truth.** `modules()` reports PDB load state, search path, and when each
+  binary was built. Unbound breakpoints report *why*: module not loaded, no
+  symbols, or a source file written after the module was built. This is where
+  native debugging actually fails, and reporting "breakpoint set" when it will
+  never bind is worse than reporting nothing.
 - **Crash dumps.** `dump_open(path)` and every inspection tool works unchanged.
   Cheap to support, and it makes the server useful for triage with no live
   process at all.

@@ -201,15 +201,15 @@ namespace VsDbgMcp.Shim.Tools
             });
 
         [McpServerTool(Name = "modules", ReadOnly = true)]
-        [Description("Loaded modules and their symbol state. Check this first when a breakpoint will not bind or a stack is full of addresses instead of function names: the answer is almost always a module with no symbols loaded.")]
+        [Description("Loaded modules: symbol state, when each binary was last built, and any source file with a breakpoint in it that is newer than the module it belongs to. Check this first when a breakpoint will not bind or a stack is full of addresses instead of function names: the answer is almost always a module with no symbols loaded, or a source edited since the module was built. A filtered answer says how many modules it picked from, because more load while the program runs.")]
         public Task<string> Modules(
             [Description("Only modules whose name contains this text.")] string filter = null,
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
             CancellationToken ct = default)
             => On(instance, ct, async link =>
             {
-                var list = await link.Debug.ModulesAsync(filter, ct).ConfigureAwait(false);
-                return Render.Modules(list);
+                var result = await link.Debug.ModulesAsync(filter, ct).ConfigureAwait(false);
+                return Render.Modules(result);
             }, filter);
     }
 }

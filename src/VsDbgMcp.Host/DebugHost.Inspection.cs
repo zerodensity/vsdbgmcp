@@ -74,7 +74,7 @@ namespace VsDbgMcp.Host
                     if (request.Collect) _sink.Trace.Start(id, request.MaxPerSecond);
                 }
 
-                var info = Describe(created);
+                var info = Describe(created, LoadedModules());
                 info.Kind = request.Kind;
                 if (request.Kind == BreakpointKind.Data)
                 {
@@ -90,8 +90,10 @@ namespace VsDbgMcp.Host
                 if (!string.IsNullOrEmpty(request.LogMessage)) CheckLogExpressions(request, info);
 
                 // Binding is not settled the instant a breakpoint is created, so do not
-                // claim it failed to bind when it simply has not bound yet.
-                if (!info.Bound && CurrentMode != DebugModes.Design)
+                // claim it failed to bind when it simply has not bound yet. A cause that
+                // is already known - no symbols, a source newer than the binary - is
+                // worth saying now rather than one call later.
+                if (!info.Bound && CurrentMode != DebugModes.Design && info.BindState == BindFailure.NoCodeHere)
                     info.BindState = "just created; bp_list confirms whether it bound";
 
                 return info;
@@ -237,7 +239,7 @@ namespace VsDbgMcp.Host
             BindState = reason
         };
 
-        BreakpointInfo Describe(Breakpoint breakpoint)
+        BreakpointInfo Describe(Breakpoint breakpoint, Lazy<List<ModuleInfo>> modules)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -265,7 +267,7 @@ namespace VsDbgMcp.Host
             if (!string.IsNullOrEmpty(message)) info.LogMessage = TraceMessage.Unmark(message, out _);
             info.Collecting = _sink.Trace.IsCollecting(info.Id);
 
-            ReadBindState(breakpoint, info);
+            ReadBindState(breakpoint, info, modules);
             return info;
         }
 
@@ -276,7 +278,7 @@ namespace VsDbgMcp.Host
         /// failure in native debugging, because everything downstream looks like the
         /// code was not reached.
         /// </summary>
-        void ReadBindState(Breakpoint breakpoint, BreakpointInfo info)
+        void ReadBindState(Breakpoint breakpoint, BreakpointInfo info, Lazy<List<ModuleInfo>> modules)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -296,16 +298,43 @@ namespace VsDbgMcp.Host
             }
 
             info.Bound = false;
-            info.BindState =
-                "no code loaded at this location. Check 'modules' for the owning module and " +
-                "whether its symbols loaded, and the Debug pane via 'output' for PDB messages";
+            info.BindState = WhyNotBound(info, modules);
         }
+
+        /// <summary>
+        /// The reason to give for a breakpoint that did not bind. Everything specific
+        /// needs the module the file was built into, so a file that belongs to no loaded
+        /// module gets the general answer.
+        /// </summary>
+        string WhyNotBound(BreakpointInfo info, Lazy<List<ModuleInfo>> modules)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (info.Kind != BreakpointKind.Location || string.IsNullOrEmpty(info.File))
+                return BindFailure.NoCodeHere;
+
+            var owner = OwningModule(info.File, modules.Value);
+            var written = SourceFreshness.LastWritten(info.File);
+            var built = owner == null ? null : SourceFreshness.LastWritten(owner.Path);
+
+            return BindFailure.Explain(info.File, owner,
+                SourceFreshness.SourceIsNewer(written, built), SourceFreshness.Show(written));
+        }
+
+        /// <summary>
+        /// The loaded modules, read at most once however many breakpoints ask for them.
+        /// Walking the engine's module list and reading every binary's timestamp is not
+        /// free, and a list in which everything bound needs none of it.
+        /// </summary>
+        Lazy<List<ModuleInfo>> LoadedModules() =>
+            new Lazy<List<ModuleInfo>>(() => NativeReader.ReadModules(_sink.CurrentProgram));
 
         public Task<List<BreakpointInfo>> BreakpointListAsync(CancellationToken ct = default) => UIAsync(() =>
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             var list = new List<BreakpointInfo>();
-            foreach (Breakpoint breakpoint in _dte.Debugger.Breakpoints) list.Add(Describe(breakpoint));
+            var modules = LoadedModules();
+            foreach (Breakpoint breakpoint in _dte.Debugger.Breakpoints) list.Add(Describe(breakpoint, modules));
             return list;
         });
 
@@ -620,11 +649,92 @@ namespace VsDbgMcp.Host
             return NativeReader.Disassemble(_sink.CurrentProgram, CurrentFrame(0), count);
         });
 
-        public Task<List<ModuleInfo>> ModulesAsync(string filter, CancellationToken ct = default) => UIAsync(() =>
+        public Task<ModulesResult> ModulesAsync(string filter, CancellationToken ct = default) => UIAsync(() =>
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            return NativeReader.ReadModules(_sink.CurrentProgram, filter);
+
+            var loaded = NativeReader.ReadModules(_sink.CurrentProgram);
+            MarkSourcesNewerThanBinaries(loaded);
+
+            return new ModulesResult
+            {
+                Modules = string.IsNullOrEmpty(filter)
+                    ? loaded
+                    : loaded.Where(m => (m.Name ?? "").IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0).ToList(),
+                LoadedCount = loaded.Count,
+                Filter = filter
+            };
         });
+
+        /// <summary>
+        /// Marks the modules whose binary is older than a source file someone has a
+        /// breakpoint in. Reading that here costs a line; finding it out from a
+        /// breakpoint that never binds costs a session.
+        /// </summary>
+        void MarkSourcesNewerThanBinaries(List<ModuleInfo> modules)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (modules.Count == 0) return;
+
+            foreach (var file in BreakpointFiles())
+            {
+                var owner = OwningModule(file, modules);
+                if (owner == null || !string.IsNullOrEmpty(owner.NewerSource)) continue;
+
+                var newer = SourceFreshness.SourceIsNewer(
+                    SourceFreshness.LastWritten(file), SourceFreshness.LastWritten(owner.Path));
+                if (newer == true) owner.NewerSource = System.IO.Path.GetFileName(file);
+            }
+        }
+
+        /// <summary>Each file a breakpoint sits in, once.</summary>
+        List<string> BreakpointFiles() => Read(() =>
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            var files = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (Breakpoint breakpoint in _dte.Debugger.Breakpoints)
+            {
+                var file = breakpoint.File;
+                if (!string.IsNullOrEmpty(file) && seen.Add(file)) files.Add(file);
+            }
+            return files;
+        }, new List<string>(), "the files breakpoints are in");
+
+        /// <summary>
+        /// Which loaded module a source file was built into.
+        ///
+        /// The debug engine will not say which files a module was built from without
+        /// reading its PDB directly, so this asks what Visual Studio already knows: the
+        /// project holding the file, matched by name against the loaded modules. It
+        /// answers only when exactly one module matches, because naming the wrong module
+        /// in a breakpoint's failure message is worse than naming none.
+        /// </summary>
+        ModuleInfo OwningModule(string file, List<ModuleInfo> modules)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (string.IsNullOrEmpty(file) || modules.Count == 0) return null;
+
+            var project = Read(() => _dte.Solution.FindProjectItem(file)?.ContainingProject?.Name,
+                null, "the project holding " + file);
+            if (string.IsNullOrEmpty(project)) return null;
+
+            var named = modules.Where(m => string.Equals(Stem(m), project, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (named.Count == 0)
+                named = modules.Where(m => Stem(m).IndexOf(project, StringComparison.OrdinalIgnoreCase) >= 0).ToList();
+
+            return named.Count == 1 ? named[0] : null;
+        }
+
+        /// <summary>
+        /// A module's name without its extension. What the engine reports is not always
+        /// a path this machine can parse.
+        /// </summary>
+        static string Stem(ModuleInfo module)
+        {
+            try { return System.IO.Path.GetFileNameWithoutExtension(module.Name ?? module.Path ?? ""); }
+            catch (ArgumentException) { return ""; }
+        }
 
         // ---------------------------------------------------------------- triage
 
@@ -676,7 +786,7 @@ namespace VsDbgMcp.Host
                 }
             }
 
-            var modules = NativeReader.ReadModules(_sink.CurrentProgram, null);
+            var modules = NativeReader.ReadModules(_sink.CurrentProgram);
             var stripped = modules.Where(m => !m.SymbolsLoaded).ToList();
             sb.AppendLine();
             sb.AppendLine("== symbols ==");

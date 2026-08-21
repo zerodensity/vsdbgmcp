@@ -192,7 +192,11 @@ namespace VsDbgMcp.Host
             return lines;
         }
 
-        public static List<ModuleInfo> ReadModules(IDebugProgram2 program, string filter)
+        /// <summary>
+        /// Every module the program has loaded. Filtering is left to the caller, which
+        /// needs the full count to say how much a filtered answer left out.
+        /// </summary>
+        public static List<ModuleInfo> ReadModules(IDebugProgram2 program)
         {
             var modules = new List<ModuleInfo>();
             if (program == null) return modules;
@@ -218,19 +222,13 @@ namespace VsDbgMcp.Host
                 var info = new MODULE_INFO[1];
                 if (buffer[0].GetInfo(wanted, info) != VSConstants.S_OK) continue;
 
-                var name = info[0].m_bstrName;
-                if (!string.IsNullOrEmpty(filter) &&
-                    (name == null || name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0))
-                {
-                    continue;
-                }
-
                 var symbolsLoaded = (info[0].m_dwModuleFlags & enum_MODULE_FLAGS.MODULE_FLAG_SYMBOLS) != 0;
 
                 modules.Add(new ModuleInfo
                 {
-                    Name = name,
+                    Name = info[0].m_bstrName,
                     Path = info[0].m_bstrUrl,
+                    Built = SourceFreshness.Show(SourceFreshness.LastWritten(info[0].m_bstrUrl)),
                     Version = info[0].m_bstrVersion,
                     Address = "0x" + info[0].m_addrLoadAddress.ToString("x"),
                     SymbolsLoaded = symbolsLoaded,

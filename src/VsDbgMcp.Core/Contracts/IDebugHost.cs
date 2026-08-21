@@ -58,7 +58,7 @@ namespace VsDbgMcp.Contracts
         Task<MemoryResult> MemoryAsync(string addressOrExpression, int size, string format, CancellationToken ct = default);
         Task<List<RegisterInfo>> RegistersAsync(string group, CancellationToken ct = default);
         Task<List<DisasmLine>> DisasmAsync(string address, int count, CancellationToken ct = default);
-        Task<List<ModuleInfo>> ModulesAsync(string filter, CancellationToken ct = default);
+        Task<ModulesResult> ModulesAsync(string filter, CancellationToken ct = default);
 
         // Evidence
         Task<string> TriageAsync(CancellationToken ct = default);

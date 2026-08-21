@@ -353,20 +353,41 @@ namespace VsDbgMcp.Shim
             }
         }
 
-        public static string Modules(IReadOnlyList<ModuleInfo> modules)
+        public static string Modules(ModulesResult result)
         {
-            if (modules == null || modules.Count == 0) return "No modules loaded.";
+            var loaded = result?.LoadedCount ?? 0;
+            if (loaded == 0) return "No modules loaded.";
+
+            // A filtered list reads as the whole truth, and while a process is still
+            // loading its plugins it is not. Say what it was picked from either way.
+            var modules = result.Modules;
+            if (modules == null || modules.Count == 0)
+            {
+                return "No module matches '" + result.Filter + "'. " + loaded +
+                       " modules are loaded and more can load while the program runs.";
+            }
 
             var sb = new StringBuilder();
-            var missing = modules.Count(m => !m.SymbolsLoaded);
-            sb.Append(modules.Count).Append(" modules, ").Append(missing).AppendLine(" without symbols");
+            if (string.IsNullOrEmpty(result.Filter))
+            {
+                sb.Append(modules.Count).Append(" modules, ")
+                  .Append(modules.Count(m => !m.SymbolsLoaded)).AppendLine(" without symbols");
+            }
+            else
+            {
+                sb.Append(modules.Count).Append(" of ").Append(loaded).Append(" loaded modules match '")
+                  .Append(result.Filter).AppendLine("'; more can load while the program runs");
+            }
 
             foreach (var m in modules)
             {
                 sb.Append("  ").Append((m.Name ?? "?").PadRight(34));
-                sb.Append(m.SymbolsLoaded ? "symbols" : "NO SYMBOLS");
+                sb.Append((m.SymbolsLoaded ? "symbols" : "NO SYMBOLS").PadRight(11));
+                if (!string.IsNullOrEmpty(m.Built)) sb.Append("built ").Append(m.Built);
                 if (!m.SymbolsLoaded && !string.IsNullOrEmpty(m.SymbolStatus))
                     sb.Append("  -- ").Append(m.SymbolStatus);
+                if (!string.IsNullOrEmpty(m.NewerSource))
+                    sb.Append("  -- ").Append(m.NewerSource).Append(" was edited after this binary was built");
                 sb.AppendLine();
             }
             return sb.ToString().TrimEnd();
