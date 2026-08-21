@@ -59,7 +59,7 @@ namespace VsDbgMcp.Shim.Tools
             });
 
         [McpServerTool(Name = "pause")]
-        [Description("Break into a running debuggee (Ctrl+Alt+Break). Use this when the program is running and you want to see where it is, for example when it seems hung.")]
+        [Description("Break into a running debuggee (Ctrl+Alt+Break). Use this when the program is running and you want to see where it is, for example when it seems hung. Blocks until it has actually stopped and reports where, so the frame is safe to inspect afterwards. If it has not stopped within 30 seconds the reply says so and the program is still running; nothing can be read from it until it stops.")]
         public Task<string> Pause(
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
             CancellationToken ct = default)
@@ -67,7 +67,15 @@ namespace VsDbgMcp.Shim.Tools
             {
                 Sessions.Events.MarkSeen();
                 var result = await link.Debug.PauseAsync(ct).ConfigureAwait(false);
-                return Render.Op(result, "Break requested.");
+                if (!result.Ok) return Render.Op(result, null);
+
+                // Returning on the request alone is what let a caller read a running
+                // process and believe the answer, so the stop has to be confirmed here.
+                var stop = await Sessions.Events.WaitAsync(link.Id, TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+                return stop == null
+                    ? "Break requested, but the debuggee has not stopped within 30 seconds. It is still " +
+                      "running, so nothing can be read from it yet. Call wait to keep waiting."
+                    : Render.Stop(stop);
             });
 
         [McpServerTool(Name = "step")]

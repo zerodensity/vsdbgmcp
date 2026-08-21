@@ -131,6 +131,40 @@ namespace VsDbgMcp.Tests
         }
 
         [Fact]
+        public async Task Pause_returns_the_stop_rather_than_the_request()
+        {
+            var tools = new ExecutionTools(_sessions);
+            await new LifecycleTools(_sessions).Status(null, CancellationToken.None);
+
+            var pausing = tools.Pause(null, CancellationToken.None);
+
+            await Task.Delay(100);
+            _host.RaiseStop(new StopEvent
+            {
+                Reason = StopReason.Pause,
+                ThreadId = 15224,
+                Frame = new Frame { Function = "Engine::Tick", File = "engine.cpp", Line = 90 }
+            });
+
+            var text = await pausing;
+
+            Assert.Contains("stopped: pause", text);
+            Assert.Contains("Engine::Tick", text);
+            Assert.DoesNotContain("Break requested", text);
+        }
+
+        [Fact]
+        public async Task A_pause_the_debugger_refuses_comes_back_without_waiting()
+        {
+            await new LifecycleTools(_sessions).Status(null, CancellationToken.None);
+            _host.PauseResult = OpResult.Bad("Nothing is running. Current mode: design.");
+
+            var text = await new ExecutionTools(_sessions).Pause(null, CancellationToken.None);
+
+            Assert.Contains("Nothing is running", text);
+        }
+
+        [Fact]
         public async Task Waiting_with_nothing_happening_reports_a_timeout_not_a_failure()
         {
             await new LifecycleTools(_sessions).Status(null, CancellationToken.None);

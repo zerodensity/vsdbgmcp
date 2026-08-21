@@ -654,7 +654,9 @@ namespace VsDbgMcp.Host
             ThreadHelper.ThrowIfNotOnUIThread();
             if (_watches.Length == 0 || CurrentMode != DebugModes.Break) return null;
 
-            var frame = CurrentFrame(0);
+            // Status must answer even when the frame cannot be read, so the refusal that
+            // stops a tool from returning stale values only costs the watch values here.
+            var frame = Read<IDebugStackFrame2>(() => CurrentFrame(0), null, "the current frame");
             if (frame == null) return null;
 
             var values = new Dictionary<string, string>();
@@ -680,10 +682,51 @@ namespace VsDbgMcp.Host
             });
         }
 
+        /// <summary>
+        /// Refuses to read the debuggee unless it really is stopped.
+        ///
+        /// The thread the sink points at outlives the stop it came from, so reading
+        /// through it while the program runs shows where that thread used to be:
+        /// members come back null, pointers come back ???, and nothing in the reply
+        /// says the values are old. A caller cannot tell that from the truth, which is
+        /// worse than getting no answer at all. Every read goes through here, so a tool
+        /// added later inherits the refusal instead of having to remember it.
+        /// </summary>
+        void RequireStopped()
+        {
+            if (CurrentMode != DebugModes.Break)
+            {
+                throw new InvalidOperationException(
+                    "The debuggee is not stopped, so nothing can be read from it. Current mode: " + CurrentMode +
+                    ". Call wait to block until it stops, or pause to stop it now.");
+            }
+
+            var thread = CurrentThreadObject();
+            if (thread == null)
+            {
+                throw new InvalidOperationException(
+                    "Break mode, but no thread is current in this session. Call threads to see what is " +
+                    "there, then select one.");
+            }
+
+            // Break mode is a state of the whole Visual Studio window rather than of one
+            // process. With a launcher and an editor in one session, either one stopping
+            // puts the window in break mode, so the mode alone does not prove this
+            // thread's process is still there. Whether a process that is still alive is
+            // stopped is not something the engine will say, so that is as far as this
+            // goes; the mode is the floor.
+            if (thread.GetProgram(out var program) == VSConstants.S_OK && !_sink.Knows(program))
+            {
+                throw new InvalidOperationException(
+                    "The process this thread came from has exited. Call threads to see what is left in " +
+                    "the session, then select a thread in it.");
+            }
+        }
+
         IDebugStackFrame2 CurrentFrame(int index)
         {
-            var thread = CurrentThreadObject();
-            return thread == null ? null : FrameReader.FrameAt(thread, index > 0 ? index : _selectedFrame);
+            RequireStopped();
+            return FrameReader.FrameAt(CurrentThreadObject(), index > 0 ? index : _selectedFrame);
         }
 
         IDebugThread2 CurrentThreadObject()

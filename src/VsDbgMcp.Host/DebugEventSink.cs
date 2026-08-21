@@ -50,6 +50,27 @@ namespace VsDbgMcp.Host
             get { lock (_programGate) return new List<IDebugProgram2>(_programs); }
         }
 
+        /// <summary>
+        /// Whether this program is still part of the session.
+        ///
+        /// A thread pointer outlives the process it came from, so one process ending
+        /// while another stays stopped leaves a pointer behind that still answers
+        /// questions. Asking here is how a reader tells that apart from a live frame.
+        /// </summary>
+        public bool Knows(IDebugProgram2 program)
+        {
+            if (program == null) return false;
+            lock (_programGate)
+            {
+                foreach (var known in _programs)
+                {
+                    if (ReferenceEquals(known, program)) return true;
+                    if (SameProgram(known, program)) return true;
+                }
+                return false;
+            }
+        }
+
         void Remember(IDebugProgram2 program)
         {
             if (program == null) return;

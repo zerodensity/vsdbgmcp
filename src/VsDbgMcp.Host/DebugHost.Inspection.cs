@@ -461,18 +461,12 @@ namespace VsDbgMcp.Host
             ThreadHelper.ThrowIfNotOnUIThread();
             var results = new List<EvalResult>();
 
-            if (CurrentMode != DebugModes.Break)
-            {
-                results.Add(new EvalResult
-                {
-                    Expression = options.Expression,
-                    Error = "the debugger is not stopped; expressions can only be evaluated in break mode"
-                });
-                return results;
-            }
-
             if (options.AllThreads)
             {
+                // The per-thread frames below are enumerated fresh, so the state check
+                // that CurrentFrame does has to be asked for here.
+                RequireStopped();
+
                 foreach (var thread in AllThreads())
                 {
                     var frame = FrameReader.FrameAt(thread, 0);

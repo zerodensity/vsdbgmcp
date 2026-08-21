@@ -210,7 +210,9 @@ namespace VsDbgMcp.Tests
             Task.FromResult(new List<ProcessInfo> { new ProcessInfo { Pid = 900, Name = "engine.exe", IsDebugged = true } });
         public Task<OpResult> OpenDumpAsync(string path, CancellationToken ct = default) => Ok();
         public Task<OpResult> GoAsync(CancellationToken ct = default) { Record(nameof(GoAsync)); return Ok(); }
-        public Task<OpResult> PauseAsync(CancellationToken ct = default) => Ok();
+        /// <summary>What pause answers. The real host refuses when nothing is running.</summary>
+        public OpResult PauseResult { get; set; } = OpResult.Good(null);
+        public Task<OpResult> PauseAsync(CancellationToken ct = default) => Task.FromResult(PauseResult);
         public Task<OpResult> StepAsync(string kind, int count, CancellationToken ct = default) { Record(nameof(StepAsync)); return Ok(); }
         public Task<OpResult> RunToAsync(string file, int line, CancellationToken ct = default) => Ok();
         public Task<OpResult> SetNextAsync(string file, int line, CancellationToken ct = default) => Ok();
