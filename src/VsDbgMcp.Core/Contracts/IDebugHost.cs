@@ -42,6 +42,7 @@ namespace VsDbgMcp.Contracts
         Task<List<BreakpointInfo>> BreakpointListAsync(CancellationToken ct = default);
         Task<OpResult> BreakpointRemoveAsync(int id, CancellationToken ct = default);
         Task<OpResult> BreakpointEnableAsync(int id, bool enabled, CancellationToken ct = default);
+        Task<TraceResult> TraceReadAsync(int id, int tail, CancellationToken ct = default);
         Task<OpResult> ExceptionSetAsync(ExceptionSetting setting, CancellationToken ct = default);
         Task<List<ExceptionSetting>> ExceptionListAsync(CancellationToken ct = default);
 

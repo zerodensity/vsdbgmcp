@@ -33,6 +33,13 @@ namespace VsDbgMcp.Host
         public event Action<OutputEvent> OutputOccurred;
         public event Action<ModuleLoadEvent> ModuleLoaded;
 
+        /// <summary>
+        /// Where a collected tracepoint's records go. They arrive on the same stream as
+        /// everything else the program writes, and the marker on them is the only thing
+        /// that tells them apart, so this is the only place they can be separated.
+        /// </summary>
+        public TraceLog Trace { get; } = new TraceLog();
+
         /// <summary>The thread that last stopped. Expression evaluation runs against it.</summary>
         public IDebugThread2 CurrentThread { get; private set; }
 
@@ -167,7 +174,14 @@ namespace VsDbgMcp.Host
                 if (debugEvent is IDebugOutputStringEvent2 output &&
                     output.GetString(out var text) == VSConstants.S_OK && !string.IsNullOrEmpty(text))
                 {
-                    OutputOccurred?.Invoke(new OutputEvent { Pane = "Debug", Text = text });
+                    // A collected tracepoint's record goes to its own buffer instead of
+                    // the shared stream. Everything else carries on, including a record
+                    // whose breakpoint has stopped collecting - it keeps its text and
+                    // loses only the marker.
+                    var body = TraceMessage.Unmark(text, out var breakpointId);
+                    if (Trace.Add(breakpointId, body, DateTime.UtcNow)) return;
+
+                    OutputOccurred?.Invoke(new OutputEvent { Pane = "Debug", Text = body });
                 }
                 return;
             }

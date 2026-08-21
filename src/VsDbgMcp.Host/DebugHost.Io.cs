@@ -97,6 +97,19 @@ namespace VsDbgMcp.Host
 
                 var lines = text.Replace("\r\n", "\n").Split('\n').ToList();
 
+                // A collected tracepoint's records belong to trace_read. Leaving them
+                // here as well is what made the pane unreadable in the first place. A
+                // record from a tracepoint that is no longer collecting stays, with the
+                // marker taken off.
+                var kept = new List<string>();
+                foreach (var line in lines)
+                {
+                    var body = TraceMessage.Unmark(line, out var breakpointId);
+                    if (_sink.Trace.IsCollecting(breakpointId)) continue;
+                    kept.Add(body);
+                }
+                lines = kept;
+
                 if (!string.IsNullOrWhiteSpace(pattern))
                 {
                     Regex regex;

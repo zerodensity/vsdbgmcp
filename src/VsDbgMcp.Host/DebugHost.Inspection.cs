@@ -31,10 +31,8 @@ namespace VsDbgMcp.Host
                             Function: QualifiedFunction(request),
                             Condition: request.Condition ?? "",
                             ConditionType: dbgBreakpointConditionType.dbgBreakpointConditionTypeWhenTrue,
-                            HitCount: request.HitCountTarget,
-                            HitCountType: request.HitCountTarget > 0
-                                ? dbgHitCountType.dbgHitCountTypeEqual
-                                : dbgHitCountType.dbgHitCountTypeNone);
+                            HitCount: HitCount(request),
+                            HitCountType: HitCountType(request));
                         break;
 
                     case BreakpointKind.Data:
@@ -51,10 +49,8 @@ namespace VsDbgMcp.Host
                             Line: request.Line,
                             Condition: request.Condition ?? "",
                             ConditionType: dbgBreakpointConditionType.dbgBreakpointConditionTypeWhenTrue,
-                            HitCount: request.HitCountTarget,
-                            HitCountType: request.HitCountTarget > 0
-                                ? dbgHitCountType.dbgHitCountTypeEqual
-                                : dbgHitCountType.dbgHitCountTypeNone);
+                            HitCount: HitCount(request),
+                            HitCountType: HitCountType(request));
                         break;
                 }
 
@@ -65,8 +61,17 @@ namespace VsDbgMcp.Host
                 {
                     var tracepoint = created as EnvDTE80.Breakpoint2;
                     if (tracepoint == null) return Failed(request, "This breakpoint cannot be made a tracepoint.");
-                    tracepoint.Message = request.LogMessage;
+
+                    // The id has to exist before the message does. Every record this
+                    // tracepoint writes carries it, and that marker is the only thing
+                    // that tells its records from the program's own output.
+                    var id = _breakpoints.IdFor(created);
+                    tracepoint.Message = request.Collect
+                        ? TraceMessage.Mark(id, request.LogMessage)
+                        : request.LogMessage;
                     tracepoint.BreakWhenHit = false;
+
+                    if (request.Collect) _sink.Trace.Start(id, request.MaxPerSecond);
                 }
 
                 var info = Describe(created);
@@ -81,6 +86,8 @@ namespace VsDbgMcp.Host
                     info.Function = request.Function;
                     info.Module = request.Module;
                 }
+
+                if (!string.IsNullOrEmpty(request.LogMessage)) CheckLogExpressions(request, info);
 
                 // Binding is not settled the instant a breakpoint is created, so do not
                 // claim it failed to bind when it simply has not bound yet.
@@ -131,6 +138,93 @@ namespace VsDbgMcp.Host
         static string QualifiedFunction(BreakpointRequest request) =>
             string.IsNullOrEmpty(request.Module) ? request.Function : request.Module + "!" + request.Function;
 
+        // "Every Nth hit" is the debug engine's own filter, so a tracepoint told to log
+        // one hit in fifty builds its message fifty times less often. That is where a
+        // tracepoint on a hot path costs the program.
+
+        static int HitCount(BreakpointRequest request) =>
+            request.EveryNthHit > 1 ? request.EveryNthHit : request.HitCountTarget;
+
+        static dbgHitCountType HitCountType(BreakpointRequest request) =>
+            request.EveryNthHit > 1 ? dbgHitCountType.dbgHitCountTypeMultiple
+                : request.HitCountTarget > 0 ? dbgHitCountType.dbgHitCountTypeEqual
+                : dbgHitCountType.dbgHitCountTypeNone;
+
+        /// <summary>
+        /// Evaluates each {expr} in a tracepoint message once, so a message that would
+        /// log "identifier X is undefined" a thousand times says so before it logs any
+        /// of them.
+        ///
+        /// Only where the tracepoint sits does the answer mean anything: the same
+        /// expression fails in every other frame for reasons that have nothing to do
+        /// with it. Stopped anywhere else, this says it did not check rather than
+        /// reporting something it did not establish.
+        /// </summary>
+        void CheckLogExpressions(BreakpointRequest request, BreakpointInfo info)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            var expressions = TraceMessage.Expressions(request.LogMessage);
+            if (expressions.Count == 0) return;
+
+            info.LogExpressions = expressions.Select(e => new TraceExpression { Expression = e }).ToList();
+
+            if (request.Kind == BreakpointKind.Data)
+            {
+                info.LogCheckDeferred =
+                    "a data breakpoint fires wherever the write happens, which is not known yet";
+                return;
+            }
+
+            if (CurrentMode != DebugModes.Break)
+            {
+                info.LogCheckDeferred = "the debuggee is not stopped, so nothing was evaluated";
+                return;
+            }
+
+            var frame = CurrentFrame(0);
+            var here = FrameReader.Describe(frame, 0);
+            if (here == null)
+            {
+                info.LogCheckDeferred = "there is no current frame to evaluate them against";
+                return;
+            }
+
+            if (!SameLocation(here, request))
+            {
+                info.LogCheckDeferred = "the debuggee is stopped in " + StoppedAt(here) +
+                                        ", not where this tracepoint sits, so its locals were not checked";
+                return;
+            }
+
+            foreach (var expression in info.LogExpressions)
+            {
+                var result = ExpressionEval.Evaluate(frame,
+                    new EvalOptions { Expression = expression.Expression, TimeoutMs = 2000 });
+
+                if (result.IsValid) expression.Value = result.Value;
+                else expression.Error = result.Error ?? "could not be evaluated";
+            }
+        }
+
+        static bool SameLocation(Frame here, BreakpointRequest request)
+        {
+            if (request.Kind == BreakpointKind.Function)
+            {
+                return !string.IsNullOrEmpty(here.Function) && !string.IsNullOrEmpty(request.Function) &&
+                       here.Function.IndexOf(request.Function, StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+
+            return here.Line == request.Line && PathUtil.SamePath(here.File, request.File);
+        }
+
+        static string StoppedAt(Frame frame)
+        {
+            var name = string.IsNullOrEmpty(frame.Function) ? "an unnamed function" : frame.Function;
+            if (string.IsNullOrEmpty(frame.File)) return name;
+            return name + " at " + System.IO.Path.GetFileName(frame.File) + ":" + frame.Line;
+        }
+
         static BreakpointInfo Failed(BreakpointRequest request, string reason) => new BreakpointInfo
         {
             Kind = request.Kind,
@@ -166,6 +260,10 @@ namespace VsDbgMcp.Host
             info.Kind = !string.IsNullOrEmpty(info.Function) && info.Line == 0 ? BreakpointKind.Function
                 : string.IsNullOrEmpty(info.File) && info.Line == 0 ? BreakpointKind.Data
                 : BreakpointKind.Location;
+
+            var message = Read(() => (breakpoint as EnvDTE80.Breakpoint2)?.Message, null, "the tracepoint message");
+            if (!string.IsNullOrEmpty(message)) info.LogMessage = TraceMessage.Unmark(message, out _);
+            info.Collecting = _sink.Trace.IsCollecting(info.Id);
 
             ReadBindState(breakpoint, info);
             return info;
@@ -216,8 +314,17 @@ namespace VsDbgMcp.Host
             ThreadHelper.ThrowIfNotOnUIThread();
             var breakpoint = _breakpoints.Find(id, _dte.Debugger.Breakpoints);
             if (breakpoint == null) return OpResult.Bad("No breakpoint #" + id + ".");
+
+            _sink.Trace.Forget(id);
             return Try(() => breakpoint.Delete(), "Removed #" + id + ".");
         });
+
+        /// <summary>
+        /// The records are already in this process, collected as they arrived. Nothing
+        /// here asks Visual Studio anything, so nothing here can be stale.
+        /// </summary>
+        public Task<TraceResult> TraceReadAsync(int id, int tail, CancellationToken ct = default) =>
+            UIAsync(() => _sink.Trace.Read(id, tail));
 
         public Task<OpResult> BreakpointEnableAsync(int id, bool enabled, CancellationToken ct = default) => UIOpAsync(() =>
         {

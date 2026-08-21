@@ -25,7 +25,10 @@ namespace VsDbgMcp.Shim.Tools
             [Description("Bytes to watch for a data breakpoint: 1, 2, 4, or 8.")] int dataSize = 4,
             [Description("Only break when this expression is true, for example 'i == 42'.")] string condition = null,
             [Description("Only break on this hit number. 0 means break every time.")] int hitCount = 0,
-            [Description("Log this message and keep running instead of breaking. Makes it a tracepoint. Expressions in braces are evaluated, for example 'n={count}'.")] string logMessage = null,
+            [Description("Log this message and keep running instead of breaking. Makes it a tracepoint. Expressions in braces are evaluated, for example 'n={count}'. Each one is evaluated once here and the reply says which will work, so a message that would log 'identifier X is undefined' a thousand times says so now. That check needs the debuggee stopped where the tracepoint sits; otherwise the reply says it did not check.")] string logMessage = null,
+            [Description("Keep this tracepoint's records in a buffer of their own, read back with trace_read. Without it the records go to the Debug pane, mixed in with everything else the program logs, with no timestamps and no hit numbers.")] bool collect = false,
+            [Description("Log only every Nth hit. The debug engine counts, so the message and its expressions are built one time in N - that is what a tracepoint costs. The thread still stops on every hit to be counted, so this cuts the overhead rather than removing it.")] int everyNthHit = 0,
+            [Description("Keep at most N records a second, dropping the rest. This only makes the stream readable: the program has already paid for a record by the time it is dropped, so this does nothing about instrumentation distorting what you are measuring. Use everyNthHit for that.")] int maxPerSecond = 0,
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
             CancellationToken ct = default)
             => On(instance, ct, async link =>
@@ -40,7 +43,10 @@ namespace VsDbgMcp.Shim.Tools
                     Size = dataSize,
                     Condition = condition,
                     HitCountTarget = hitCount,
-                    LogMessage = logMessage
+                    LogMessage = logMessage,
+                    Collect = collect,
+                    EveryNthHit = everyNthHit,
+                    MaxPerSecond = maxPerSecond
                 };
 
                 if (!string.IsNullOrEmpty(dataExpression)) request.Kind = BreakpointKind.Data;
@@ -49,6 +55,12 @@ namespace VsDbgMcp.Shim.Tools
 
                 if (request.Kind == BreakpointKind.Location && (string.IsNullOrEmpty(file) || line <= 0))
                     return "Give a file and line, a function, or a data expression.";
+
+                if (string.IsNullOrEmpty(logMessage) && (collect || maxPerSecond > 0))
+                    return "collect and maxPerSecond describe a tracepoint. Give a logMessage as well.";
+
+                if (everyNthHit > 1 && hitCount > 0)
+                    return "Give hitCount to fire once on hit N, or everyNthHit to fire one hit in N. Not both.";
 
                 var info = await link.Debug.BreakpointSetAsync(request, ct).ConfigureAwait(false);
                 return Render.Breakpoint(info);
@@ -88,6 +100,19 @@ namespace VsDbgMcp.Shim.Tools
             {
                 var result = await link.Debug.BreakpointEnableAsync(id, enabled, ct).ConfigureAwait(false);
                 return Render.Op(result, enabled ? "Enabled." : "Disabled.");
+            }, "#" + id);
+
+        [McpServerTool(Name = "trace_read", ReadOnly = true)]
+        [Description("Read what a collecting tracepoint has logged: only that breakpoint's records, each with the time it arrived and which hit it was. Set one with bp_set(logMessage: ..., collect: true). This is how to answer 'how often does this run, and in what order against that', without inferring it from how records interleave in the Debug pane. The reply says how many records were collected in total, so a tail that misses some is visible rather than silent.")]
+        public Task<string> TraceRead(
+            [Description("Breakpoint id, from bp_set or bp_list.")] int id,
+            [Description("Return only the last N records. 0 returns everything still buffered, up to a few thousand.")] int tail = 50,
+            [Description("Instance id. Omit to use the default for this session.")] string instance = null,
+            CancellationToken ct = default)
+            => On(instance, ct, async link =>
+            {
+                var result = await link.Debug.TraceReadAsync(id, tail, ct).ConfigureAwait(false);
+                return Render.Trace(result);
             }, "#" + id);
 
         [McpServerTool(Name = "exceptions_set")]

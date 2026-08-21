@@ -262,6 +262,7 @@ namespace VsDbgMcp.Shim
                 sb.Append(Where(b));
                 if (!string.IsNullOrEmpty(b.Condition)) sb.Append("  when ").Append(b.Condition);
                 if (b.HitCount > 0) sb.Append("  hits ").Append(b.HitCount);
+                if (!string.IsNullOrEmpty(b.LogMessage)) sb.Append(b.Collecting ? "  trace, collecting" : "  trace");
                 if (!b.Bound && !string.IsNullOrEmpty(b.BindState)) sb.Append("  -- ").Append(b.BindState);
                 sb.AppendLine();
             }
@@ -276,7 +277,67 @@ namespace VsDbgMcp.Shim
             sb.Append(b.Bound ? "  bound" : "  UNBOUND");
             if (!b.Bound && !string.IsNullOrEmpty(b.BindState))
                 sb.Append(" -- ").Append(b.BindState);
-            return sb.ToString();
+            sb.AppendLine();
+            Tracepoint(sb, b);
+            return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>
+        /// What the tracepoint will log, and which of its expressions actually
+        /// evaluated. An expression that will not is worth more here than in the
+        /// thousand records that would otherwise carry the evaluator's complaint.
+        /// </summary>
+        static void Tracepoint(StringBuilder sb, BreakpointInfo b)
+        {
+            if (string.IsNullOrEmpty(b.LogMessage)) return;
+
+            sb.Append("logs: ").Append(b.LogMessage);
+            if (b.Collecting) sb.Append("   [collecting; read it with trace_read]");
+            sb.AppendLine();
+
+            if (b.LogExpressions != null)
+            {
+                foreach (var e in b.LogExpressions)
+                {
+                    sb.Append("  {").Append(e.Expression).Append('}');
+                    if (!string.IsNullOrEmpty(e.Error)) sb.Append("  -- ").Append(e.Error);
+                    else if (e.Value != null) sb.Append(" = ").Append(e.Value);
+                    sb.AppendLine();
+                }
+            }
+
+            if (!string.IsNullOrEmpty(b.LogCheckDeferred))
+                sb.Append("not checked: ").AppendLine(b.LogCheckDeferred);
+        }
+
+        public static string Trace(TraceResult t)
+        {
+            if (t == null) return "No records.";
+            if (t.Records == null || t.Records.Count == 0)
+                return t.Message ?? "Tracepoint #" + t.BreakpointId + " has collected nothing.";
+
+            var sb = new StringBuilder();
+            sb.Append('#').Append(t.BreakpointId).Append("  ").Append(t.Records.Count);
+            sb.Append(" of ").Append(t.Collected).Append(" records");
+            if (t.Dropped > 0) sb.Append(", ").Append(t.Dropped).Append(" dropped by the per-second cap");
+
+            var span = (t.Records[t.Records.Count - 1].Time - t.Records[0].Time).TotalSeconds;
+            if (t.Records.Count > 1 && span > 0)
+            {
+                sb.Append("  ").Append(((t.Records.Count - 1) / span).ToString("0.0", CultureInfo.InvariantCulture));
+                sb.Append("/s over ").Append(span.ToString("0.###", CultureInfo.InvariantCulture)).Append('s');
+            }
+            sb.AppendLine();
+
+            foreach (var r in t.Records)
+            {
+                sb.Append("  ").Append(r.Time.ToLocalTime().ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture));
+                sb.Append("  #").Append(r.Hit.ToString(CultureInfo.InvariantCulture).PadRight(7));
+                sb.AppendLine(r.Text);
+            }
+
+            if (!string.IsNullOrEmpty(t.Message)) sb.AppendLine(t.Message);
+            return sb.ToString().TrimEnd();
         }
 
         static string Where(BreakpointInfo b)

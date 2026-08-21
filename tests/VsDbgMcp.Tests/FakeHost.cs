@@ -156,7 +156,8 @@ namespace VsDbgMcp.Tests
         public Task<BreakpointInfo> BreakpointSetAsync(BreakpointRequest request, CancellationToken ct = default)
         {
             Record(nameof(BreakpointSetAsync));
-            return Task.FromResult(new BreakpointInfo
+
+            var info = new BreakpointInfo
             {
                 Id = 7,
                 Kind = request.Kind,
@@ -167,7 +168,41 @@ namespace VsDbgMcp.Tests
                 Size = request.Size,
                 Bound = false,
                 BindState = "pending: not debugging yet, binding happens at launch"
-            });
+            };
+
+            if (!string.IsNullOrEmpty(request.LogMessage))
+            {
+                info.LogMessage = request.LogMessage;
+                info.Collecting = request.Collect;
+
+                // The real host evaluates these against the frame the tracepoint sits
+                // in. Here one name stands in for an expression that will never work,
+                // which is the case worth rendering.
+                info.LogExpressions = TraceMessage.Expressions(request.LogMessage)
+                    .Select(e => new TraceExpression
+                    {
+                        Expression = e,
+                        Value = e == "ResInfo" ? null : "1024",
+                        Error = e == "ResInfo" ? "identifier \"ResInfo\" is undefined" : null
+                    })
+                    .ToList();
+
+                if (request.Collect) _trace.Start(info.Id, request.MaxPerSecond);
+            }
+
+            return Task.FromResult(info);
+        }
+
+        readonly TraceLog _trace = new TraceLog();
+
+        /// <summary>Feeds a record in the way the event sink would, so trace_read has something to answer with.</summary>
+        public void RaiseTrace(int breakpointId, string text, DateTime whenUtc) =>
+            _trace.Add(breakpointId, text, whenUtc);
+
+        public Task<TraceResult> TraceReadAsync(int id, int tail, CancellationToken ct = default)
+        {
+            Record(nameof(TraceReadAsync));
+            return Task.FromResult(_trace.Read(id, tail));
         }
 
         public Task<List<EvalResult>> EvalAsync(EvalOptions options, CancellationToken ct = default)

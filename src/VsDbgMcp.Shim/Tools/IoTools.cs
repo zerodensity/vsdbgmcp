@@ -41,7 +41,7 @@ namespace VsDbgMcp.Shim.Tools
             }, text ?? keys);
 
         [McpServerTool(Name = "output", ReadOnly = true)]
-        [Description("Read a Visual Studio output pane. The Debug pane is where native diagnostics land: module loads, 'cannot find or open the PDB file', first-chance exception notices, and everything the program writes with OutputDebugString. Check it whenever symbols or breakpoints behave oddly. Filter with a regular expression to keep the reply small.")]
+        [Description("Read a Visual Studio output pane. The Debug pane is where native diagnostics land: module loads, 'cannot find or open the PDB file', first-chance exception notices, and everything the program writes with OutputDebugString. Check it whenever symbols or breakpoints behave oddly. Filter with a regular expression to keep the reply small. Records from a tracepoint set with collect are kept out of here, because they would bury everything else; read those with trace_read.")]
         public Task<string> Output(
             [Description("Pane name: Debug, Build, or any other pane title.")] string pane = "Debug",
             [Description("Regular expression; only matching lines are returned.")] string pattern = null,

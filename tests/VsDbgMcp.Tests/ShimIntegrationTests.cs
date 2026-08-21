@@ -234,6 +234,58 @@ namespace VsDbgMcp.Tests
         }
 
         [Fact]
+        public async Task A_tracepoint_reports_which_of_its_expressions_will_work()
+        {
+            var text = await new BreakpointTools(_sessions).BpSet(
+                file: @"D:\repo\Engine\audio.cpp", line: 214,
+                logMessage: "publish samples={n} dst={ResInfo}", collect: true,
+                ct: CancellationToken.None);
+
+            Assert.Contains("{n} = 1024", text);
+            Assert.Contains("identifier \"ResInfo\" is undefined", text);
+            Assert.Contains("trace_read", text);
+        }
+
+        [Fact]
+        public async Task A_collected_tracepoint_reads_back_as_its_own_stream()
+        {
+            var tools = new BreakpointTools(_sessions);
+            await tools.BpSet(file: @"D:\repo\Engine\audio.cpp", line: 214,
+                logMessage: "publish samples={n}", collect: true, ct: CancellationToken.None);
+
+            var start = DateTime.UtcNow;
+            for (var i = 0; i < 3; i++) _host.RaiseTrace(7, "publish samples=1024", start.AddMilliseconds(i * 20));
+
+            var text = await tools.TraceRead(7, 50, null, CancellationToken.None);
+
+            Assert.Contains("#7  3 of 3 records", text);
+            Assert.Contains("50.0/s", text);
+            Assert.Contains("publish samples=1024", text);
+        }
+
+        [Fact]
+        public async Task Reading_a_tracepoint_that_is_not_collecting_says_which_ones_are()
+        {
+            var tools = new BreakpointTools(_sessions);
+            await tools.BpSet(file: @"D:\repo\Engine\audio.cpp", line: 214,
+                logMessage: "publish samples={n}", collect: true, ct: CancellationToken.None);
+
+            var text = await tools.TraceRead(3, 50, null, CancellationToken.None);
+
+            Assert.Contains("#3 is not collecting", text);
+            Assert.Contains("#7", text);
+        }
+
+        [Fact]
+        public async Task Collecting_without_a_message_is_refused_rather_than_ignored()
+        {
+            var text = await new BreakpointTools(_sessions).BpSet(
+                file: @"D:\repo\Engine\audio.cpp", line: 214, collect: true, ct: CancellationToken.None);
+
+            Assert.Contains("Give a logMessage", text);
+        }
+
+        [Fact]
         public async Task Evaluation_refuses_to_call_functions_unless_asked()
         {
             var tools = new InspectionTools(_sessions);

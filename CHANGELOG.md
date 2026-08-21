@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Tracepoints can keep their records out of the Debug pane: `bp_set(logMessage: ...,
+  collect: true)` buffers them per breakpoint and `trace_read` returns that one
+  breakpoint's records, each stamped with the time it arrived and which hit it was.
+- `bp_set` evaluates each `{expr}` in a tracepoint message once and reports which will
+  work, or says it could not check because the debuggee is not stopped there.
+- `bp_set` takes `everyNthHit`, which is the debug engine's own hit filter, and
+  `maxPerSecond`, which only keeps the collected stream readable.
+
 ## 0.1.2
 
 - The icon keeps the D's square corners, which is how the Zero Density mark draws them,

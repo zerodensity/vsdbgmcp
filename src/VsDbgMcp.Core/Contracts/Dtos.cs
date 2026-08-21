@@ -188,6 +188,67 @@ namespace VsDbgMcp.Contracts
 
         /// <summary>Non-null turns the breakpoint into a tracepoint.</summary>
         public string LogMessage { get; set; }
+
+        /// <summary>
+        /// Keep this tracepoint's records for trace_read instead of leaving them in the
+        /// Debug pane among everything else the program writes.
+        /// </summary>
+        public bool Collect { get; set; }
+
+        /// <summary>
+        /// Log only every Nth hit. The debug engine counts, so the message and its
+        /// expressions are built one time in N, which is where a tracepoint's cost is.
+        /// </summary>
+        public int EveryNthHit { get; set; }
+
+        /// <summary>
+        /// Keep at most this many records a second, dropping the rest at the sink. Makes
+        /// a flood readable; does nothing for what the tracepoint costs the program.
+        /// </summary>
+        public int MaxPerSecond { get; set; }
+    }
+
+    /// <summary>
+    /// One {expr} out of a tracepoint message, evaluated once when the breakpoint was
+    /// set. An expression that will not evaluate otherwise announces itself only after
+    /// it has logged a thousand records saying so.
+    /// </summary>
+    public sealed class TraceExpression
+    {
+        public string Expression { get; set; }
+        public string Value { get; set; }
+
+        /// <summary>The evaluator's own words, so "identifier X is undefined" arrives as itself.</summary>
+        public string Error { get; set; }
+    }
+
+    /// <summary>One record a collected tracepoint produced.</summary>
+    public sealed class TraceRecord
+    {
+        /// <summary>Which record this is for this tracepoint, counting from when collection started.</summary>
+        public long Hit { get; set; }
+
+        /// <summary>UTC, stamped when the record reached the extension.</summary>
+        public DateTime Time { get; set; }
+
+        public string Text { get; set; }
+    }
+
+    public sealed class TraceResult
+    {
+        public int BreakpointId { get; set; }
+
+        /// <summary>Oldest first.</summary>
+        public List<TraceRecord> Records { get; set; }
+
+        /// <summary>Records this tracepoint has produced since collection started.</summary>
+        public long Collected { get; set; }
+
+        /// <summary>Records the per-second cap threw away.</summary>
+        public long Dropped { get; set; }
+
+        /// <summary>Set when there is nothing to return, saying why.</summary>
+        public string Message { get; set; }
     }
 
     public sealed class BreakpointInfo
@@ -212,6 +273,22 @@ namespace VsDbgMcp.Contracts
         /// worse than reporting nothing.
         /// </summary>
         public string BindState { get; set; }
+
+        /// <summary>What a tracepoint logs, without the marker collection puts in front of it.</summary>
+        public string LogMessage { get; set; }
+
+        /// <summary>Records are being kept for this tracepoint, ready for trace_read.</summary>
+        public bool Collecting { get; set; }
+
+        /// <summary>Each {expr} in the message, with what it evaluated to when the breakpoint was set.</summary>
+        public List<TraceExpression> LogExpressions { get; set; }
+
+        /// <summary>
+        /// Set when those expressions carry no result, saying why. Checking them needs
+        /// the debuggee stopped where the tracepoint sits; evaluated anywhere else, a
+        /// failure says more about where the debugger is than about the expression.
+        /// </summary>
+        public string LogCheckDeferred { get; set; }
     }
 
     public sealed class EvalOptions

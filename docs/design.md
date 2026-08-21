@@ -280,11 +280,11 @@ pending exception, breakpoints hit, pinned watch values. One cheap call.
 `wait(timeout, for?, instance?)`, `go()`, `pause()`, `step(kind, count?)`,
 `run_to(file, line)`, `set_next(file, line)`
 
-**Breakpoints** (5)
+**Breakpoints** (6)
 `bp_set(...)` — file:line, or function with optional module, or data address
 and size; plus condition, hit count, and log message for tracepoints.
 `bp_list()`, `bp_remove(id)`, `bp_enable(id, on)`,
-`exceptions_set(category, code, breakOn)`
+`trace_read(id, tail?)`, `exceptions_set(category, code, breakOn)`
 
 **Inspection** (12)
 `threads(depth?)`, `stack(thread?, count?)`, `select(thread?, frame?)`,
@@ -304,7 +304,7 @@ and size; plus condition, hit count, and log message for tracepoints.
 clean. `build_cancel()`, `build_output(pattern?)`, `config(get|set)`,
 `startup_project(get|set)`
 
-**43 tools.** The ceiling is 50 — past that, an addition has to displace
+**44 tools.** The ceiling is 50 — past that, an addition has to displace
 something. The count is a constraint, not an outcome.
 
 ## 5. Debug semantics
@@ -375,6 +375,16 @@ Not a longer tool list — a different one.
   the expression string.
 - **Data breakpoints.** `bp_set` with an address or expression and a size. C++
   only, and the best single tool for memory corruption.
+- **Tracepoints with a sink of their own.** `bp_set(logMessage: ..., collect:
+  true)` marks its records with the breakpoint's id, the event sink pulls them
+  back out of the debug output stream, and `trace_read` returns that one
+  breakpoint's records with a timestamp and a hit number on each. In the shared
+  Debug pane a tracepoint on a hot path buries the program's own logging and
+  leaves cadence to be guessed at from how the two interleave. Each `{expr}` is
+  also evaluated once at bind time, because an expression that will not evaluate
+  otherwise announces itself only after a thousand records have said so — and
+  only where the tracepoint sits, since anywhere else the answer would be about
+  the debugger's position rather than the expression.
 - **Symbol truth.** `modules()` reports PDB load state and search path. Unbound
   breakpoints report *why*: module not loaded, no symbols, source mismatch.
   This is where native debugging actually fails, and reporting "breakpoint set"

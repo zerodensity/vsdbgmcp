@@ -122,14 +122,14 @@ connections, and anything that went wrong inside the extension.
 
 ## Tools
 
-43 of them.
+44 of them.
 
 | | |
 |---|---|
 | **session** | `instances` `use` |
 | **lifecycle** | `status` `launch` `attach` `detach` `stop` `restart` `processes` `dump_open` |
 | **execution** | `wait` `go` `pause` `step` `run_to` `set_next` |
-| **breakpoints** | `bp_set` `bp_list` `bp_remove` `bp_enable` `exceptions_set` |
+| **breakpoints** | `bp_set` `bp_list` `bp_remove` `bp_enable` `trace_read` `exceptions_set` |
 | **inspection** | `threads` `stack` `select` `freeze` `eval` `vars` `expand` `watch_set` `memory` `registers` `disasm` `modules` |
 | **evidence** | `triage` `capture` |
 | **debuggee I/O** | `console_read` `console_send` `output` |
@@ -152,7 +152,13 @@ Notes on a few:
   Without that, a slot the optimizer handed to two locals reads as an ordinary value of
   both.
 - **`bp_set`** — with `dataExpression`, a data breakpoint: break when the memory at an
-  address changes.
+  address changes. With `logMessage`, a tracepoint: each `{expr}` in the message is
+  evaluated once when the breakpoint is set, so an expression that will never work says
+  so before it has logged a thousand records saying it.
+- **`trace_read`** — a tracepoint set with `collect: true` keeps its records in a buffer
+  of its own, each stamped with the time it arrived and which hit it was. That is what
+  makes a 50 Hz callback readable, and what answers "how often does this run" without
+  inferring it from how records interleave in the Debug pane.
 - **`watch_set`** — pins expressions whose values then come back with every `wait` and
   every `status`, instead of several `eval` calls at each stop.
 - **`triage`** — after a crash: exception record, faulting stack, registers, memory at the
