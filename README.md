@@ -159,6 +159,12 @@ Notes on a few:
   of its own, each stamped with the time it arrived and which hit it was. That is what
   makes a 50 Hz callback readable, and what answers "how often does this run" without
   inferring it from how records interleave in the Debug pane.
+- **`modules`** — also reports when each binary was built, and marks a module whose
+  source has been edited since. That is the breakpoint that binds nowhere for a reason
+  neither the module list nor the PDB messages will show you.
+- **`memory`, `eval`, `vars`** — a value that is nothing but an allocator's fill pattern
+  is named where it appears, so `0xdddddddddddddddd` reads as freed heap without anyone
+  having to remember the table.
 - **`watch_set`** — pins expressions whose values then come back with every `wait` and
   every `status`, instead of several `eval` calls at each stop.
 - **`triage`** — after a crash: exception record, faulting stack, registers, memory at the
@@ -189,8 +195,11 @@ Studio, since the VSIX packaging tasks are .NET Framework assemblies.
 
 ## Status
 
-72 automated tests cover routing, discovery, the event bus, and the whole shim path —
-discovery file, named pipe, JSON-RPC, rendering — against a stand-in for the extension.
+211 automated tests cover routing, discovery, the event bus, and the whole shim path —
+discovery file, named pipe, JSON-RPC, rendering — against a stand-in for the extension,
+plus the pure decisions: which expression forms to try against a module, which values are
+allocator fill, whether a source file outran its binary, and what a tracepoint buffer
+keeps.
 
 The following were driven by hand against Visual Studio 2026 debugging a native C++
 program (`tests/fixtures/cpp`):
@@ -212,6 +221,11 @@ program (`tests/fixtures/cpp`):
   named, `stack` on a thread in the process that did not stop, `select` by pid switching
   evaluation into it, and an unknown id answering with every thread that does exist and
   which process it is in
+
+The eight changes in [docs/iteration_1.md](docs/iteration_1.md) have not been driven by
+hand yet. Their pure parts are covered by tests; the parts that need a live debug engine —
+a tracepoint record actually arriving, a breakpoint failing to bind on a stale file, two
+locals sharing a slot — have not been seen happen.
 
 Known gaps:
 
