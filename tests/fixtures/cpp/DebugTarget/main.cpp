@@ -66,7 +66,10 @@ void Crash() {
 // Built optimized in Release, where the compiler has every reason to keep some of
 // these nowhere and to hand one slot to more than one of them. That is the frame
 // where locals stop being trustworthy without something saying which are which.
-int Fold(int seed) {
+//
+// Kept out of line, and fed something only known at run time, or an optimizing
+// build would work the whole thing out in advance and leave no frame to stand in.
+__declspec(noinline) int Fold(int seed) {
     int scaled = seed * 3;
     int shifted = scaled << 2;
     int masked = shifted & 0xFF;
@@ -136,7 +139,7 @@ int main(int argc, char** argv) {
     std::printf("guard is now 0x%08X\n", buffer.guard);
     std::fflush(stdout);
 
-    const int folded = Fold(total);
+    const int folded = Fold(total + argc);
     std::printf("folded %d\n", folded);
     std::fflush(stdout);
 
