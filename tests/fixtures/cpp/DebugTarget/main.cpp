@@ -5,6 +5,7 @@
 //   DebugTarget            run through every stage, then exit
 //   DebugTarget crash      end with an access violation
 //   DebugTarget wait       block on input, for exercising console_send
+//   DebugTarget plugin     load DebugPlugin.dll a few seconds in, then use it
 
 #include <atomic>
 #include <chrono>
@@ -62,6 +63,51 @@ void Crash() {
     *nowhere = 42;
 }
 
+// Built optimized in Release, where the compiler has every reason to keep some of
+// these nowhere and to hand one slot to more than one of them. That is the frame
+// where locals stop being trustworthy without something saying which are which.
+int Fold(int seed) {
+    int scaled = seed * 3;
+    int shifted = scaled << 2;
+    int masked = shifted & 0xFF;
+    int folded = masked ^ scaled;
+    int carried = folded + shifted;
+    return carried - masked;
+}
+
+// Loads the plugin late on purpose, so a breakpoint armed in it beforehand is
+// genuinely unbound until the load happens.
+void UsePlugin() {
+    std::printf("loading the plugin in 3 seconds\n");
+    std::fflush(stdout);
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+
+    HMODULE plugin = LoadLibraryA("DebugPlugin.dll");
+    if (!plugin) {
+        std::printf("could not load DebugPlugin.dll (%lu)\n", GetLastError());
+        std::fflush(stdout);
+        return;
+    }
+
+    auto create = reinterpret_cast<void* (*)(const char*)>(GetProcAddress(plugin, "CreateState"));
+    auto touch = reinterpret_cast<int (*)(void*)>(GetProcAddress(plugin, "Touch"));
+    auto dangling = reinterpret_cast<void* (*)()>(GetProcAddress(plugin, "MakeDangling"));
+    if (!create || !touch || !dangling) {
+        std::printf("the plugin is missing an export\n");
+        std::fflush(stdout);
+        return;
+    }
+
+    // Deliberately void*: this frame has no idea what shape it is, which is the whole
+    // point of naming the module the type comes from.
+    void* state = create("plugin");
+    void* freed = dangling();
+
+    const int count = touch(state);
+    std::printf("plugin state at %p, refCount %d, freed block at %p\n", state, count, freed);
+    std::fflush(stdout);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -89,6 +135,12 @@ int main(int argc, char** argv) {
     Corrupt(buffer);
     std::printf("guard is now 0x%08X\n", buffer.guard);
     std::fflush(stdout);
+
+    const int folded = Fold(total);
+    std::printf("folded %d\n", folded);
+    std::fflush(stdout);
+
+    if (mode == "plugin") UsePlugin();
 
     if (mode == "wait") {
         std::printf("type something and press enter: ");

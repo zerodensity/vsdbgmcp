@@ -4,6 +4,8 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DebugTarget", "DebugTarget\DebugTarget.vcxproj", "{6C1B9E42-2A77-4B3E-9C15-0D77C7F2A311}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DebugPlugin", "DebugPlugin\DebugPlugin.vcxproj", "{8098666F-1F34-4EAB-A491-B6E951E78919}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -14,6 +16,10 @@ Global
 		{6C1B9E42-2A77-4B3E-9C15-0D77C7F2A311}.Debug|x64.Build.0 = Debug|x64
 		{6C1B9E42-2A77-4B3E-9C15-0D77C7F2A311}.Release|x64.ActiveCfg = Release|x64
 		{6C1B9E42-2A77-4B3E-9C15-0D77C7F2A311}.Release|x64.Build.0 = Release|x64
+		{8098666F-1F34-4EAB-A491-B6E951E78919}.Debug|x64.ActiveCfg = Debug|x64
+		{8098666F-1F34-4EAB-A491-B6E951E78919}.Debug|x64.Build.0 = Debug|x64
+		{8098666F-1F34-4EAB-A491-B6E951E78919}.Release|x64.ActiveCfg = Release|x64
+		{8098666F-1F34-4EAB-A491-B6E951E78919}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
