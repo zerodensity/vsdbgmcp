@@ -230,23 +230,76 @@ to the gap.
 
 ## Verification
 
-275 automated tests, up from 215. The shim, the extension and the VSIX all build, and the
+284 automated tests, up from 215. The shim, the extension and the VSIX all build, and the
 package still carries the shim, both images and the licence.
 
-**This round has not been driven by hand against a live Visual Studio.** Iteration 1
-records a feature that passed every unit test and did not work at all, because the one
-assumption that needed a real debugger was the one that was wrong. The same exposure
-exists here, and these are the specific claims that unit tests cannot reach:
+All of it was then driven against a live Visual Studio 2026 debugging
+`tests/fixtures/cpp`, through a shim speaking MCP over stdio to an extension installed in
+the experimental hive. Four things that every unit test passed turned out to be wrong,
+which is the same lesson iteration 1 recorded and did not stop this round from needing it
+again.
 
-- That `IDebugModule3.LoadSymbols` and `GetSymbolInfo` behave as the interface documents,
-  and that the verbose search text is the same text the Modules window shows.
-- That `MODULE_INFO.m_TimeStamp` is the PE `TimeDateStamp`. The output is worded to what
-  the engine hands over rather than to a header field nobody here has watched it read.
-- That `IDebugCoreServer3.QueryIsLocal` returns `S_FALSE` for a remote session. Only
-  `S_FALSE` claims remote, so a wrong reading of this produces silence rather than a false
-  claim.
-- That hits really do sit on a bound breakpoint's children.
-- That the pause pseudo-frame is distinguished by having no expression context, rather
-  than by something else that also happens to be true of it.
-- That a natvis container's element rows carry a usable full name for every container
-  worth indexing.
+**A tracepoint reported `hits 0` while its records were piling up in the Debug pane.** The
+automation model counts only hits that broke, so a tracepoint counts none however often it
+fires. Printing zero there was not a missing answer, it was a wrong one, and it was
+introduced by the change that started printing zero for a bound breakpoint. A tracepoint
+now carries no count. The diagnostic run that settled it also confirmed the fix's premise:
+the pending breakpoint reads `parent=0` throughout while the bound child moves, so the
+count really does live on the children.
+
+**Load Symbols was reported as declining to search when it had searched.** `LoadSymbols`
+does not return `S_OK` for a search that ran and found nothing, and the code read anything
+but `S_OK` as a refusal. The case that exposed it is the one the issue was filed about:
+`KernelBase.dll` went from "Symbol loading disabled by Include/Exclude setting" to "Cannot
+find or open the PDB file" across the call — the load had overridden the setting and gone
+looking, exactly as intended, and the reply said it had not. Only a failure code counts as
+a refusal now.
+
+**The engine repeats its symbol search text.** It keeps every search it has made for a
+module and hands back all of them at once, so a module retried four times answered with
+the same two paths four times over. Identical searches collapse into one and the count is
+said instead.
+
+**A read after a pause landed on `ntdll`, not on the program.** The pause row has no
+expression context, but the system frames beneath it do, so the nearest readable frame was
+`ntdll.dll!00007ff...` — where `eval("1+1")` answers and `vars` comes back empty, which is
+the exact answer the item set out to stop giving. Frames with source of their own are now
+preferred. The same pause afterwards reads `ms = 50` in
+`DebugTarget.exe!_Thrd_sleep_for`.
+
+A fifth was cosmetic and fixed: the engine's refusal text does not end in a period, so the
+advice joined onto it with a space and the whole thing read as one sentence the evaluator
+had written.
+
+### What the live run confirmed
+
+- `MODULE_INFO.m_TimeStamp` really is a build time: `DebugTarget.exe` reports `image
+  2026-08-21 15:00`, matching when it was linked. The system DLLs report none and fall
+  back to the file time, which is what the reproducible-build note in item 2 predicted.
+- `IDebugModule3.LoadSymbols` and `GetSymbolInfo` behave as documented, and the verbose
+  text is the Modules window's own.
+- Hits really do sit on a bound breakpoint's children.
+- The pause pseudo-frame is distinguished by having no expression context.
+- A vector's element rows carry a usable full name: `expand(index: 2)` returns
+  `ref: mesh.vertices[2]`, and `expand(key: "2.50000000")` returns `ref: mesh.vertices[1]`.
+- The reference-out-parameter matcher fires on the real wording, which turned out to be
+  `a reference of type "X &" (not const-qualified) cannot be initialized with a value of
+  type "Y"`.
+- `wait` after `stop` then `attach` returns a timeout rather than the previous process
+  exiting. That is item 8, reproduced and gone.
+
+### Two things still open
+
+**Nested evaluation was not reproduced.** `Fold(Fold(1))` evaluates to 153 on Visual Studio
+2026; this evaluator does not refuse nested calls outright. The wording the issue reported
+must come from a narrower case than the one that was tried, so the advice for it is written
+and untested. It costs nothing when it does not match, because an unrecognised message is
+passed through untouched.
+
+**`pause` returns before the shell is in break mode.** The stop event arrives from the
+debug engine first and `IVsDebuggerEvents.OnModeChange` follows a moment later, so a read
+issued straight after `pause` returns is refused with "the debuggee is not stopped. Current
+mode: run". It settles within a few seconds. This is not new and is not from this round,
+but it defeats what `pause` says it does — "blocks until it has actually stopped, so the
+frame is safe to inspect afterwards" — which was itself iteration 1's item 1. It wants
+`pause` to wait for the mode as well as the stop.
