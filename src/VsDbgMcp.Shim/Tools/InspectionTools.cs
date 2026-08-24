@@ -71,7 +71,7 @@ namespace VsDbgMcp.Shim.Tools
             }, thread.ToString());
 
         [McpServerTool(Name = "eval", ReadOnly = true)]
-        [Description("Evaluate an expression in the current frame, through the same visualizers the debugger uses, so a std::vector prints as its elements. Function calls are refused by default: the native evaluator would really run them and change the program. Set allowSideEffects only when you intend that.")]
+        [Description("Evaluate an expression in the current frame, through the same visualizers the debugger uses, so a std::vector prints as its elements. Function calls are refused by default: the native evaluator would really run them and change the program. Set allowSideEffects only when you intend that. The evaluator will not run one call inside another and has nothing to bind a reference out-parameter to; where it refuses for either reason the reply says whose limit it is and what to do instead.")]
         public Task<string> Eval(
             [Description("Expression in the language of the current frame.")] string expression,
             [Description("Format specifier without the comma: x for hex, d for decimal, su for a unicode string, or '[n]' to show n elements.")] string format = null,

@@ -110,6 +110,7 @@
     <Compile Include="..\VsDbgMcp.Core\Names.cs" Link="Core\Names.cs" />
     <Compile Include="..\VsDbgMcp.Core\BindFailure.cs" Link="Core\BindFailure.cs" />
     <Compile Include="..\VsDbgMcp.Core\ContainerElement.cs" Link="Core\ContainerElement.cs" />
+    <Compile Include="..\VsDbgMcp.Core\EngineRefusal.cs" Link="Core\EngineRefusal.cs" />
     <Compile Include="..\VsDbgMcp.Core\FrameChoice.cs" Link="Core\FrameChoice.cs" />
     <Compile Include="..\VsDbgMcp.Core\InstanceFile.cs" Link="Core\InstanceFile.cs" />
     <Compile Include="..\VsDbgMcp.Core\InstanceRecord.cs" Link="Core\InstanceRecord.cs" />

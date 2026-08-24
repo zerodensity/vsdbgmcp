@@ -34,6 +34,11 @@
   expression never has to be carried from one call to the next. The key is a walk down
   the elements comparing what each renders as, not a lookup, and it sees only the first
   200 an expansion reads; a refusal says which of those it compared.
+- Two refusals that come from the native expression evaluator rather than from this
+  server now say so, and say what to do instead: evaluate a nested call's inner half on
+  its own, and for a reference out-parameter allocate in the debuggee and pass a
+  dereferenced pointer, which is the caller's to free. Nothing else the evaluator says
+  is touched.
 
 ## 0.2.0
 

@@ -635,7 +635,7 @@ namespace VsDbgMcp.Shim
                 if (r.Frame != null) head.AppendLine(Frames(new[] { r.Frame }, r.Frame.Index));
 
                 if (!r.IsValid)
-                    return head + r.Expression + " -- " + (r.Error ?? "could not be evaluated");
+                    return head + r.Expression + " -- " + EngineRefusal.Explain(r.Error ?? "could not be evaluated");
 
                 var text = r.Expression + " = " + r.Value;
                 if (!string.IsNullOrEmpty(r.Type)) text += "  (" + r.Type + ")";
@@ -655,6 +655,14 @@ namespace VsDbgMcp.Shim
                 sb.Append("   threads: ");
                 sb.AppendLine(string.Join(", ", ids.Take(16)) + (ids.Count > 16 ? ", ..." : ""));
             }
+
+            // The engine's own words stay in the group they are grouping by; what to do
+            // about them is said once rather than beside every thread that hit it.
+            var advice = results.Where(r => !r.IsValid)
+                .Select(r => EngineRefusal.Advice(r.Error))
+                .FirstOrDefault(a => a != null);
+            if (advice != null) sb.AppendLine(advice);
+
             return sb.ToString().TrimEnd();
         }
 
