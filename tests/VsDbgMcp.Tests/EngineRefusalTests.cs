@@ -91,5 +91,21 @@ namespace VsDbgMcp.Tests
             for (var i = text.IndexOf(part); i >= 0; i = text.IndexOf(part, i + part.Length)) count++;
             return count;
         }
+
+        /// <summary>
+        /// The engine's text does not end in a period, so joined with a space the advice
+        /// ran on into it and the whole thing read as the evaluator's own words.
+        /// </summary>
+        [Fact]
+        public void The_advice_does_not_run_on_from_the_engines_own_words()
+        {
+            var engine = "a reference of type \"Mesh &\" (not const-qualified) cannot be " +
+                         "initialized with a value of type \"int\"";
+
+            var text = EngineRefusal.Explain(engine);
+
+            Assert.Equal(engine, text.Split('\n')[0]);
+            Assert.Contains("\n", text);
+        }
     }
 }

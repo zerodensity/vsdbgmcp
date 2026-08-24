@@ -20,7 +20,12 @@ namespace VsDbgMcp
         public static string Explain(string message)
         {
             var advice = Advice(message);
-            return advice == null ? message : message + " " + advice;
+            if (advice == null) return message;
+
+            // On its own line: the engine's text does not end in a period, so joined
+            // with a space the two run together into one sentence that reads as the
+            // engine's own words.
+            return message.TrimEnd() + "\n" + advice;
         }
 
         /// <summary>What a caller can do about this refusal, or null when nothing here recognises it.</summary>
