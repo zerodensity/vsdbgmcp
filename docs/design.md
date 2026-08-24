@@ -305,7 +305,7 @@ and size; plus condition, hit count, and log message for tracepoints.
 clean. `build_cancel()`, `build_output(pattern?)`, `config(get|set)`,
 `startup_project(get|set)`
 
-**44 tools.** The ceiling is 50 — past that, an addition has to displace
+**45 tools.** The ceiling is 50 — past that, an addition has to displace
 something. The count is a constraint, not an outcome.
 
 ## 5. Debug semantics
