@@ -28,7 +28,7 @@ namespace VsDbgMcp.Host
 
             if (frame.GetExpressionContext(out var context) != VSConstants.S_OK || context == null)
             {
-                result.Error = "this frame has no expression context";
+                result.Error = FrameChoice.NoContext;
                 return result;
             }
 

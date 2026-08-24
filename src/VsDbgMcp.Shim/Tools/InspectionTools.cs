@@ -48,7 +48,7 @@ namespace VsDbgMcp.Shim.Tools
         public Task<string> Select(
             [Description("Thread id to switch to. Thread ids are unique across processes, so this alone is enough.")] int? thread = null,
             [Description("Process to switch to, by pid or part of its name, for example 'nosLauncher'. Picks that process's current thread. Ignored when a thread is given.")] string process = null,
-            [Description("Frame index within that thread, 0 being the innermost.")] int? frame = null,
+            [Description("Frame index within that thread, 0 being the innermost. Naming one pins it: later reads use it and report a failure there rather than moving to a frame you did not ask for.")] int? frame = null,
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
             CancellationToken ct = default)
             => On(instance, ct, async link =>
@@ -79,7 +79,7 @@ namespace VsDbgMcp.Shim.Tools
             [Description("Allow the expression to call functions, which executes code in the debuggee.")] bool allowSideEffects = false,
             [Description("Evaluate on every thread and group the results. Use this to compare one value across a worker pool.")] bool allThreads = false,
             [Description("Look type names up in this module, by file name, for example 'MyPlugin.dll'. Pass it when a cast fails with 'identifier X is undefined' because the type belongs to a module other than the one the frame is in. Write the expression the way you would normally; nothing else about it changes.")] string typeModule = null,
-            [Description("Frame index to evaluate in. Defaults to the selected frame.")] int frame = 0,
+            [Description("Frame index to evaluate in. Omit to use the selected frame, which steps past the pseudo-frame a pause leaves on top of the stack; naming a frame pins this call to it and reports a failure there rather than reading somewhere else.")] int? frame = null,
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
             CancellationToken ct = default)
             => On(instance, ct, async link =>
@@ -98,7 +98,7 @@ namespace VsDbgMcp.Shim.Tools
             }, expression);
 
         [McpServerTool(Name = "vars", ReadOnly = true)]
-        [Description("Variables in the current frame. Returns one level by default; large containers report that they have children rather than printing thousands of elements. Use expand on the reference to go deeper. In an optimized build a variable the compiler kept nothing for is marked as not readable, and variables reading the same address are marked with each other's names, so a slot the compiler handed to two locals does not read as an ordinary value of both.")]
+        [Description("Variables in the current frame. Returns one level by default; large containers report that they have children rather than printing thousands of elements. Use expand on the reference to go deeper. In an optimized build a variable the compiler kept nothing for is marked as not readable, and variables reading the same address are marked with each other's names, so a slot the compiler handed to two locals does not read as an ordinary value of both. An empty answer says why it is empty rather than leaving it to read as 'no locals here'.")]
         public Task<string> Vars(
             [Description("locals, args, autos, or watch.")] string scope = "locals",
             [Description("How many levels to expand. Keep this small; depth costs tokens fast.")] int depth = 1,
@@ -108,9 +108,9 @@ namespace VsDbgMcp.Shim.Tools
             CancellationToken ct = default)
             => On(instance, ct, async link =>
             {
-                var nodes = await link.Debug.VarsAsync(scope, Math.Max(1, Math.Min(depth, 5)), filter, sharedAddresses, ct)
+                var result = await link.Debug.VarsAsync(scope, Math.Max(1, Math.Min(depth, 5)), filter, sharedAddresses, ct)
                     .ConfigureAwait(false);
-                return Render.Vars(nodes);
+                return Render.Vars(result);
             }, scope);
 
         [McpServerTool(Name = "expand", ReadOnly = true)]
@@ -123,9 +123,9 @@ namespace VsDbgMcp.Shim.Tools
             CancellationToken ct = default)
             => On(instance, ct, async link =>
             {
-                var nodes = await link.Debug.ExpandAsync(reference, Math.Max(1, Math.Min(depth, 5)), typeModule, ct)
+                var result = await link.Debug.ExpandAsync(reference, Math.Max(1, Math.Min(depth, 5)), typeModule, ct)
                     .ConfigureAwait(false);
-                return Render.Vars(nodes);
+                return Render.Vars(result);
             }, reference);
 
         [McpServerTool(Name = "watch_set")]

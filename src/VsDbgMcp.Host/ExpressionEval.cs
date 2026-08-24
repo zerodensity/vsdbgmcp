@@ -53,7 +53,7 @@ namespace VsDbgMcp.Host
 
             if (frame.GetExpressionContext(out var context) != VSConstants.S_OK || context == null)
             {
-                result.Error = "this frame has no expression context";
+                result.Error = FrameChoice.NoContext;
                 return result;
             }
 
@@ -132,22 +132,33 @@ namespace VsDbgMcp.Host
             return text;
         }
 
-        public static List<VarNode> Scope(IDebugStackFrame2 frame, string scope, int depth, string filter,
+        public static VarsResult Scope(IDebugStackFrame2 frame, string scope, int depth, string filter,
             bool sharedAddresses)
         {
-            var nodes = new List<VarNode>();
-            if (frame == null) return nodes;
+            var result = new VarsResult();
+            if (frame == null)
+            {
+                result.Message = "there is no frame to list variables in";
+                return result;
+            }
 
             var guid = ScopeFilter(scope);
             if (frame.EnumProperties(PropertyFields, 10, ref guid, 5000, out _, out var enumerator)
                     != VSConstants.S_OK || enumerator == null)
             {
-                return nodes;
+                // Not the same as a frame with no locals, and the difference is the whole
+                // reason to say anything: an empty list here would read as one.
+                result.Message = "the engine would not list variables in this frame";
+                return result;
             }
 
+            var nodes = result.Nodes;
             var properties = new List<IDebugProperty2>();
+            var inScope = 0;
+
             foreach (var info in Drain(enumerator, 500))
             {
+                inScope++;
                 if (!string.IsNullOrEmpty(filter) &&
                     (info.bstrName == null ||
                      info.bstrName.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0))
@@ -161,8 +172,14 @@ namespace VsDbgMcp.Host
                 properties.Add(info.pProperty);
             }
 
+            if (nodes.Count == 0 && inScope > 0 && !string.IsNullOrEmpty(filter))
+            {
+                result.Message = "No variable's name contains '" + filter + "'. " + inScope +
+                                 " were read in this frame; drop the filter to see them.";
+            }
+
             if (sharedAddresses) MarkSharedAddresses(nodes, properties);
-            return nodes;
+            return result;
         }
 
         /// <summary>
@@ -234,23 +251,39 @@ namespace VsDbgMcp.Host
         /// stateless means there is no handle table to grow, invalidate across stops,
         /// or leak.
         /// </summary>
-        public static List<VarNode> Expand(IDebugStackFrame2 frame, string reference, int depth, string typeModule)
+        public static VarsResult Expand(IDebugStackFrame2 frame, string reference, int depth, string typeModule)
         {
-            var nodes = new List<VarNode>();
-            if (frame == null) return nodes;
+            var result = new VarsResult();
+            if (frame == null)
+            {
+                result.Message = "there is no frame to expand this in";
+                return result;
+            }
 
-            if (frame.GetExpressionContext(out var context) != VSConstants.S_OK || context == null) return nodes;
+            if (frame.GetExpressionContext(out var context) != VSConstants.S_OK || context == null)
+            {
+                result.Message = FrameChoice.NoContext;
+                return result;
+            }
 
-            var expression = Parse(context, reference, typeModule, null, false, out _);
-            if (expression == null) return nodes;
+            var expression = Parse(context, reference, typeModule, null, false, out var parseError);
+            if (expression == null)
+            {
+                result.Message = string.IsNullOrEmpty(parseError)
+                    ? "could not parse '" + reference + "'"
+                    : parseError;
+                return result;
+            }
 
             if (expression.EvaluateSync(enum_EVALFLAGS.EVAL_NOSIDEEFFECTS | enum_EVALFLAGS.EVAL_NOFUNCEVAL,
                     5000, null, out var property) != VSConstants.S_OK || property == null)
             {
-                return nodes;
+                result.Message = "'" + reference + "' could not be evaluated in this frame";
+                return result;
             }
 
-            return Children(property, depth);
+            result.Nodes = Children(property, depth);
+            return result;
         }
 
         static List<VarNode> Children(IDebugProperty2 property, int depth)

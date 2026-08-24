@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- After a pause, reads no longer land on the row Visual Studio puts on top of the stack.
+  `eval`, `vars`, `memory` and the rest step past it to the innermost frame that can be
+  read and say which one that was. A frame pinned with `select(frame: N)` or named in
+  `eval` is still used exactly as asked, and its failure names the nearest frame that
+  would have worked. `vars` with nothing to show says why instead of coming back empty.
 - `modules` says which binary each module actually is: the time stamped into the loaded
   image, the load path, the size and the load address, and the symbol file it found.
   The image's own time is the one that survives a deployment; the file time is labelled

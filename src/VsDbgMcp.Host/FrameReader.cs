@@ -50,6 +50,39 @@ namespace VsDbgMcp.Host
             return null;
         }
 
+        /// <summary>
+        /// The top frames themselves rather than a description of them, for the one caller
+        /// that has to try several. Walking the stack a frame at a time enumerates it
+        /// again for every frame, which is the cost this exists to avoid.
+        /// </summary>
+        public static List<IDebugStackFrame2> FrameObjects(IDebugThread2 thread, int count)
+        {
+            var frames = new List<IDebugStackFrame2>();
+            foreach (var info in Enumerate(thread, count)) frames.Add(info.m_pFrame);
+            return frames;
+        }
+
+        /// <summary>
+        /// Whether anything can be evaluated in this frame. The row Visual Studio puts on
+        /// top of a paused stack has no expression context, and neither does a frame the
+        /// engine has no symbols for.
+        /// </summary>
+        public static bool CanEvaluate(IDebugStackFrame2 frame) =>
+            frame != null && frame.GetExpressionContext(out var context) == VSConstants.S_OK && context != null;
+
+        /// <summary>
+        /// The frame's function on its own, for a message that has to point at one. No
+        /// document or code context is read, because a name is all such a message shows.
+        /// </summary>
+        public static string NameOf(IDebugStackFrame2 frame)
+        {
+            if (frame == null) return null;
+
+            var info = new FRAMEINFO[1];
+            if (frame.GetInfo(Flags, 10, info) != VSConstants.S_OK) return null;
+            return info[0].m_bstrFuncName;
+        }
+
         static IEnumerable<FRAMEINFO> Enumerate(IDebugThread2 thread, int count)
         {
             if (thread == null || count <= 0) yield break;

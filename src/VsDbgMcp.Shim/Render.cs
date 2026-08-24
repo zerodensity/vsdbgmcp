@@ -92,6 +92,7 @@ namespace VsDbgMcp.Shim
 
                 sb.AppendLine(":");
                 sb.AppendLine(Frames(s.TopFrames, s.CurrentFrameIndex));
+                if (!string.IsNullOrEmpty(s.FrameNote)) sb.AppendLine(s.FrameNote);
             }
 
             if (s.Watches != null && s.Watches.Count > 0)
@@ -557,6 +558,27 @@ namespace VsDbgMcp.Shim
             return sb.ToString().TrimEnd();
         }
 
+        /// <summary>
+        /// What vars and expand answer with. The frame is printed only when the host
+        /// filled it in, which it does when there is something to say: a frame that was
+        /// moved past, or one the caller pinned.
+        /// </summary>
+        public static string Vars(VarsResult result)
+        {
+            if (result == null) return "No result.";
+
+            var sb = new StringBuilder();
+            if (!string.IsNullOrEmpty(result.FrameNote)) sb.AppendLine(result.FrameNote);
+            if (result.Frame != null) sb.AppendLine(Frames(new[] { result.Frame }, result.Frame.Index));
+
+            var nodes = result.Nodes;
+            if (nodes != null && nodes.Count > 0) sb.AppendLine(Vars(nodes));
+            else if (string.IsNullOrEmpty(result.Message)) sb.AppendLine("  (nothing in scope)");
+
+            if (!string.IsNullOrEmpty(result.Message)) sb.AppendLine(result.Message);
+            return sb.ToString().TrimEnd();
+        }
+
         public static string Vars(IReadOnlyList<VarNode> nodes, int indent = 0)
         {
             if (nodes == null || nodes.Count == 0) return "  (nothing in scope)";
@@ -605,13 +627,20 @@ namespace VsDbgMcp.Shim
             if (results.Count == 1)
             {
                 var r = results[0];
-                if (!r.IsValid) return r.Expression + " -- " + (r.Error ?? "could not be evaluated");
+
+                var head = new StringBuilder();
+                if (!string.IsNullOrEmpty(r.FrameNote)) head.AppendLine(r.FrameNote);
+                if (r.Frame != null) head.AppendLine(Frames(new[] { r.Frame }, r.Frame.Index));
+
+                if (!r.IsValid)
+                    return head + r.Expression + " -- " + (r.Error ?? "could not be evaluated");
+
                 var text = r.Expression + " = " + r.Value;
                 if (!string.IsNullOrEmpty(r.Type)) text += "  (" + r.Type + ")";
                 if (r.HasChildren) text += "  ... expand " + r.Ref;
                 var fills = FillPatterns.Notes(r.Value);
                 if (fills.Count > 0) text += "  -- " + string.Join("; ", fills);
-                return text;
+                return head + text;
             }
 
             var sb = new StringBuilder();

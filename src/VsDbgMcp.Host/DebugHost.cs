@@ -36,6 +36,10 @@ namespace VsDbgMcp.Host
         string[] _watches = new string[0];
         int _selectedThreadId;
         int _selectedFrame;
+
+        /// <summary>The caller chose that frame, so no read is allowed to move off it.</summary>
+        bool _framePinned;
+
         TaskCompletionSource<string> _modeWaiter;
 
         public DebugHost(VsDbgMcpPackage package, DTE2 dte, IVsSolution solution, IVsDebugger vsDebugger,
@@ -68,7 +72,12 @@ namespace VsDbgMcp.Host
             // A frame does not survive its thread resuming, so neither should a pinned
             // selection. Leaving it in place would quietly evaluate later expressions in
             // a process the caller stopped meaning to look at.
-            if (mode != DebugModes.Break) _selectedThreadId = 0;
+            if (mode != DebugModes.Break)
+            {
+                _selectedThreadId = 0;
+                _selectedFrame = 0;
+                _framePinned = false;
+            }
 
             CurrentMode = mode;
             TaskCompletionSource<string> waiter;
@@ -248,8 +257,18 @@ namespace VsDbgMcp.Host
                 status.CurrentProcessName = identity.Name;
                 status.CurrentPid = identity.Pid;
                 status.ThreadWasSelected = _selectedThreadId != 0;
-                status.CurrentFrameIndex = _selectedFrame;
                 status.TopFrames = FrameReader.Frames(thread, 5);
+                status.CurrentFrameIndex = _selectedFrame;
+
+                // The frame reads would actually land in, which after a pause is not the
+                // one on top. Status has to answer whether or not that can be worked out,
+                // so a refusal here costs the marker rather than the whole call.
+                if (CurrentMode == DebugModes.Break)
+                {
+                    var reading = Read<ChosenFrame>(() => CurrentFrame(), null, "the current frame");
+                    status.CurrentFrameIndex = reading?.Index ?? _selectedFrame;
+                    status.FrameNote = reading?.Note ?? reading?.Refusal;
+                }
             }
 
             if (CurrentMode == DebugModes.Break) status.PendingException = _sink.LastException;
@@ -694,13 +713,13 @@ namespace VsDbgMcp.Host
 
             // Status must answer even when the frame cannot be read, so the refusal that
             // stops a tool from returning stale values only costs the watch values here.
-            var frame = Read<IDebugStackFrame2>(() => CurrentFrame(0), null, "the current frame");
-            if (frame == null) return null;
+            var chosen = Read<ChosenFrame>(() => CurrentFrame(), null, "the current frame");
+            if (chosen?.Frame == null || chosen.Refusal != null) return null;
 
             var values = new Dictionary<string, string>();
             foreach (var expression in _watches)
             {
-                var result = ExpressionEval.Evaluate(frame, new EvalOptions { Expression = expression, TimeoutMs = 1000 });
+                var result = ExpressionEval.Evaluate(chosen.Frame, new EvalOptions { Expression = expression, TimeoutMs = 1000 });
                 values[expression] = result.IsValid ? result.Value : "<" + (result.Error ?? "error") + ">";
             }
             return values;
@@ -761,11 +780,81 @@ namespace VsDbgMcp.Host
             }
         }
 
-        IDebugStackFrame2 CurrentFrame(int index)
+        /// <summary>How far up a stack to look for a frame that can be evaluated in.</summary>
+        const int FrameSearchDepth = 16;
+
+        /// <summary>
+        /// The frame a read happened in, once the frames that cannot be read have been
+        /// dealt with.
+        /// </summary>
+        sealed class ChosenFrame
+        {
+            public IDebugStackFrame2 Frame { get; set; }
+            public int Index { get; set; }
+
+            /// <summary>Why this is not the frame the call started from. Null when it is.</summary>
+            public string Note { get; set; }
+
+            /// <summary>Set when nothing can be read here at all, saying where it can.</summary>
+            public string Refusal { get; set; }
+        }
+
+        /// <summary>
+        /// The frame every read goes through.
+        ///
+        /// After a pause the innermost frame is Visual Studio's own row, which has no
+        /// expression context: eval failed in it and vars came back empty, and neither
+        /// reply said which frame would have worked. Nobody chose that frame, so a read
+        /// that was not given one moves past it and says it did. A frame the caller did
+        /// choose is never moved off, because a value quietly read somewhere else is the
+        /// failure this whole file is written against.
+        /// </summary>
+        ChosenFrame CurrentFrame(int? requested = null)
         {
             RequireStopped();
-            return FrameReader.FrameAt(CurrentThreadObject(), index > 0 ? index : _selectedFrame);
+            return ChooseFrame(CurrentThreadObject(), requested ?? (_framePinned ? _selectedFrame : (int?)null));
         }
+
+        static ChosenFrame ChooseFrame(IDebugThread2 thread, int? pinned)
+        {
+            var from = pinned ?? 0;
+            var chosen = new ChosenFrame { Index = from, Frame = FrameReader.FrameAt(thread, from) };
+            if (FrameReader.CanEvaluate(chosen.Frame)) return chosen;
+
+            // Only once the obvious frame has failed is walking the stack worth what it
+            // costs the engine.
+            var frames = FrameReader.FrameObjects(thread, Math.Max(from + 1, FrameSearchDepth));
+            if (from >= frames.Count)
+            {
+                chosen.Refusal = FrameChoice.NoSuchFrame(from, frames.Count);
+                return chosen;
+            }
+
+            var nearest = FrameChoice.Nearest(from, frames.Count, i => FrameReader.CanEvaluate(frames[i]));
+            var name = nearest == null ? null : FrameReader.NameOf(frames[nearest.Value]);
+
+            if (pinned.HasValue || nearest == null)
+            {
+                chosen.Refusal = FrameChoice.CannotEvaluate(nearest, name, frames.Count);
+                return chosen;
+            }
+
+            chosen.Index = nearest.Value;
+            chosen.Frame = frames[nearest.Value];
+            chosen.Note = FrameChoice.Moved(from, nearest.Value, name);
+            return chosen;
+        }
+
+        /// <summary>
+        /// The frame to name in a reply, or null when there is nothing worth saying.
+        /// Frame 0 with nothing skipped is what every one of these tools already says it
+        /// reads; anything else has to be named, or a value is read as belonging to a
+        /// frame it did not come from.
+        /// </summary>
+        static Frame Reported(ChosenFrame chosen) =>
+            chosen.Frame == null || (chosen.Index == 0 && chosen.Note == null)
+                ? null
+                : FrameReader.Describe(chosen.Frame, chosen.Index);
 
         IDebugThread2 CurrentThreadObject()
         {

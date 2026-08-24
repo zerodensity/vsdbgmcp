@@ -192,8 +192,14 @@ namespace VsDbgMcp.Host
                 return;
             }
 
-            var frame = CurrentFrame(0);
-            var here = FrameReader.Describe(frame, 0);
+            var chosen = CurrentFrame();
+            if (chosen.Refusal != null)
+            {
+                info.LogCheckDeferred = chosen.Refusal;
+                return;
+            }
+
+            var here = FrameReader.Describe(chosen.Frame, chosen.Index);
             if (here == null)
             {
                 info.LogCheckDeferred = "there is no current frame to evaluate them against";
@@ -209,7 +215,7 @@ namespace VsDbgMcp.Host
 
             foreach (var expression in info.LogExpressions)
             {
-                var result = ExpressionEval.Evaluate(frame,
+                var result = ExpressionEval.Evaluate(chosen.Frame,
                     new EvalOptions { Expression = expression.Expression, TimeoutMs = 2000 });
 
                 if (result.IsValid) expression.Value = result.Value;
@@ -617,7 +623,13 @@ namespace VsDbgMcp.Host
                 }, null, "the debugged processes");
             }
 
-            if (frameIndex.HasValue) _selectedFrame = Math.Max(0, frameIndex.Value);
+            // A frame named here is the caller's choice, and no read is allowed to move
+            // off it afterwards even when it turns out to be one nothing can be read in.
+            if (frameIndex.HasValue)
+            {
+                _selectedFrame = Math.Max(0, frameIndex.Value);
+                _framePinned = true;
+            }
 
             var selected = AllThreads().FirstOrDefault(t => ThreadIdOf(t) == _selectedThreadId);
             var where = selected == null ? "(current)" : ProcessIdentity.Of(selected).Describe();
@@ -667,48 +679,83 @@ namespace VsDbgMcp.Host
 
                 foreach (var thread in AllThreads())
                 {
-                    var frame = FrameReader.FrameAt(thread, 0);
-                    var result = ExpressionEval.Evaluate(frame, options);
+                    var result = Evaluate(ChooseFrame(thread, options.FrameIndex), options);
                     result.ThreadId = ThreadIdOf(thread);
                     results.Add(result);
                 }
                 return results;
             }
 
-            results.Add(ExpressionEval.Evaluate(CurrentFrame(options.FrameIndex), options));
+            results.Add(Evaluate(CurrentFrame(options.FrameIndex), options));
             return results;
         });
 
-        public Task<List<VarNode>> VarsAsync(string scope, int depth, string filter, bool sharedAddresses, CancellationToken ct = default) => UIAsync(() =>
+        /// <summary>
+        /// Evaluates in a frame that has already been settled on, so a frame nothing can
+        /// be read in names one that can instead of failing with the same three words
+        /// however many times it is asked.
+        /// </summary>
+        static EvalResult Evaluate(ChosenFrame chosen, EvalOptions options)
+        {
+            if (chosen.Refusal != null)
+                return new EvalResult { Expression = options.Expression, Error = chosen.Refusal };
+
+            var result = ExpressionEval.Evaluate(chosen.Frame, options);
+            result.Frame = Reported(chosen);
+            result.FrameNote = chosen.Note;
+            return result;
+        }
+
+        public Task<VarsResult> VarsAsync(string scope, int depth, string filter, bool sharedAddresses, CancellationToken ct = default) => UIAsync(() =>
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            return ExpressionEval.Scope(CurrentFrame(0), scope, depth, filter, sharedAddresses);
+
+            var chosen = CurrentFrame();
+            if (chosen.Refusal != null) return new VarsResult { Message = chosen.Refusal };
+
+            return ReadIn(chosen, ExpressionEval.Scope(chosen.Frame, scope, depth, filter, sharedAddresses));
         });
 
-        public Task<List<VarNode>> ExpandAsync(string reference, int depth, string typeModule, CancellationToken ct = default) => UIAsync(() =>
+        public Task<VarsResult> ExpandAsync(string reference, int depth, string typeModule, CancellationToken ct = default) => UIAsync(() =>
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            return ExpressionEval.Expand(CurrentFrame(0), reference, depth, typeModule);
+
+            var chosen = CurrentFrame();
+            if (chosen.Refusal != null) return new VarsResult { Message = chosen.Refusal };
+
+            return ReadIn(chosen, ExpressionEval.Expand(chosen.Frame, reference, depth, typeModule));
         });
+
+        static VarsResult ReadIn(ChosenFrame chosen, VarsResult result)
+        {
+            result.Frame = Reported(chosen);
+            result.FrameNote = chosen.Note;
+            return result;
+        }
 
         // ---------------------------------------------------------------- native
 
         public Task<MemoryResult> MemoryAsync(string addressOrExpression, int size, string format, CancellationToken ct = default) => UIAsync(() =>
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            return NativeReader.ReadMemory(CurrentFrame(0), addressOrExpression, size);
+
+            var chosen = CurrentFrame();
+            if (chosen.Refusal != null)
+                return new MemoryResult { Address = addressOrExpression, Length = size, Error = chosen.Refusal };
+
+            return NativeReader.ReadMemory(chosen.Frame, addressOrExpression, size);
         });
 
         public Task<List<RegisterInfo>> RegistersAsync(string group, CancellationToken ct = default) => UIAsync(() =>
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            return NativeReader.ReadRegisters(CurrentFrame(0), group);
+            return NativeReader.ReadRegisters(CurrentFrame().Frame, group);
         });
 
         public Task<List<DisasmLine>> DisasmAsync(string address, int count, CancellationToken ct = default) => UIAsync(() =>
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            return NativeReader.Disassemble(_sink.CurrentProgram, CurrentFrame(0), count);
+            return NativeReader.Disassemble(_sink.CurrentProgram, CurrentFrame().Frame, count);
         });
 
         public Task<ModulesResult> ModulesAsync(string filter, CancellationToken ct = default) => UIAsync(() =>
@@ -815,7 +862,7 @@ namespace VsDbgMcp.Host
 
             var sb = new StringBuilder();
             var thread = CurrentThreadObject();
-            var frame = CurrentFrame(0);
+            var frame = CurrentFrame().Frame;
 
             sb.AppendLine("== stop ==");
             var exception = _sink.LastException;

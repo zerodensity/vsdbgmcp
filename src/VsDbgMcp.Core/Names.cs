@@ -17,7 +17,9 @@ namespace VsDbgMcp
         /// 4: module loads are their own event, tracepoints have their own sink,
         ///    and modules report how many were loaded before the filter.
         /// 5: symbols can be loaded and their search reported, modules carry the
-        ///    identity of the image, and a process says which machine it runs on.
+        ///    identity of the image, a process says which machine it runs on, vars
+        ///    and expand say which frame they read in, and expand can pick one
+        ///    element out of a container.
         /// </summary>
         public const int ContractVersion = 5;
 

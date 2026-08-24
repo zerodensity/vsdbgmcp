@@ -132,6 +132,13 @@ namespace VsDbgMcp.Contracts
         public bool ThreadWasSelected { get; set; }
 
         public int CurrentFrameIndex { get; set; }
+
+        /// <summary>
+        /// Set when that frame is not the one on top of the stack, saying why. After a
+        /// pause the top frame is Visual Studio's own and nothing can be read in it.
+        /// </summary>
+        public string FrameNote { get; set; }
+
         public List<Frame> TopFrames { get; set; }
         public ExceptionInfo PendingException { get; set; }
         public List<ProcessInfo> Processes { get; set; }
@@ -321,7 +328,13 @@ namespace VsDbgMcp.Contracts
     {
         public string Expression { get; set; }
         public int? ThreadId { get; set; }
-        public int FrameIndex { get; set; }
+
+        /// <summary>
+        /// Which frame to evaluate in. Null is not frame 0: it means whichever frame the
+        /// session is on, and lets a pseudo-frame nobody chose be skipped. A caller who
+        /// names a frame gets that frame, failure and all.
+        /// </summary>
+        public int? FrameIndex { get; set; }
 
         /// <summary>Native format specifier without the comma: x, d, su, and so on.</summary>
         public string Format { get; set; }
@@ -357,6 +370,33 @@ namespace VsDbgMcp.Contracts
         public bool HasChildren { get; set; }
         public string Ref { get; set; }
         public int? ThreadId { get; set; }
+
+        /// <summary>
+        /// The frame this was read in, when that is worth saying. A value carries no trace
+        /// of where it came from, so one frame's value is otherwise read as another's.
+        /// </summary>
+        public Frame Frame { get; set; }
+
+        /// <summary>Set when that is not the frame the call started from, saying why it moved.</summary>
+        public string FrameNote { get; set; }
+    }
+
+    /// <summary>
+    /// What vars or expand found, and where it looked.
+    ///
+    /// An empty list on its own reads as "nothing here", which is a different statement
+    /// from "this frame could not be read at all" - and after a pause the second one is
+    /// what was true.
+    /// </summary>
+    public sealed class VarsResult
+    {
+        public List<VarNode> Nodes { get; set; } = new List<VarNode>();
+
+        public Frame Frame { get; set; }
+        public string FrameNote { get; set; }
+
+        /// <summary>Set when there is nothing to return, or something to add, saying what.</summary>
+        public string Message { get; set; }
     }
 
     public sealed class VarNode
