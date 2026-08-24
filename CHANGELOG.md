@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+Nine issues from a second agent-driven session, recorded in
+[docs/iteration_2.md](docs/iteration_2.md). The first two change what existing calls
+return.
+
 - After a pause, reads no longer land on the row Visual Studio puts on top of the stack.
   `eval`, `vars`, `memory` and the rest step past it to the innermost frame that can be
   read and say which one that was. A frame pinned with `select(frame: N)` or named in
@@ -13,11 +17,6 @@
   as belonging to whatever sits at that path on this machine, which for a remote
   debuggee is a different copy or nothing. A list of more than forty stays one line per
   module and says to filter for the rest.
-- `symbols(module)` returns the Modules window's Symbol Load Information: every path the
-  engine tried and what each one turned out to be, which is where a PDB that is present
-  and does not match the binary finally says so. `symbols(module, load: true)` is Load
-  Symbols, reports the state after the attempt rather than what the call returned, and
-  says that the load will not survive the module unloading and loading again.
 - `status` names the machine a debuggee is running on and how the debugger reaches it,
   so a remote session stops reading as a dead one. `processes` marks the remote rows for
   the same reason: their pids are in no local process list.
@@ -29,6 +28,11 @@
   Attaching to a debuggee that had been restarted returned the previous process
   exiting, which reads as the current target having died. A process that exited a
   moment ago is still reported.
+- `symbols(module)` returns the Modules window's Symbol Load Information: every path the
+  engine tried and what each one turned out to be, which is where a PDB that is present
+  and does not match the binary finally says so. `symbols(module, load: true)` is Load
+  Symbols, reports the state after the attempt rather than what the call returned, and
+  says that the load will not survive the module unloading and loading again.
 - `expand` takes `index` or `key` and returns one element of a container together with
   the reference that reaches it, so the visualizer's own two hundred character
   expression never has to be carried from one call to the next. The key is a walk down

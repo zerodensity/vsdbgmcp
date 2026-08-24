@@ -289,7 +289,7 @@ and size; plus condition, hit count, and log message for tracepoints.
 **Inspection** (13)
 `threads(depth?)`, `stack(thread?, count?)`, `select(thread?, frame?)`,
 `freeze(thread, on)`, `eval(expr, opts)`, `vars(scope, depth, filter)`,
-`expand(ref, depth)`, `watch_set(exprs[])`, `memory(addrOrExpr, size, format)`,
+`expand(ref, depth, index?, key?)`, `watch_set(exprs[])`, `memory(addrOrExpr, size, format)`,
 `registers(group?)`, `disasm(addr?, count)`, `modules(filter?)`,
 `symbols(module, load?)`
 
