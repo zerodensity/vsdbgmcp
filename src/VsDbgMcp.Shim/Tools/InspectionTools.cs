@@ -211,5 +211,18 @@ namespace VsDbgMcp.Shim.Tools
                 var result = await link.Debug.ModulesAsync(filter, ct).ConfigureAwait(false);
                 return Render.Modules(result);
             }, filter);
+
+        [McpServerTool(Name = "symbols")]
+        [Description("Why one module's symbols are not loaded, and, with load set, an attempt to load them. The report is the Modules window's Symbol Load Information: every path the engine tried and what each one turned out to be, which is the only place a PDB that is present but does not match the binary says so. Loading is the Modules window's Load Symbols, and it does not survive the module unloading and loading again, because the Include/Exclude symbol setting is applied afresh on every load.")]
+        public Task<string> Symbols(
+            [Description("Module name or part of one, for example 'engine.dll'. An exact name wins over a partial match.")] string module,
+            [Description("Try to load its symbols first. Leave this off to only read what the debugger already tried.")] bool load = false,
+            [Description("Instance id. Omit to use the default for this session.")] string instance = null,
+            CancellationToken ct = default)
+            => On(instance, ct, async link =>
+            {
+                var result = await link.Debug.SymbolsAsync(module, load, ct).ConfigureAwait(false);
+                return Render.Symbols(result);
+            }, module);
     }
 }

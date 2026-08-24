@@ -8,6 +8,11 @@
   as belonging to whatever sits at that path on this machine, which for a remote
   debuggee is a different copy or nothing. A list of more than forty stays one line per
   module and says to filter for the rest.
+- `symbols(module)` returns the Modules window's Symbol Load Information: every path the
+  engine tried and what each one turned out to be, which is where a PDB that is present
+  and does not match the binary finally says so. `symbols(module, load: true)` is Load
+  Symbols, reports the state after the attempt rather than what the call returned, and
+  says that the load will not survive the module unloading and loading again.
 - `bp_list` reports the hit count its description always promised. The hits are counted
   on the places a breakpoint bound rather than on the pending breakpoint the listing
   walks, which is why the number was missing, and a bound breakpoint now always carries

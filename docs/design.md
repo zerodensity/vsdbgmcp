@@ -134,7 +134,7 @@ Two interfaces cross the pipe. Both are small and version-negotiated.
     events       subscribe -> break, exception, moduleLoad, processExit, output
     breakpoints  set, remove, enable, list (with bind state)
     inspection   threads, stack, frames, eval, expand, memory, registers,
-                 disasm, modules
+                 disasm, modules, symbols
     io           consoleRead, consoleWrite, outputRead
     capture      windowCapture
 
@@ -286,11 +286,12 @@ and size; plus condition, hit count, and log message for tracepoints.
 `bp_list()`, `bp_remove(id)`, `bp_enable(id, on)`,
 `trace_read(id, tail?)`, `exceptions_set(category, code, breakOn)`
 
-**Inspection** (12)
+**Inspection** (13)
 `threads(depth?)`, `stack(thread?, count?)`, `select(thread?, frame?)`,
 `freeze(thread, on)`, `eval(expr, opts)`, `vars(scope, depth, filter)`,
 `expand(ref, depth)`, `watch_set(exprs[])`, `memory(addrOrExpr, size, format)`,
-`registers(group?)`, `disasm(addr?, count)`, `modules(filter?)`
+`registers(group?)`, `disasm(addr?, count)`, `modules(filter?)`,
+`symbols(module, load?)`
 
 **Evidence** (2)
 `triage()`, `capture(region?)`
@@ -406,6 +407,13 @@ Not a longer tool list — a different one.
   symbols, or a source file written after the module was built. This is where
   native debugging actually fails, and reporting "breakpoint set" when it will
   never bind is worse than reporting nothing.
+- **Symbols on demand.** `symbols(module)` returns the Symbol Load Information
+  text — every path the engine tried and what each turned out to be — and
+  `symbols(module, load: true)` is the Modules window's Load Symbols. Both live
+  behind a dialog only the person at the keyboard can reach, which turns a remote
+  session into round trips. The reply reports the state after the attempt rather
+  than what the load call returned, and says that a load does not survive the
+  module reloading.
 - **Crash dumps.** `dump_open(path)` and every inspection tool works unchanged.
   Cheap to support, and it makes the server useful for triage with no live
   process at all.

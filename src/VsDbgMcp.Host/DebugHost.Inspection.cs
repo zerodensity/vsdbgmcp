@@ -728,6 +728,12 @@ namespace VsDbgMcp.Host
             };
         });
 
+        public Task<SymbolResult> SymbolsAsync(string module, bool load, CancellationToken ct = default) => UIAsync(() =>
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            return SymbolLoad.For(_sink.CurrentProgram, module, load);
+        });
+
         /// <summary>
         /// Marks the modules whose binary is older than a source file someone has a
         /// breakpoint in. Reading that here costs a line; finding it out from a

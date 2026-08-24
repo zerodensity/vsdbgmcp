@@ -122,7 +122,7 @@ connections, and anything that went wrong inside the extension.
 
 ## Tools
 
-44 of them.
+45 of them.
 
 | | |
 |---|---|
@@ -130,7 +130,7 @@ connections, and anything that went wrong inside the extension.
 | **lifecycle** | `status` `launch` `attach` `detach` `stop` `restart` `processes` `dump_open` |
 | **execution** | `wait` `go` `pause` `step` `run_to` `set_next` |
 | **breakpoints** | `bp_set` `bp_list` `bp_remove` `bp_enable` `trace_read` `exceptions_set` |
-| **inspection** | `threads` `stack` `select` `freeze` `eval` `vars` `expand` `watch_set` `memory` `registers` `disasm` `modules` |
+| **inspection** | `threads` `stack` `select` `freeze` `eval` `vars` `expand` `watch_set` `memory` `registers` `disasm` `modules` `symbols` |
 | **evidence** | `triage` `capture` |
 | **debuggee I/O** | `console_read` `console_send` `output` |
 | **build** | `build` `build_cancel` `build_output` `config` `startup_project` |
@@ -168,6 +168,12 @@ Notes on a few:
   messages will show you. The image's own time is the one that answers whether a binary
   deployed to another machine is the one you just built; the file time beside the path
   belongs to whatever sits at that path here.
+- **`symbols`** — why one module's symbols are missing, and, with `load`, an attempt to
+  fetch them. The report is Symbol Load Information: every path the engine tried and
+  what each one turned out to be, which is where a PDB that is present and does not
+  match the binary finally says so. A load does not survive the module unloading and
+  loading again, because the Include/Exclude symbol setting is applied afresh each time;
+  the reply says so.
 - **`memory`, `eval`, `vars`** — a value that is nothing but an allocator's fill pattern
   is named where it appears, so `0xdddddddddddddddd` reads as freed heap without anyone
   having to remember the table.

@@ -391,5 +391,24 @@ namespace VsDbgMcp.Tests
             Assert.Contains("image 2026-08-21 12:11", text);
             Assert.Contains("on this machine was written 2026-08-21 13:05", text);
         }
+
+        [Fact]
+        public async Task Symbols_report_where_the_engine_looked_and_what_it_found_there()
+        {
+            var text = await new InspectionTools(_sessions).Symbols("ucrtbase", false, null, CancellationToken.None);
+
+            Assert.Contains("NO SYMBOLS", text);
+            Assert.Contains("Where it looked:", text);
+            Assert.Contains("PDB does not match image", text);
+        }
+
+        [Fact]
+        public async Task Symbols_for_a_name_that_is_not_loaded_says_how_many_are()
+        {
+            var text = await new InspectionTools(_sessions).Symbols("nosuch", true, null, CancellationToken.None);
+
+            Assert.Contains("No loaded module matches 'nosuch'", text);
+            Assert.Contains("3 modules are loaded", text);
+        }
     }
 }

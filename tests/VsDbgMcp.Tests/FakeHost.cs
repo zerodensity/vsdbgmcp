@@ -367,6 +367,46 @@ namespace VsDbgMcp.Tests
                 Filter = filter
             });
         }
+
+        public Task<SymbolResult> SymbolsAsync(string module, bool load, CancellationToken ct = default)
+        {
+            Record(nameof(SymbolsAsync));
+
+            var loaded = LoadedModules();
+            var matches = loaded
+                .Where(m => m.Name.IndexOf(module ?? "", StringComparison.OrdinalIgnoreCase) >= 0)
+                .ToList();
+
+            var result = new SymbolResult { Query = module, LoadedCount = loaded.Count };
+
+            if (matches.Count == 0)
+            {
+                result.Message = "No loaded module matches '" + module + "'. " + loaded.Count +
+                                 " modules are loaded and more can load while the program runs.";
+                return Task.FromResult(result);
+            }
+
+            if (matches.Count > 1)
+            {
+                result.Candidates = matches.Select(m => m.Name).ToList();
+                result.Message = "'" + module + "' matches " + matches.Count + " modules. Name one of them.";
+                return Task.FromResult(result);
+            }
+
+            result.Module = matches[0];
+            result.LoadTried = load;
+
+            // The real engine reports the state after the attempt. Here the module with
+            // no symbols never gains any, which is the case the search text is for.
+            if (!result.Module.SymbolsLoaded)
+            {
+                result.SearchInfo =
+                    "C:\\Symbols\\ucrtbase.pdb: Cannot find or open the PDB file.\n" +
+                    "C:\\Windows\\System32\\ucrtbase.pdb: PDB does not match image.";
+            }
+
+            return Task.FromResult(result);
+        }
         public Task<string> TriageAsync(CancellationToken ct = default) => Task.FromResult("nothing to triage");
         public Task<CaptureResult> CaptureAsync(int[] region, CancellationToken ct = default) => Task.FromResult(new CaptureResult());
         public Task<ConsoleResult> ConsoleReadAsync(int tailLines, CancellationToken ct = default) => Task.FromResult(new ConsoleResult { Text = "hello from the debuggee" });

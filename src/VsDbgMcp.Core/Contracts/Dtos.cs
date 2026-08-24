@@ -424,6 +424,45 @@ namespace VsDbgMcp.Contracts
         public string Filter { get; set; }
     }
 
+    /// <summary>
+    /// One module's symbol story: what state its symbols are in now, and, when they
+    /// are not loaded, every path the engine tried and what it made of each.
+    /// </summary>
+    public sealed class SymbolResult
+    {
+        /// <summary>What the caller asked for, so a refusal can quote it back.</summary>
+        public string Query { get; set; }
+
+        /// <summary>The module that matched, read after any load attempt. Null when nothing matched.</summary>
+        public ModuleInfo Module { get; set; }
+
+        /// <summary>Every module the query matched, when it matched more than one.</summary>
+        public List<string> Candidates { get; set; }
+
+        /// <summary>How many modules were loaded when the query ran, so a miss can be sized.</summary>
+        public int LoadedCount { get; set; }
+
+        /// <summary>True when a symbol load was asked for and the engine was asked to do it.</summary>
+        public bool LoadTried { get; set; }
+
+        /// <summary>
+        /// True when the engine turned the load down rather than searching and coming
+        /// back empty. The two look the same in the symbol state afterwards and are
+        /// different problems.
+        /// </summary>
+        public bool LoadRefused { get; set; }
+
+        /// <summary>
+        /// The Symbol Load Information text: every path the engine tried and why each
+        /// one did not answer. Only read while symbols are missing, which is the only
+        /// time it has anything to say.
+        /// </summary>
+        public string SearchInfo { get; set; }
+
+        /// <summary>Why there is nothing else here: no program, no match, or a module the engine will not discuss.</summary>
+        public string Message { get; set; }
+    }
+
     public sealed class MemoryResult
     {
         public string Address { get; set; }

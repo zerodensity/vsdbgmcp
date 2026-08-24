@@ -59,6 +59,7 @@ namespace VsDbgMcp.Contracts
         Task<List<RegisterInfo>> RegistersAsync(string group, CancellationToken ct = default);
         Task<List<DisasmLine>> DisasmAsync(string address, int count, CancellationToken ct = default);
         Task<ModulesResult> ModulesAsync(string filter, CancellationToken ct = default);
+        Task<SymbolResult> SymbolsAsync(string module, bool load, CancellationToken ct = default);
 
         // Evidence
         Task<string> TriageAsync(CancellationToken ct = default);

@@ -461,6 +461,71 @@ namespace VsDbgMcp.Shim
                 sb.Append("    symbols ").AppendLine(m.SymbolPath);
         }
 
+        /// <summary>
+        /// What state one module's symbols are in, and where the engine looked when they
+        /// are missing. The search text is the only place a PDB that is present and does
+        /// not match the binary ever says so.
+        /// </summary>
+        public static string Symbols(SymbolResult r)
+        {
+            if (r == null) return "No answer.";
+
+            var sb = new StringBuilder();
+
+            if (r.Module == null)
+            {
+                sb.Append(r.Message ?? "Nothing to report.");
+                if (r.Candidates != null && r.Candidates.Count > 0)
+                {
+                    sb.AppendLine();
+                    foreach (var name in r.Candidates) sb.Append("  ").AppendLine(name);
+                }
+                return sb.ToString().TrimEnd();
+            }
+
+            Module(sb, r.Module, true);
+
+            if (!string.IsNullOrEmpty(r.Message)) sb.AppendLine(r.Message);
+
+            if (r.LoadTried)
+            {
+                if (r.Module.SymbolsLoaded)
+                {
+                    sb.AppendLine("Load Symbols worked. It does not survive the module being unloaded and " +
+                                  "loaded again: the Include/Exclude list under Tools > Options > Debugging > " +
+                                  "Symbols is applied afresh on every load, so a plugin that reloads comes back " +
+                                  "without symbols unless that list is changed.");
+                }
+                else if (r.LoadRefused)
+                {
+                    sb.AppendLine("The engine turned the load down rather than searching. The module still has " +
+                                  "no symbols.");
+                }
+                else
+                {
+                    sb.AppendLine("Load Symbols ran and the module still has no symbols.");
+                }
+            }
+
+            if (!string.IsNullOrEmpty(r.SearchInfo))
+            {
+                sb.AppendLine("Where it looked:");
+                foreach (var line in r.SearchInfo.Split('\n'))
+                    sb.Append("  ").AppendLine(line.TrimEnd());
+            }
+            else if (!r.Module.SymbolsLoaded)
+            {
+                sb.AppendLine("The engine did not say where it looked.");
+            }
+
+            // The whole point of the tool is that the next move is available from here
+            // rather than from a dialog someone else has to open.
+            if (!r.Module.SymbolsLoaded && !r.LoadTried && string.IsNullOrEmpty(r.Message))
+                sb.AppendLine("Call this again with load to make the engine search now.");
+
+            return sb.ToString().TrimEnd();
+        }
+
         public static string Vars(IReadOnlyList<VarNode> nodes, int indent = 0)
         {
             if (nodes == null || nodes.Count == 0) return "  (nothing in scope)";
