@@ -82,7 +82,14 @@ namespace VsDbgMcp.Host
             if (load)
             {
                 result.LoadTried = true;
-                result.LoadRefused = module3.LoadSymbols() != VSConstants.S_OK;
+
+                // A search that ran and found nothing does not return S_OK, so only a
+                // failure code means the engine declined to look. Reading anything else
+                // as a refusal reported "turned the load down rather than searching"
+                // about a load that had plainly searched: it had just overridden the
+                // Include/Exclude setting and changed the module's reason for having no
+                // symbols.
+                result.LoadRefused = module3.LoadSymbols() < 0;
             }
 
             // Read after the attempt, never before: whether it worked is a property of
@@ -115,8 +122,7 @@ namespace VsDbgMcp.Host
                 return null;
             }
 
-            var text = search[0].bstrVerboseSearchInfo;
-            return string.IsNullOrWhiteSpace(text) ? null : text.Replace("\r\n", "\n").Trim();
+            return SymbolSearch.Tidy(search[0].bstrVerboseSearchInfo);
         }
     }
 }

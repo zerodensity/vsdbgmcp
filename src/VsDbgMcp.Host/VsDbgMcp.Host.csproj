@@ -119,6 +119,7 @@
     <Compile Include="..\VsDbgMcp.Core\PathUtil.cs" Link="Core\PathUtil.cs" />
     <Compile Include="..\VsDbgMcp.Core\Router.cs" Link="Core\Router.cs" />
     <Compile Include="..\VsDbgMcp.Core\SourceFreshness.cs" Link="Core\SourceFreshness.cs" />
+    <Compile Include="..\VsDbgMcp.Core\SymbolSearch.cs" Link="Core\SymbolSearch.cs" />
     <Compile Include="..\VsDbgMcp.Core\TraceLog.cs" Link="Core\TraceLog.cs" />
     <Compile Include="..\VsDbgMcp.Core\Contracts\Dtos.cs" Link="Core\Contracts\Dtos.cs" />
     <Compile Include="..\VsDbgMcp.Core\Contracts\IDebugHost.cs" Link="Core\Contracts\IDebugHost.cs" />
