@@ -6,6 +6,10 @@
   on the places a breakpoint bound rather than on the pending breakpoint the listing
   walks, which is why the number was missing, and a bound breakpoint now always carries
   one, so `hits 0` says the line was never reached.
+- `wait` no longer answers with a stop left over from a debug session that has ended.
+  Attaching to a debuggee that had been restarted returned the previous process
+  exiting, which reads as the current target having died. A process that exited a
+  moment ago is still reported.
 
 ## 0.2.0
 

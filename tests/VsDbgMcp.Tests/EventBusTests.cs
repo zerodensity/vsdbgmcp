@@ -17,6 +17,16 @@ namespace VsDbgMcp.Tests
         static StopEvent Stop(string instance, string reason = StopReason.Breakpoint) =>
             new StopEvent { InstanceId = instance, Reason = reason };
 
+        static StopEvent Exit(string instance, int pid) => new StopEvent
+        {
+            InstanceId = instance,
+            Reason = StopReason.Exited,
+            ProcessName = "host.exe",
+            Pid = pid,
+            ExitCode = 0,
+            Mode = DebugModes.Design
+        };
+
         static ModuleLoadEvent Module(string instance, string name) =>
             new ModuleLoadEvent { InstanceId = instance, Name = name, SymbolsLoaded = true };
 
@@ -127,6 +137,91 @@ namespace VsDbgMcp.Tests
             bus.Publish(second);
 
             Assert.True(second.Seq > first.Seq);
+        }
+
+        /// <summary>
+        /// The process that exited belongs to the run that is over. Handing it to the
+        /// first wait() after re-attaching says the current target has died, which is a
+        /// misleading place to start and cost a reader the first minutes of a session.
+        /// </summary>
+        [Fact]
+        public async Task An_exit_from_the_previous_session_is_not_reported_once_a_new_one_starts()
+        {
+            var bus = new EventBus();
+            bus.ModeChanged("Engine#1", DebugModes.Run);
+            bus.Publish(Exit("Engine#1", 1724));
+            bus.ModeChanged("Engine#1", DebugModes.Design);
+
+            // Attaching to the process that replaced it: Visual Studio leaves design
+            // mode as it attaches, whichever tool asked for it.
+            bus.ModeChanged("Engine#1", DebugModes.Run);
+
+            Assert.Null(await bus.WaitAsync(null, TimeSpan.FromMilliseconds(30), CancellationToken.None));
+        }
+
+        [Fact]
+        public async Task An_exit_that_just_happened_is_still_reported()
+        {
+            var bus = new EventBus();
+            bus.ModeChanged("Engine#1", DebugModes.Run);
+            bus.Publish(Exit("Engine#1", 1724));
+            bus.ModeChanged("Engine#1", DebugModes.Design);
+
+            var stop = await bus.WaitAsync(null, TimeSpan.FromMilliseconds(50), CancellationToken.None);
+
+            Assert.Equal(StopReason.Exited, stop.Reason);
+            Assert.Equal(1724, stop.Pid);
+        }
+
+        [Fact]
+        public async Task A_session_starting_in_one_window_leaves_another_window_s_stop_alone()
+        {
+            var bus = new EventBus();
+            bus.ModeChanged("Editor#2", DebugModes.Design);
+            bus.ModeChanged("Editor#2", DebugModes.Run);
+            bus.Publish(Stop("Editor#2"));
+
+            bus.ModeChanged("Engine#1", DebugModes.Design);
+            bus.ModeChanged("Engine#1", DebugModes.Run);
+
+            var stop = await bus.WaitAsync(null, TimeSpan.FromMilliseconds(50), CancellationToken.None);
+
+            Assert.Equal("Editor#2", stop.InstanceId);
+        }
+
+        [Fact]
+        public async Task Stops_within_a_session_survive_its_own_mode_changes()
+        {
+            var bus = new EventBus();
+            bus.ModeChanged("Engine#1", DebugModes.Design);
+            bus.ModeChanged("Engine#1", DebugModes.Run);
+            bus.Publish(Stop("Engine#1"));
+            bus.ModeChanged("Engine#1", DebugModes.Break);
+
+            Assert.NotNull(await bus.WaitAsync(null, TimeSpan.FromMilliseconds(50), CancellationToken.None));
+
+            // What go() does. Running again is the same session carrying on.
+            bus.ModeChanged("Engine#1", DebugModes.Run);
+            bus.Publish(Stop("Engine#1", StopReason.Exception));
+            bus.ModeChanged("Engine#1", DebugModes.Break);
+
+            var second = await bus.WaitAsync(null, TimeSpan.FromMilliseconds(50), CancellationToken.None);
+            Assert.Equal(StopReason.Exception, second.Reason);
+        }
+
+        /// <summary>
+        /// Connecting to a window that is already debugging: the first mode this hears
+        /// is not a session beginning, so nothing buffered may be thrown away on it.
+        /// </summary>
+        [Fact]
+        public async Task A_stop_buffered_before_any_mode_was_known_is_still_reported()
+        {
+            var bus = new EventBus();
+            bus.Publish(Stop("Engine#1"));
+
+            bus.ModeChanged("Engine#1", DebugModes.Break);
+
+            Assert.NotNull(await bus.WaitAsync(null, TimeSpan.FromMilliseconds(50), CancellationToken.None));
         }
 
         /// <summary>

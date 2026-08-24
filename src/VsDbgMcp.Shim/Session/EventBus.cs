@@ -28,6 +28,8 @@ namespace VsDbgMcp.Shim.Session
         readonly List<Waiter> _waiters = new List<Waiter>();
         readonly LinkedList<LoadedModule> _modules = new LinkedList<LoadedModule>();
         readonly List<ModuleWaiter> _moduleWaiters = new List<ModuleWaiter>();
+        readonly Dictionary<string, string> _modes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        readonly Dictionary<string, long> _sessionStart = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         long _seq;
         long _cursor;
 
@@ -96,7 +98,8 @@ namespace VsDbgMcp.Shim.Session
 
             lock (_gate)
             {
-                var buffered = _buffer.FirstOrDefault(e => e.Seq > _cursor && Matches(instanceId, e.InstanceId));
+                var buffered = _buffer.FirstOrDefault(e =>
+                    e.Seq > _cursor && InCurrentSession(e) && Matches(instanceId, e.InstanceId));
                 if (buffered != null)
                 {
                     _cursor = buffered.Seq;
@@ -225,10 +228,51 @@ namespace VsDbgMcp.Shim.Session
             lock (_gate) _cursor = _seq;
         }
 
+        /// <summary>
+        /// Told what mode an instance's debugger is in, every time it changes.
+        ///
+        /// Leaving design mode begins a debug session, and whatever is still buffered
+        /// belongs to one that is over. After the debuggee was restarted and the
+        /// debugger re-attached, the first wait() answered with the previous process
+        /// exiting, which reads as the current target having died.
+        ///
+        /// The rule is here rather than in attach, launch and dump_open because each of
+        /// them would have to remember it and the next way into a session would not.
+        /// Only a debugger seen sitting in design mode counts as one having ended, so a
+        /// stop buffered before this ever heard from the instance is never discarded.
+        ///
+        /// Module loads are left alone: they arrive while a program is starting, and
+        /// dropping one that came in ahead of the mode change would leave a wait for a
+        /// module that is already there sitting out its timeout.
+        /// </summary>
+        public void ModeChanged(string instanceId, string mode)
+        {
+            if (string.IsNullOrEmpty(instanceId) || string.IsNullOrEmpty(mode)) return;
+
+            lock (_gate)
+            {
+                var wasIdle = _modes.TryGetValue(instanceId, out var previous) && IsDesign(previous);
+                _modes[instanceId] = mode;
+
+                if (wasIdle && !IsDesign(mode)) _sessionStart[instanceId] = _seq;
+            }
+        }
+
         public StopEvent Latest(string instanceId)
         {
             lock (_gate) return _buffer.LastOrDefault(e => Matches(instanceId, e.InstanceId));
         }
+
+        /// <summary>
+        /// Whether the stop belongs to the debug session that is running now. An older
+        /// one names a process that is already gone, and an exit is the dangerous case:
+        /// read plainly it says the thing being debugged has stopped existing.
+        /// </summary>
+        bool InCurrentSession(StopEvent stop) =>
+            !_sessionStart.TryGetValue(stop.InstanceId ?? "", out var start) || stop.Seq > start;
+
+        static bool IsDesign(string mode) =>
+            string.Equals(mode, DebugModes.Design, StringComparison.OrdinalIgnoreCase);
 
         static bool Matches(string instanceId, string eventInstanceId) =>
             string.IsNullOrEmpty(instanceId) ||

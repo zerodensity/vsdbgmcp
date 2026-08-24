@@ -117,6 +117,9 @@ namespace VsDbgMcp.Shim.Session
 
         public Task OnModeChangedAsync(string instanceId, string mode)
         {
+            // Every way into a debug session passes through here, whether an agent asked
+            // for it or someone pressed F5, so this is where the bus is told.
+            _bus.ModeChanged(Id, mode);
             Record.DebugMode = mode;
             return Task.CompletedTask;
         }

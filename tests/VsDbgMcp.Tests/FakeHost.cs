@@ -83,6 +83,19 @@ namespace VsDbgMcp.Tests
             }
         }
 
+        /// <summary>Pushes a debugger mode change the way the shell would.</summary>
+        public void RaiseModeChange(string mode)
+        {
+            Mode = mode;
+
+            List<IShimEvents> targets;
+            lock (_gate) targets = new List<IShimEvents>(_clients);
+            foreach (var client in targets)
+            {
+                try { client.OnModeChangedAsync(null, mode).GetAwaiter().GetResult(); } catch { }
+            }
+        }
+
         /// <summary>Pushes a module load the way the debug engine would.</summary>
         public void RaiseModuleLoad(ModuleLoadEvent module)
         {
