@@ -261,7 +261,10 @@ namespace VsDbgMcp.Shim
                 sb.Append(b.Bound ? "bound   " : "UNBOUND ");
                 sb.Append(Where(b));
                 if (!string.IsNullOrEmpty(b.Condition)) sb.Append("  when ").Append(b.Condition);
-                if (b.HitCount > 0) sb.Append("  hits ").Append(b.HitCount);
+
+                // Zero is an answer - it was never reached - and leaving it out instead
+                // reads as nothing having been counted.
+                if (b.Bound) sb.Append("  hits ").Append(b.HitCount);
                 if (!string.IsNullOrEmpty(b.LogMessage)) sb.Append(b.Collecting ? "  trace, collecting" : "  trace");
                 if (!b.Bound && !string.IsNullOrEmpty(b.BindState)) sb.Append("  -- ").Append(b.BindState);
                 sb.AppendLine();

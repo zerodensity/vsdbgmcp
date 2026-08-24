@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `bp_list` reports the hit count its description always promised. The hits are counted
+  on the places a breakpoint bound rather than on the pending breakpoint the listing
+  walks, which is why the number was missing, and a bound breakpoint now always carries
+  one, so `hits 0` says the line was never reached.
+
 ## 0.2.0
 
 Eight changes from a long agent-driven debugging session, recorded in

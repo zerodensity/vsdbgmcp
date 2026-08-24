@@ -67,7 +67,7 @@ namespace VsDbgMcp.Shim.Tools
             }, dataExpression ?? function ?? (file == null ? null : System.IO.Path.GetFileName(file) + ":" + line));
 
         [McpServerTool(Name = "bp_list", ReadOnly = true)]
-        [Description("List every breakpoint with its bind state and hit count. Unbound ones are marked and carry the reason they did not bind.")]
+        [Description("List every breakpoint with its bind state and hit count. A bound breakpoint always carries a count, totalled over every place it bound, so hits 0 means it was never reached rather than that nothing was counted. Unbound ones are marked and carry the reason they did not bind.")]
         public Task<string> BpList(
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
             CancellationToken ct = default)

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -258,7 +258,6 @@ namespace VsDbgMcp.Host
                 Line = breakpoint.FileLine,
                 Function = breakpoint.FunctionName,
                 Condition = breakpoint.Condition,
-                HitCount = breakpoint.CurrentHits,
                 HitCountTarget = breakpoint.HitCountTarget,
                 Enabled = breakpoint.Enabled
             };
@@ -275,8 +274,32 @@ namespace VsDbgMcp.Host
             if (!string.IsNullOrEmpty(message)) info.LogMessage = TraceMessage.Unmark(message, out _);
             info.Collecting = _sink.Trace.IsCollecting(info.Id);
 
-            ReadBindState(breakpoint, info, modules);
+            // The breakpoint the automation model hands out is the pending one; binding
+            // produces its children. They answer both whether it will be hit and how
+            // often it has been.
+            var bound = Read(() => breakpoint.Children, null, "the bound breakpoints");
+            info.HitCount = Read(() => Hits(bound), 0, "the hit count");
+            ReadBindState(bound, info, modules);
             return info;
+        }
+
+        /// <summary>
+        /// How many times the breakpoint was reached, totalled over every place it bound.
+        ///
+        /// The pending breakpoint counts nothing itself, so reading its own CurrentHits
+        /// reported zero for a line that had run thousands of times. A line in a header
+        /// inlined into two modules binds in both, and the question a count answers -
+        /// does this fail on the first frame or after running for a while - is about the
+        /// line, not about one of the copies.
+        /// </summary>
+        static int Hits(Breakpoints bound)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (bound == null) return 0;
+
+            var total = 0;
+            foreach (Breakpoint instance in bound) total += instance.CurrentHits;
+            return total;
         }
 
         /// <summary>
@@ -286,7 +309,7 @@ namespace VsDbgMcp.Host
         /// failure in native debugging, because everything downstream looks like the
         /// code was not reached.
         /// </summary>
-        void ReadBindState(Breakpoint breakpoint, BreakpointInfo info, Lazy<List<ModuleInfo>> modules)
+        void ReadBindState(Breakpoints bound, BreakpointInfo info, Lazy<List<ModuleInfo>> modules)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -297,9 +320,7 @@ namespace VsDbgMcp.Host
                 return;
             }
 
-            // A pending breakpoint's bound instances appear as its children.
-            var children = Read(() => breakpoint.Children, null, "the bound breakpoints");
-            if (children != null && children.Count > 0)
+            if (bound != null && bound.Count > 0)
             {
                 info.Bound = true;
                 return;
