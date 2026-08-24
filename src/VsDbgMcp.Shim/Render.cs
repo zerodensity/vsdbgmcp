@@ -295,8 +295,12 @@ namespace VsDbgMcp.Shim
                 if (!string.IsNullOrEmpty(b.Condition)) sb.Append("  when ").Append(b.Condition);
 
                 // Zero is an answer - it was never reached - and leaving it out instead
-                // reads as nothing having been counted.
-                if (b.Bound) sb.Append("  hits ").Append(b.HitCount);
+                // reads as nothing having been counted. A tracepoint is left out
+                // altogether: the automation model counts only hits that broke, so a
+                // tracepoint that has fired thousands of times still reports none, and
+                // printing that would be the false answer rather than no answer.
+                if (b.Bound && string.IsNullOrEmpty(b.LogMessage))
+                    sb.Append("  hits ").Append(b.HitCount);
                 if (!string.IsNullOrEmpty(b.LogMessage)) sb.Append(b.Collecting ? "  trace, collecting" : "  trace");
                 if (!b.Bound && !string.IsNullOrEmpty(b.BindState)) sb.Append("  -- ").Append(b.BindState);
                 sb.AppendLine();

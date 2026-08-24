@@ -63,5 +63,24 @@ namespace VsDbgMcp.Tests
             Assert.Contains("UNBOUND", text);
             Assert.DoesNotContain("hits", text);
         }
+
+        /// <summary>
+        /// Driving a real debugger settled this one. A tracepoint on a worker loop had
+        /// written hundreds of records to the Debug pane and the automation model still
+        /// reported no hits, because only hits that broke are counted. Printing "hits 0"
+        /// there is not a missing answer, it is a wrong one.
+        /// </summary>
+        [Fact]
+        public void A_tracepoint_carries_no_count_because_nothing_counts_it()
+        {
+            var tracepoint = At(216, true, 0);
+            tracepoint.LogMessage = "frame {i}";
+            tracepoint.Collecting = true;
+
+            var text = Render.Breakpoints(new[] { tracepoint });
+
+            Assert.Contains("trace", text);
+            Assert.DoesNotContain("hits", text);
+        }
     }
 }

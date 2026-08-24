@@ -22,8 +22,9 @@ return.
   the same reason: their pids are in no local process list.
 - `bp_list` reports the hit count its description always promised. The hits are counted
   on the places a breakpoint bound rather than on the pending breakpoint the listing
-  walks, which is why the number was missing, and a bound breakpoint now always carries
-  one, so `hits 0` says the line was never reached.
+  walks, which is why the number was missing. A breakpoint that breaks carries one even
+  at zero, so `hits 0` says the line was never reached; a tracepoint carries none,
+  because only hits that broke are counted at all.
 - `wait` no longer answers with a stop left over from a debug session that has ended.
   Attaching to a debuggee that had been restarted returned the previous process
   exiting, which reads as the current target having died. A process that exited a
