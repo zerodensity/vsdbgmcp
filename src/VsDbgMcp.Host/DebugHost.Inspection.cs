@@ -716,14 +716,14 @@ namespace VsDbgMcp.Host
             return ReadIn(chosen, ExpressionEval.Scope(chosen.Frame, scope, depth, filter, sharedAddresses));
         });
 
-        public Task<VarsResult> ExpandAsync(string reference, int depth, string typeModule, CancellationToken ct = default) => UIAsync(() =>
+        public Task<VarsResult> ExpandAsync(string reference, int depth, string typeModule, int? index, string key, CancellationToken ct = default) => UIAsync(() =>
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
             var chosen = CurrentFrame();
             if (chosen.Refusal != null) return new VarsResult { Message = chosen.Refusal };
 
-            return ReadIn(chosen, ExpressionEval.Expand(chosen.Frame, reference, depth, typeModule));
+            return ReadIn(chosen, ExpressionEval.Expand(chosen.Frame, reference, depth, typeModule, index, key));
         });
 
         static VarsResult ReadIn(ChosenFrame chosen, VarsResult result)

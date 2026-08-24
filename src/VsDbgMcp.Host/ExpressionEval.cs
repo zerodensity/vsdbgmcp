@@ -247,11 +247,17 @@ namespace VsDbgMcp.Host
         }
 
         /// <summary>
-        /// Re-evaluates the full name a previous reply returned. Keeping expansion
-        /// stateless means there is no handle table to grow, invalidate across stops,
-        /// or leak.
+        /// Re-evaluates the full name a previous reply returned, and can pick one element
+        /// out of what a container's visualizer showed.
+        ///
+        /// Keeping expansion stateless means there is no handle table to grow, invalidate
+        /// across stops, or leak. The price is that a reference into a std container is a
+        /// two hundred character expression, and a typo in the middle of one is invisible.
+        /// Picking an element is what removes the need to carry it: the element's own
+        /// reference comes back with the reply, so the caller never types it.
         /// </summary>
-        public static VarsResult Expand(IDebugStackFrame2 frame, string reference, int depth, string typeModule)
+        public static VarsResult Expand(IDebugStackFrame2 frame, string reference, int depth, string typeModule,
+            int? index, string key)
         {
             var result = new VarsResult();
             if (frame == null)
@@ -282,9 +288,71 @@ namespace VsDbgMcp.Host
                 return result;
             }
 
-            result.Nodes = Children(property, depth);
-            return result;
+            if (index == null && key == null)
+            {
+                result.Nodes = Children(property, depth);
+                return result;
+            }
+
+            return Element(frame, property, reference, depth, typeModule, index, key);
         }
+
+        /// <summary>
+        /// One element out of a container, chosen from the rows the visualizer already
+        /// produces. Each row's full name is the expression that reaches that element, so
+        /// this picks a row rather than writing any C++ of its own.
+        /// </summary>
+        static VarsResult Element(IDebugStackFrame2 frame, IDebugProperty2 property, string reference,
+            int depth, string typeModule, int? index, string key)
+        {
+            // A key is compared against the element's own key, which for a map is its
+            // "first" child, so a key search has to read one level deeper than an index.
+            var rows = Children(property, key == null ? 1 : 2);
+            var elements = ContainerElement.In(rows);
+
+            if (elements.Count == 0)
+                return new VarsResult { Message = ContainerElement.NotAContainer(reference, rows) };
+
+            var chosen = index.HasValue
+                ? ContainerElement.At(elements, index.Value)
+                : ContainerElement.WithKey(elements, key);
+
+            if (chosen == null)
+            {
+                return new VarsResult
+                {
+                    Message = ContainerElement.NotFound(reference, elements, index, key, MaxChildren)
+                };
+            }
+
+            if (string.IsNullOrEmpty(chosen.Ref))
+            {
+                return new VarsResult
+                {
+                    Nodes = new List<VarNode> { chosen },
+                    Message = "The visualizer gave this element no expression of its own, so there is " +
+                              "nothing to hand back for a further call."
+                };
+            }
+
+            // Expanded through the reference the caller is being given, which is also what
+            // shows that the reference works.
+            var deeper = Expand(frame, chosen.Ref, depth, typeModule, null, null);
+            chosen.Children = deeper.Nodes;
+
+            return new VarsResult
+            {
+                Ref = chosen.Ref,
+                Nodes = new List<VarNode> { chosen },
+                Message = deeper.Message
+            };
+        }
+
+        /// <summary>
+        /// How many children one expansion reads. A key search sees these and no more,
+        /// and says so when it finds nothing.
+        /// </summary>
+        const int MaxChildren = 200;
 
         static List<VarNode> Children(IDebugProperty2 property, int depth)
         {
@@ -298,7 +366,7 @@ namespace VsDbgMcp.Host
                 return nodes;
             }
 
-            foreach (var info in Drain(enumerator, 200))
+            foreach (var info in Drain(enumerator, MaxChildren))
             {
                 var node = ToNode(info);
                 if (depth > 1 && node.HasChildren) node.Children = Children(info.pProperty, depth - 1);

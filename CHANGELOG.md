@@ -29,6 +29,11 @@
   Attaching to a debuggee that had been restarted returned the previous process
   exiting, which reads as the current target having died. A process that exited a
   moment ago is still reported.
+- `expand` takes `index` or `key` and returns one element of a container together with
+  the reference that reaches it, so the visualizer's own two hundred character
+  expression never has to be carried from one call to the next. The key is a walk down
+  the elements comparing what each renders as, not a lookup, and it sees only the first
+  200 an expansion reads; a refusal says which of those it compared.
 
 ## 0.2.0
 

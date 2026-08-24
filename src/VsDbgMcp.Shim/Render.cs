@@ -559,9 +559,10 @@ namespace VsDbgMcp.Shim
         }
 
         /// <summary>
-        /// What vars and expand answer with. The frame is printed only when the host
-        /// filled it in, which it does when there is something to say: a frame that was
-        /// moved past, or one the caller pinned.
+        /// What vars and expand answer with. The frame and the reference are printed only
+        /// when the host filled them in, which it does when there is something to say -
+        /// a frame that was moved past, or an element reference the caller would otherwise
+        /// have to copy out of this reply by hand.
         /// </summary>
         public static string Vars(VarsResult result)
         {
@@ -570,6 +571,7 @@ namespace VsDbgMcp.Shim
             var sb = new StringBuilder();
             if (!string.IsNullOrEmpty(result.FrameNote)) sb.AppendLine(result.FrameNote);
             if (result.Frame != null) sb.AppendLine(Frames(new[] { result.Frame }, result.Frame.Index));
+            if (!string.IsNullOrEmpty(result.Ref)) sb.Append("ref: ").AppendLine(result.Ref);
 
             var nodes = result.Nodes;
             if (nodes != null && nodes.Count > 0) sb.AppendLine(Vars(nodes));

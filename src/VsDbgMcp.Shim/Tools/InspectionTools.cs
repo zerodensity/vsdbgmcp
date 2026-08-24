@@ -114,16 +114,18 @@ namespace VsDbgMcp.Shim.Tools
             }, scope);
 
         [McpServerTool(Name = "expand", ReadOnly = true)]
-        [Description("Expand one variable or expression by the reference that vars or eval returned, so you pay for only the part of a large structure you actually need.")]
+        [Description("Expand one variable or expression by the reference that vars or eval returned, so you pay for only the part of a large structure you actually need. Pass index or key to pick a single element out of a container: the reply carries that element's own reference, so a deeper call never has to repeat the visualizer's expression for it.")]
         public Task<string> Expand(
             [Description("Reference from a previous vars or eval reply.")] string reference,
             [Description("How many levels to expand.")] int depth = 1,
             [Description("Look type names up in this module, by file name, for example 'MyPlugin.dll'. Pass it when the reference casts to a type that belongs to a module other than the one the frame is in.")] string typeModule = null,
+            [Description("Element at this position, as the visualizer numbers them: [0], [1], and so on. Exact, and no more work than expanding the container.")] int? index = null,
+            [Description("Element whose key renders as this text. A walk down the container's elements comparing each one's rendered key - a map element's 'first', the element itself for a set or vector - not a hash lookup, and it sees only the first 200 elements an expansion reads.")] string key = null,
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
             CancellationToken ct = default)
             => On(instance, ct, async link =>
             {
-                var result = await link.Debug.ExpandAsync(reference, Math.Max(1, Math.Min(depth, 5)), typeModule, ct)
+                var result = await link.Debug.ExpandAsync(reference, Math.Max(1, Math.Min(depth, 5)), typeModule, index, key, ct)
                     .ConfigureAwait(false);
                 return Render.Vars(result);
             }, reference);

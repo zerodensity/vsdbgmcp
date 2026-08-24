@@ -392,6 +392,14 @@ namespace VsDbgMcp.Contracts
     {
         public List<VarNode> Nodes { get; set; } = new List<VarNode>();
 
+        /// <summary>
+        /// The expression these nodes came from, in the form the engine takes back. Set
+        /// when a call reached something the caller did not name, which is the whole point
+        /// of picking a container element: the reference comes back instead of being
+        /// copied out of an earlier reply by hand.
+        /// </summary>
+        public string Ref { get; set; }
+
         public Frame Frame { get; set; }
         public string FrameNote { get; set; }
 
