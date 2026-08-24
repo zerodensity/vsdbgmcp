@@ -414,6 +414,12 @@ Not a longer tool list — a different one.
   session into round trips. The reply reports the state after the attempt rather
   than what the load call returned, and says that a load does not survive the
   module reloading.
+- **A remote target says so.** `status` names the machine a debuggee is running on
+  and how the debugger reaches it, once the debug server has said the process is
+  not local. Without that line a session over msvsmon reads as a dead one: the
+  pid is in no local process list and the paths in every other reply do not
+  exist on this disk. Both are correct, and both are what remote debugging looks
+  like.
 - **Crash dumps.** `dump_open(path)` and every inspection tool works unchanged.
   Cheap to support, and it makes the server useful for triage with no live
   process at all.

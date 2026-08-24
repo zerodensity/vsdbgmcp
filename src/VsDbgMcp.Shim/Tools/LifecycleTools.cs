@@ -116,6 +116,10 @@ namespace VsDbgMcp.Shim.Tools
                     sb.Append(p.IsDebugged ? "* " : "  ");
                     sb.Append(p.Pid.ToString().PadLeft(7)).Append("  ").Append(p.Name);
                     if (!string.IsNullOrEmpty(p.Engine)) sb.Append("  [").Append(p.Engine).Append(']');
+
+                    // A remote pid is in no local process list, so without this the row
+                    // reads as a process this machine simply cannot find.
+                    if (p.IsRemote) sb.Append("  on ").Append(p.Machine ?? "another machine");
                     sb.AppendLine();
                 }
                 return sb.ToString().TrimEnd();

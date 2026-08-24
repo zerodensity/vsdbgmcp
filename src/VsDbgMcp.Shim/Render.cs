@@ -72,6 +72,9 @@ namespace VsDbgMcp.Shim
             {
                 sb.Append("processes: ");
                 sb.AppendLine(string.Join(", ", s.Processes.Select(p => p.Name + " (" + p.Pid + ")")));
+
+                var remote = Remote(s.Processes);
+                if (remote != null) sb.AppendLine(remote);
             }
 
             if (s.TopFrames != null && s.TopFrames.Count > 0)
@@ -100,6 +103,34 @@ namespace VsDbgMcp.Shim
 
             sb.Append("breakpoints: ").Append(s.BreakpointCount);
             return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>
+        /// One line saying the debuggee is on another machine, or null when nothing
+        /// established that it is.
+        ///
+        /// Without it a remote session reads as a dead one: the pid is in no local
+        /// process list and the paths in every other reply do not exist on this disk.
+        /// Both are correct, and both are what remote debugging looks like.
+        /// </summary>
+        static string Remote(IReadOnlyList<ProcessInfo> processes)
+        {
+            var remote = processes.Where(p => p.IsRemote).ToList();
+            if (remote.Count == 0) return null;
+
+            var machines = remote.Select(p => p.Machine)
+                .Where(m => !string.IsNullOrEmpty(m))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var transport = remote.Select(p => p.Transport).FirstOrDefault(t => !string.IsNullOrEmpty(t));
+
+            var sb = new StringBuilder("remote: ");
+            sb.Append(string.Join(", ", remote.Select(p => p.Name + " (" + p.Pid + ")")));
+            sb.Append(machines.Count > 0 ? " runs on " + string.Join(", ", machines) : " runs on another machine");
+            if (transport != null) sb.Append(" over ").Append(transport);
+            sb.AppendLine(".");
+            sb.Append("Every path in this session - module paths, source files - is on that machine, ");
+            sb.Append("and the pid is not one this machine's process list will show.");
+            return sb.ToString();
         }
 
         public static string Exception(ExceptionInfo e)

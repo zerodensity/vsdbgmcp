@@ -13,6 +13,9 @@
   and does not match the binary finally says so. `symbols(module, load: true)` is Load
   Symbols, reports the state after the attempt rather than what the call returned, and
   says that the load will not survive the module unloading and loading again.
+- `status` names the machine a debuggee is running on and how the debugger reaches it,
+  so a remote session stops reading as a dead one. `processes` marks the remote rows for
+  the same reason: their pids are in no local process list.
 - `bp_list` reports the hit count its description always promised. The hits are counted
   on the places a breakpoint bound rather than on the pending breakpoint the listing
   walks, which is why the number was missing, and a bound breakpoint now always carries

@@ -87,6 +87,7 @@
     <Compile Include="DebugHost.cs" />
     <Compile Include="DebugHost.Inspection.cs" />
     <Compile Include="DebugHost.Io.cs" />
+    <Compile Include="DebugServer.cs" />
     <Compile Include="ExpressionEval.cs" />
     <Compile Include="FocusGuard.cs" />
     <Compile Include="FrameReader.cs" />

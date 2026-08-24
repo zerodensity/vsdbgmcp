@@ -148,6 +148,20 @@ namespace VsDbgMcp.Contracts
         public string Path { get; set; }
         public bool IsDebugged { get; set; }
         public string Engine { get; set; }
+
+        /// <summary>
+        /// True only when the debug server said the process is somewhere else. A
+        /// question the engine would not answer leaves this false, because a session
+        /// wrongly called remote sends a reader looking for a machine that does not
+        /// exist.
+        /// </summary>
+        public bool IsRemote { get; set; }
+
+        /// <summary>The machine it is running on, when that is not this one.</summary>
+        public string Machine { get; set; }
+
+        /// <summary>How the debugger reaches it: TCP/IP, a named pipe. Null when the engine would not say.</summary>
+        public string Transport { get; set; }
     }
 
     public sealed class ThreadSummary

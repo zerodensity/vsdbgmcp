@@ -297,12 +297,13 @@ namespace VsDbgMcp.Host
         List<ProcessInfo> DebuggedProcesses()
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            return Read(() =>
+
+            var list = Read(() =>
             {
-                var list = new List<ProcessInfo>();
+                var processes = new List<ProcessInfo>();
                 foreach (EnvDTE.Process process in _dte.Debugger.DebuggedProcesses)
                 {
-                    list.Add(new ProcessInfo
+                    processes.Add(new ProcessInfo
                     {
                         Pid = process.ProcessID,
                         Name = System.IO.Path.GetFileName(process.Name),
@@ -310,8 +311,45 @@ namespace VsDbgMcp.Host
                         IsDebugged = true
                     });
                 }
-                return list;
+                return processes;
             }, new List<ProcessInfo>(), "the debugged processes");
+
+            MarkRemoteTargets(list);
+            return list;
+        }
+
+        /// <summary>
+        /// Names the machine behind any process that is not on this one.
+        ///
+        /// The automation model has nothing to say about where a process is running, so
+        /// this comes from the debug engine's programs, matched back to the list by pid.
+        /// </summary>
+        void MarkRemoteTargets(List<ProcessInfo> processes)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (processes.Count == 0) return;
+
+            Read<object>(() =>
+            {
+                foreach (var program in _sink.Programs)
+                {
+                    var identity = ProcessIdentity.Of(program);
+                    if (identity.Pid == 0) continue;
+
+                    var server = DebugServer.Of(program);
+                    if (!server.IsRemote) continue;
+
+                    foreach (var process in processes)
+                    {
+                        if (process.Pid != identity.Pid) continue;
+
+                        process.IsRemote = true;
+                        process.Machine = server.Machine;
+                        process.Transport = server.Transport;
+                    }
+                }
+                return null;
+            }, null, "where the debugged processes are running");
         }
 
         // ---------------------------------------------------------------- session
