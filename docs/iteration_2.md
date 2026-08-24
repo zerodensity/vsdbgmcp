@@ -14,11 +14,11 @@ This records what shipped, where it differs from what was asked for, and why.
 | 3 | `status` says when the target is remote | Machine and transport named; other replies' paths left alone |
 | 4 | Bind reference out-parameters, or scratch memory | Neither. The refusal says whose limit it is and what to do |
 | 5 | Read one element of a container by index or key | `expand(index:)` and `expand(key:)`, returning the element's reference |
-| 6 | `bp_list` reports hit counts | Counted on the bound instances, and reported at zero too |
+| 6 | `bp_list` reports hit counts | Counted on the bound instances; a tracepoint carries none |
 | 7 | Give tracepoint records a real arrival time | Already shipped in 0.2.0; the issue predates the fix reaching it |
 | 8 | Drop stop events from a finished session | Dropped in the event bus, keyed on the debugger's own mode |
 | 9 | Say that nested evaluation is the evaluator's limit | The refusal names whose limit it is and what to do instead |
-| 10 | Skip the pseudo-frame a pause leaves on top | Skipped when nobody chose it, named when somebody did |
+| 10 | Skip the pseudo-frame a pause leaves on top | Skipped to the nearest frame with source, named when pinned |
 
 ---
 
@@ -138,9 +138,20 @@ The count is the **sum across bound instances**. A line in a header inlined into
 modules binds in both, and the question a count answers — does this fail on the first
 frame or after running for a while — is about the line, not one of the copies.
 
-**Zero is now printed.** Showing a count only when it was above zero left "never reached"
-indistinguishable from "nothing was counted", and "never reached" is the answer that says
-the code path is not the one running.
+**Zero is now printed, for a breakpoint that breaks.** Showing a count only when it was
+above zero left "never reached" indistinguishable from "nothing was counted", and "never
+reached" is the answer that says the code path is not the one running.
+
+**A tracepoint carries no count at all**, which driving a real debugger is what settled.
+Only hits that broke are counted, so a tracepoint that had written hundreds of records to
+the Debug pane still reported none — and printing zero beside it was the wrong answer
+rather than a missing one. `trace_read` counts a collecting tracepoint's records, and that
+count is real.
+
+**The number can lag the stop you are sitting on by one.** Across three consecutive stops
+at the same line the child reported 1, 1, 2. The automation model updates it in its own
+time and nothing here can hurry it. It is immaterial to the question the count is for —
+once or ten thousand times — and the tool description says it.
 
 ## 7. Tracepoint times
 
@@ -201,6 +212,13 @@ a frame moves to the nearest one that can be evaluated in, and says it did. A fr
 with `select(frame: N)` or named in `eval` is never moved off; its failure names the frame
 that would have worked instead. Quietly reading somewhere the caller did not ask for is
 the failure the rest of this codebase is written against.
+
+**"Can be evaluated in" was not enough, which only a real pause showed.** Under Visual
+Studio's row sit the frames of the thread's way into the kernel — ntdll, KernelBase — and
+every one of them has an expression context. The first version landed on `ntdll` and
+`vars` came back empty, for a reason that has nothing to do with the program: the exact
+answer this item exists to stop giving. Frames with source of their own are preferred now,
+and the system frames used only when there are none.
 
 Every reply now names the frame it read in whenever that is not frame 0 or was moved.
 `vars` returns a result that can say why it is empty, so "the frame cannot be read", "the
