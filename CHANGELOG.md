@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `modules` says which binary each module actually is: the time stamped into the loaded
+  image, the load path, the size and the load address, and the symbol file it found.
+  The image's own time is the one that survives a deployment; the file time is labelled
+  as belonging to whatever sits at that path on this machine, which for a remote
+  debuggee is a different copy or nothing. A list of more than forty stays one line per
+  module and says to filter for the rest.
 - `bp_list` reports the hit count its description always promised. The hits are counted
   on the places a breakpoint bound rather than on the pending breakpoint the listing
   walks, which is why the number was missing, and a bound breakpoint now always carries

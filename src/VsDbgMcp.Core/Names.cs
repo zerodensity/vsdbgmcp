@@ -16,8 +16,10 @@ namespace VsDbgMcp
         /// 3: the shim reports each call so the panel can show what was returned.
         /// 4: module loads are their own event, tracepoints have their own sink,
         ///    and modules report how many were loaded before the filter.
+        /// 5: symbols can be loaded and their search reported, modules carry the
+        ///    identity of the image, and a process says which machine it runs on.
         /// </summary>
-        public const int ContractVersion = 4;
+        public const int ContractVersion = 5;
 
         public const string InstanceFilePrefix = "inst-";
         public const string InstanceFileSuffix = ".json";

@@ -152,7 +152,7 @@ namespace VsDbgMcp.Tests
             });
 
             Assert.Contains("2 modules, 1 without symbols", text);
-            Assert.Contains("built 2026-08-21 13:05", text);
+            Assert.Contains("file 2026-08-21 13:05", text);
             Assert.Contains("mesh.cpp was edited after this binary was built", text);
             Assert.Contains("no symbols loaded", text);
         }

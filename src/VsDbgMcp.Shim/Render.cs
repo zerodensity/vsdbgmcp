@@ -387,29 +387,78 @@ namespace VsDbgMcp.Shim
             }
 
             var sb = new StringBuilder();
+            var detailed = modules.Count <= DetailedModules;
+
             if (string.IsNullOrEmpty(result.Filter))
             {
                 sb.Append(modules.Count).Append(" modules, ")
-                  .Append(modules.Count(m => !m.SymbolsLoaded)).AppendLine(" without symbols");
+                  .Append(modules.Count(m => !m.SymbolsLoaded)).Append(" without symbols");
             }
             else
             {
                 sb.Append(modules.Count).Append(" of ").Append(loaded).Append(" loaded modules match '")
-                  .Append(result.Filter).AppendLine("'; more can load while the program runs");
+                  .Append(result.Filter).Append("'; more can load while the program runs");
             }
+
+            if (!detailed) sb.Append(". Filter to see each one's path, size and load address");
+            sb.AppendLine();
 
             foreach (var m in modules)
             {
-                sb.Append("  ").Append((m.Name ?? "?").PadRight(34));
-                sb.Append((m.SymbolsLoaded ? "symbols" : "NO SYMBOLS").PadRight(11));
-                if (!string.IsNullOrEmpty(m.Built)) sb.Append("built ").Append(m.Built);
-                if (!m.SymbolsLoaded && !string.IsNullOrEmpty(m.SymbolStatus))
-                    sb.Append("  -- ").Append(m.SymbolStatus);
-                if (!string.IsNullOrEmpty(m.NewerSource))
-                    sb.Append("  -- ").Append(m.NewerSource).Append(" was edited after this binary was built");
-                sb.AppendLine();
+                Module(sb, m, detailed);
             }
             return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>
+        /// How many modules still get their full identity printed. Past this the list is
+        /// something being scanned for a name rather than read, and a process with
+        /// hundreds of modules loaded would otherwise answer in pages.
+        /// </summary>
+        const int DetailedModules = 40;
+
+        /// <summary>
+        /// One module, as a line naming it and an indented line saying which binary that
+        /// actually is.
+        ///
+        /// The two times are deliberately labelled apart. 'image' is stamped into the
+        /// binary the debuggee loaded and travels with it; the file time belongs to
+        /// whatever sits at that path on this machine, which for a module deployed
+        /// somewhere else is a different copy or nothing at all.
+        /// </summary>
+        static void Module(StringBuilder sb, ModuleInfo m, bool detailed)
+        {
+            sb.Append("  ").Append((m.Name ?? "?").PadRight(34));
+            sb.Append((m.SymbolsLoaded ? "symbols" : "NO SYMBOLS").PadRight(12));
+
+            if (!string.IsNullOrEmpty(m.ImageBuilt)) sb.Append("image ").Append(m.ImageBuilt);
+            else if (!string.IsNullOrEmpty(m.Built)) sb.Append("file ").Append(m.Built);
+
+            if (m.IsUserCode) sb.Append("  user code");
+            if (!m.SymbolsLoaded && !string.IsNullOrEmpty(m.SymbolStatus))
+                sb.Append("  -- ").Append(m.SymbolStatus);
+            if (!string.IsNullOrEmpty(m.NewerSource))
+                sb.Append("  -- ").Append(m.NewerSource).Append(" was edited after this binary was built");
+            sb.AppendLine();
+
+            if (!detailed) return;
+
+            if (!string.IsNullOrEmpty(m.Path))
+            {
+                sb.Append("    ").Append(m.Path);
+                if (!string.IsNullOrEmpty(m.Size)) sb.Append("  ").Append(m.Size);
+                if (!string.IsNullOrEmpty(m.Address)) sb.Append(" at ").Append(m.Address);
+
+                // Only worth saying once. Where there is no image time the line above
+                // already showed this one, and repeating it reads as two facts.
+                if (!string.IsNullOrEmpty(m.Built) && !string.IsNullOrEmpty(m.ImageBuilt))
+                    sb.Append("  -- the file at that path on this machine was written ").Append(m.Built);
+
+                sb.AppendLine();
+            }
+
+            if (!string.IsNullOrEmpty(m.SymbolPath))
+                sb.Append("    symbols ").AppendLine(m.SymbolPath);
         }
 
         public static string Vars(IReadOnlyList<VarNode> nodes, int indent = 0)

@@ -161,9 +161,13 @@ Notes on a few:
   inferring it from how records interleave in the Debug pane. Visual Studio writes those
   records to the Debug pane itself, so where the pane cannot be watched as it fills they
   are recovered from it afterwards and carry no individual times; the reply says so.
-- **`modules`** — also reports when each binary was built, and marks a module whose
-  source has been edited since. That is the breakpoint that binds nowhere for a reason
-  neither the module list nor the PDB messages will show you.
+- **`modules`** — says which binary each module actually is: the time stamped into the
+  loaded image, its load path, size and load address, and the symbol file it found. It
+  also marks a module whose source has been edited since it was built, which is the
+  breakpoint that binds nowhere for a reason neither the module list nor the PDB
+  messages will show you. The image's own time is the one that answers whether a binary
+  deployed to another machine is the one you just built; the file time beside the path
+  belongs to whatever sits at that path here.
 - **`memory`, `eval`, `vars`** — a value that is nothing but an allocator's fill pattern
   is named where it appears, so `0xdddddddddddddddd` reads as freed heap without anyone
   having to remember the table.

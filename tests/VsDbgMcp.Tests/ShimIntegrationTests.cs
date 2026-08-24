@@ -369,11 +369,27 @@ namespace VsDbgMcp.Tests
             var tools = new InspectionTools(_sessions);
 
             var all = await tools.Modules(null, null, CancellationToken.None);
-            Assert.Contains("built 2026-08-21 13:05", all);
+            Assert.Contains("image 2026-08-21 12:11", all);
             Assert.Contains("mesh.cpp was edited after this binary was built", all);
 
             var filtered = await tools.Modules("vulkan", null, CancellationToken.None);
             Assert.Contains("1 of 3 loaded modules match 'vulkan'", filtered);
+        }
+
+        [Fact]
+        public async Task A_module_list_says_which_binary_each_module_actually_is()
+        {
+            var text = await new InspectionTools(_sessions).Modules("engine", null, CancellationToken.None);
+
+            Assert.Contains(@"D:\repo\Engine\out\engine.dll", text);
+            Assert.Contains("1.3 MB (0x145000)", text);
+            Assert.Contains("0x7ff6b2340000", text);
+            Assert.Contains(@"symbols D:\repo\Engine\out\engine.pdb", text);
+
+            // The image is stamped an hour before the file at that path here. Both times
+            // are shown, and which is which has to be readable from the text alone.
+            Assert.Contains("image 2026-08-21 12:11", text);
+            Assert.Contains("on this machine was written 2026-08-21 13:05", text);
         }
     }
 }

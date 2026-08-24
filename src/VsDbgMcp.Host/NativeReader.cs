@@ -199,46 +199,118 @@ namespace VsDbgMcp.Host
         public static List<ModuleInfo> ReadModules(IDebugProgram2 program)
         {
             var modules = new List<ModuleInfo>();
-            if (program == null) return modules;
-
-            if (program.EnumModules(out var enumerator) != VSConstants.S_OK || enumerator == null)
-                return modules;
-
-            const enum_MODULE_INFO_FIELDS wanted =
-                enum_MODULE_INFO_FIELDS.MIF_NAME |
-                enum_MODULE_INFO_FIELDS.MIF_URL |
-                enum_MODULE_INFO_FIELDS.MIF_VERSION |
-                enum_MODULE_INFO_FIELDS.MIF_DEBUGMESSAGE |
-                enum_MODULE_INFO_FIELDS.MIF_LOADADDRESS |
-                enum_MODULE_INFO_FIELDS.MIF_FLAGS |
-                enum_MODULE_INFO_FIELDS.MIF_URLSYMBOLLOCATION;
-
-            var buffer = new IDebugModule2[1];
-            uint fetched = 0;
             var order = 0;
 
-            while (enumerator.Next(1, buffer, ref fetched) == VSConstants.S_OK && fetched == 1)
+            foreach (var module in Enumerate(program))
             {
-                var info = new MODULE_INFO[1];
-                if (buffer[0].GetInfo(wanted, info) != VSConstants.S_OK) continue;
+                var info = Describe(module);
+                if (info == null) continue;
 
-                var symbolsLoaded = (info[0].m_dwModuleFlags & enum_MODULE_FLAGS.MODULE_FLAG_SYMBOLS) != 0;
-
-                modules.Add(new ModuleInfo
-                {
-                    Name = info[0].m_bstrName,
-                    Path = info[0].m_bstrUrl,
-                    Built = SourceFreshness.Show(SourceFreshness.LastWritten(info[0].m_bstrUrl)),
-                    Version = info[0].m_bstrVersion,
-                    Address = "0x" + info[0].m_addrLoadAddress.ToString("x"),
-                    SymbolsLoaded = symbolsLoaded,
-                    SymbolStatus = symbolsLoaded ? null : NormalizeMessage(info[0].m_bstrDebugMessage),
-                    SymbolPath = info[0].m_bstrUrlSymbolLocation,
-                    Order = order++
-                });
+                info.Order = order++;
+                modules.Add(info);
             }
 
             return modules;
+        }
+
+        /// <summary>
+        /// The engine's own module objects, one at a time. Separate from the reading
+        /// below because loading symbols needs the object itself and not a snapshot of
+        /// what it said a moment ago.
+        /// </summary>
+        public static IEnumerable<IDebugModule2> Enumerate(IDebugProgram2 program)
+        {
+            if (program == null) yield break;
+
+            if (program.EnumModules(out var enumerator) != VSConstants.S_OK || enumerator == null)
+                yield break;
+
+            var buffer = new IDebugModule2[1];
+            uint fetched = 0;
+
+            while (enumerator.Next(1, buffer, ref fetched) == VSConstants.S_OK && fetched == 1)
+                yield return buffer[0];
+        }
+
+        /// <summary>The module's name on its own, for matching a query without paying for the rest.</summary>
+        public static string NameOf(IDebugModule2 module)
+        {
+            if (module == null) return null;
+
+            var info = new MODULE_INFO[1];
+            if (module.GetInfo(enum_MODULE_INFO_FIELDS.MIF_NAME, info) != VSConstants.S_OK) return null;
+
+            return info[0].m_bstrName;
+        }
+
+        const enum_MODULE_INFO_FIELDS Wanted =
+            enum_MODULE_INFO_FIELDS.MIF_NAME |
+            enum_MODULE_INFO_FIELDS.MIF_URL |
+            enum_MODULE_INFO_FIELDS.MIF_VERSION |
+            enum_MODULE_INFO_FIELDS.MIF_DEBUGMESSAGE |
+            enum_MODULE_INFO_FIELDS.MIF_LOADADDRESS |
+            enum_MODULE_INFO_FIELDS.MIF_SIZE |
+            enum_MODULE_INFO_FIELDS.MIF_TIMESTAMP |
+            enum_MODULE_INFO_FIELDS.MIF_FLAGS |
+            enum_MODULE_INFO_FIELDS.MIF_URLSYMBOLLOCATION;
+
+        /// <summary>
+        /// What the engine will say about one module, read fresh. The engine fills only
+        /// the fields it has, and says which those were in dwValidFields, so each one
+        /// is taken only when it was actually answered.
+        /// </summary>
+        public static ModuleInfo Describe(IDebugModule2 module)
+        {
+            if (module == null) return null;
+
+            var info = new MODULE_INFO[1];
+            if (module.GetInfo(Wanted, info) != VSConstants.S_OK) return null;
+
+            var got = info[0].dwValidFields;
+            var symbolsLoaded = (info[0].m_dwModuleFlags & enum_MODULE_FLAGS.MODULE_FLAG_SYMBOLS) != 0;
+            var size = (got & enum_MODULE_INFO_FIELDS.MIF_SIZE) == 0 ? 0 : info[0].m_dwSize;
+
+            return new ModuleInfo
+            {
+                Name = info[0].m_bstrName,
+                Path = info[0].m_bstrUrl,
+                Built = SourceFreshness.Show(SourceFreshness.LastWritten(info[0].m_bstrUrl)),
+                ImageBuilt = ModuleIdentity.ImageTime(Stamp(info[0])),
+                Size = ModuleIdentity.Size(size),
+                Version = info[0].m_bstrVersion,
+                Address = "0x" + info[0].m_addrLoadAddress.ToString("x"),
+                SymbolsLoaded = symbolsLoaded,
+                SymbolStatus = symbolsLoaded ? null : NormalizeMessage(info[0].m_bstrDebugMessage),
+                SymbolPath = info[0].m_bstrUrlSymbolLocation,
+                IsUserCode = UserCode(module)
+            };
+        }
+
+        /// <summary>
+        /// The image's own time stamp. The engine hands it over as a file time, and a
+        /// module that carries none reports a value the conversion refuses outright.
+        /// </summary>
+        static DateTime? Stamp(MODULE_INFO info)
+        {
+            if ((info.dwValidFields & enum_MODULE_INFO_FIELDS.MIF_TIMESTAMP) == 0) return null;
+
+            var fileTime = ((long)info.m_TimeStamp.dwHighDateTime << 32) | info.m_TimeStamp.dwLowDateTime;
+            if (fileTime <= 0) return null;
+
+            try { return DateTime.FromFileTimeUtc(fileTime); }
+            catch (ArgumentOutOfRangeException) { return null; }
+        }
+
+        /// <summary>
+        /// Whether Just My Code counts this module as the caller's own. Only a yes is
+        /// ever recorded: an engine that will not answer must not read as a no.
+        /// </summary>
+        static bool UserCode(IDebugModule2 module)
+        {
+            var module3 = module as IDebugModule3;
+            if (module3 == null) return false;
+
+            return module3.IsUserCode(out var user) == VSConstants.S_OK && user != 0;
         }
 
         static string NormalizeMessage(string message)

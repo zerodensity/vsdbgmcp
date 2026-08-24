@@ -385,8 +385,22 @@ namespace VsDbgMcp.Contracts
         /// When the binary on disk was last written, ready to show, or empty when the
         /// path could not be read. Source files edited after this no longer line up
         /// with the code that is running.
+        ///
+        /// This is a file on the machine Visual Studio is running on. When the debuggee
+        /// is on another machine there is no such file and this stays empty.
         /// </summary>
         public string Built { get; set; }
+
+        /// <summary>
+        /// The time stamped into the image the debuggee actually loaded, ready to show,
+        /// or empty when the header does not hold one. This is the field that answers
+        /// whether a binary somewhere else is the one that was just built; the file
+        /// time above cannot, because that file may be a different copy or absent.
+        /// </summary>
+        public string ImageBuilt { get; set; }
+
+        /// <summary>How much address space the image occupies, ready to show. Empty when unknown.</summary>
+        public string Size { get; set; }
 
         /// <summary>
         /// A source file with a breakpoint in it that was written after this binary
