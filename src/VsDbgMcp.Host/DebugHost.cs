@@ -830,7 +830,8 @@ namespace VsDbgMcp.Host
                 return chosen;
             }
 
-            var nearest = FrameChoice.Nearest(from, frames.Count, i => FrameReader.CanEvaluate(frames[i]));
+            var nearest = FrameChoice.Nearest(from, frames.Count,
+                i => FrameReader.CanEvaluate(frames[i]), i => FrameReader.HasSource(frames[i]));
             var name = nearest == null ? null : FrameReader.NameOf(frames[nearest.Value]);
 
             if (pinned.HasValue || nearest == null)

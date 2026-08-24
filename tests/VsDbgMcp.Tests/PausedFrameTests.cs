@@ -161,5 +161,35 @@ namespace VsDbgMcp.Tests
             Assert.Contains("> #4   host.exe!main", text);
             Assert.Contains("read in frame 4", text);
         }
+
+        /// <summary>
+        /// Driving a real pause landed the read on ntdll, three frames below Visual
+        /// Studio's row and above the program's own. An expression context exists there,
+        /// so 1+1 answered - and vars came back empty, which is the answer this was
+        /// written to stop giving.
+        /// </summary>
+        [Fact]
+        public void A_read_skips_the_system_frames_a_paused_thread_is_parked_in()
+        {
+            // Frames 1 to 3 are ntdll and KernelBase: readable, and holding nothing.
+            Assert.Equal(4, FrameChoice.Nearest(0, 8, i => i >= 1, i => i >= 4));
+        }
+
+        [Fact]
+        public void A_stack_with_no_source_anywhere_still_picks_a_readable_frame()
+        {
+            Assert.Equal(1, FrameChoice.Nearest(0, 8, i => i >= 1, i => false));
+        }
+
+        [Fact]
+        public void Saying_it_moved_names_what_it_moved_to_and_why()
+        {
+            var text = FrameChoice.Moved(0, 4, "DebugTarget.exe!Worker");
+
+            Assert.Contains("frame 0 has no expression context", text);
+            Assert.Contains("frame 4 (DebugTarget.exe!Worker)", text);
+            Assert.Contains("code of its own", text);
+        }
+
     }
 }

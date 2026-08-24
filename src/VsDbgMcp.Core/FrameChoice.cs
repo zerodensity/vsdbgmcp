@@ -36,6 +36,19 @@ namespace VsDbgMcp
         }
 
         /// <summary>
+        /// The same, preferring a frame that has source of its own.
+        ///
+        /// Under the pause row sit the frames of the thread's way into the kernel -
+        /// ntdll, KernelBase - and an expression context exists in every one of them.
+        /// Landing on the first of those answers 1+1 and nothing else: it has no locals,
+        /// so vars comes back empty for a reason that has nothing to do with the program,
+        /// which is the answer this whole thing exists to stop giving. The frames with
+        /// code of their own are looked at first, and the rest only if there are none.
+        /// </summary>
+        public static int? Nearest(int from, int count, Func<int, bool> canEvaluate, Func<int, bool> hasSource) =>
+            Nearest(from, count, i => canEvaluate(i) && hasSource(i)) ?? Nearest(from, count, canEvaluate);
+
+        /// <summary>
         /// What to tell a caller whose own choice of frame cannot be evaluated in. The
         /// choice stands, so this names the frame that would have worked rather than
         /// leaving it to be found by trying frames one at a time.
@@ -58,8 +71,9 @@ namespace VsDbgMcp
         /// </summary>
         public static string Moved(int from, int to, string toName) =>
             "frame " + from + " has no expression context, so this was read in frame " + to +
-            Named(toName) + ", the nearest one that has. After a pause the innermost frame is " +
-            "Visual Studio's own and holds nothing. select(frame: N) pins a frame of your own.";
+            Named(toName) + ", the nearest one with code of its own. After a pause the innermost " +
+            "frame is Visual Studio's own and holds nothing, and the frames under it belong to " +
+            "the system libraries the thread is parked in. select(frame: N) pins a frame of your own.";
 
         /// <summary>The stack ran out before the frame the caller named.</summary>
         public static string NoSuchFrame(int index, int count) =>

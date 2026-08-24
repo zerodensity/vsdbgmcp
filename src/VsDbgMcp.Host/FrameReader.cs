@@ -71,6 +71,14 @@ namespace VsDbgMcp.Host
             frame != null && frame.GetExpressionContext(out var context) == VSConstants.S_OK && context != null;
 
         /// <summary>
+        /// Whether this frame has source of its own. What separates a frame of the
+        /// program being debugged from the system libraries under it, which have an
+        /// expression context and no locals to read in it.
+        /// </summary>
+        public static bool HasSource(IDebugStackFrame2 frame) =>
+            frame != null && frame.GetDocumentContext(out var context) == VSConstants.S_OK && context != null;
+
+        /// <summary>
         /// The frame's function on its own, for a message that has to point at one. No
         /// document or code context is read, because a name is all such a message shows.
         /// </summary>
