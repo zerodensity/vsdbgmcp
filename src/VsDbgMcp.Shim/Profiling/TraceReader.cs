@@ -29,6 +29,13 @@ namespace VsDbgMcp.Shim.Profiling
         /// </summary>
         const int LineBudget = 4000;
 
+        /// <summary>
+        /// How far up a stack is worth following. Deeper than this and what is kept is
+        /// the innermost frames, which is where the answer is; the capture counts how
+        /// often it happened so a report can say the stacks are not whole.
+        /// </summary>
+        const int DepthLimit = 128;
+
         public static Capture Read(ProfileCollection collection, IReadOnlyList<ModuleInfo> modules, out string error)
         {
             error = null;
@@ -136,12 +143,17 @@ namespace VsDbgMcp.Shim.Profiling
                         capture.Threads.TryGetValue(sample.ThreadID, out var had) ? had + 1 : 1;
 
                     path.Clear();
-                    for (var frame = stack; frame != null && path.Count < 128; frame = frame.Caller)
+                    var frame = stack;
+                    for (; frame != null && path.Count < DepthLimit; frame = frame.Caller)
                         path.Add(Intern(capture, byAddress, frame.CodeAddress, symbols, modules, ref lineBudget));
+
+                    if (frame != null) capture.StacksCutShort++;
                     path.Reverse();
 
                     Add(byStack, capture, path, sample.ThreadID);
                 }
+
+                capture.LinesRanOut = lineBudget <= 0;
 
                 if (capture.Samples == 0)
                 {

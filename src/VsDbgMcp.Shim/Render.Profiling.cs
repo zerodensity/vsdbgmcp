@@ -91,8 +91,12 @@ namespace VsDbgMcp.Shim
                     sb.Append("  No samples landed in a module whose name contains ").Append(query.Module)
                       .AppendLine(". These took some:");
 
-                    foreach (var one in capture.ByModule().Take(12))
+                    var sampled = capture.ByModule();
+                    foreach (var one in sampled.Take(12))
                         sb.Append("    ").Append(one.Module).Append("  ").AppendLine(Samples(one.Samples));
+
+                    if (sampled.Count > 12)
+                        sb.Append("    and ").Append(sampled.Count - 12).AppendLine(" more");
                     return;
                 }
             }
@@ -167,8 +171,11 @@ namespace VsDbgMcp.Shim
             sb.Append("  No samples were taken in thread ").Append(query.Thread.Value)
               .AppendLine(". These threads have some:");
 
-            foreach (var thread in capture.ByThread().Take(12))
+            var all = capture.ByThread();
+            foreach (var thread in all.Take(12))
                 sb.Append("    ").Append(thread.Key).Append("  ").AppendLine(Samples(thread.Value));
+
+            if (all.Count > 12) sb.Append("    and ").Append(all.Count - 12).AppendLine(" more");
         }
 
         static void Tree(StringBuilder sb, Capture capture, int total)
@@ -184,6 +191,9 @@ namespace VsDbgMcp.Shim
                 Line(sb, node.Row.Samples, total, new string(' ', node.Depth * 2) + node.Row.Key, null);
 
             sb.Append("  branches under 1% are left out").AppendLine(Trimmed(capture));
+            if (capture.TreeWasCut)
+                sb.Append("  the tree is cut off at ").Append(nodes.Count)
+                  .AppendLine(" rows, so branches below that are missing rather than small");
         }
 
         /// <summary>
@@ -218,6 +228,7 @@ namespace VsDbgMcp.Shim
             {
                 sb.Append("  ").Append(query.Function).AppendLine(" could be any of these, which are different costs:");
                 foreach (var candidate in found.Take(8)) sb.Append("    ").AppendLine(candidate);
+                if (found.Count > 8) sb.Append("    and ").Append(found.Count - 8).AppendLine(" more");
                 sb.AppendLine("  Name one of them.");
                 return;
             }
@@ -237,8 +248,11 @@ namespace VsDbgMcp.Shim
             sb.AppendLine().AppendLine("lines");
 
             if (lines.Count == 0)
-                sb.AppendLine("  none: source lines are read from the symbols of the debuggee's own modules, " +
-                              "and this function is not in one of those or its symbols carry no line numbers");
+                sb.AppendLine(capture.LinesRanOut
+                    ? "  none: this profile had more distinct addresses than lines were looked up for, so " +
+                      "some functions have none. That is a limit of the reading, not of the symbols."
+                    : "  none: source lines are read from the symbols of the debuggee's own modules, and " +
+                      "this function is not in one of those or its symbols carry no line numbers");
 
             foreach (var line in lines.Take(query.Top))
                 Line(sb, line.Samples, total, line.Source, null);
@@ -254,6 +268,9 @@ namespace VsDbgMcp.Shim
             }
 
             foreach (var row in rows.Take(8)) Line(sb, row.Samples, total, row.Key, row.Source);
+
+            if (rows.Count > 8)
+                sb.Append("  and ").Append(rows.Count - 8).AppendLine(" more, each smaller than those");
         }
 
         static void Threads(StringBuilder sb, Capture capture, int total)
@@ -341,6 +358,10 @@ namespace VsDbgMcp.Shim
                       "so what is ranked above accounts for most of what it was doing.");
             }
 
+            if (capture.StacksCutShort > 0)
+                notes.Add(Samples(capture.StacksCutShort) + " came from stacks deeper than 128 frames. The " +
+                          "innermost 128 were kept, so the outermost callers of those are missing.");
+
             var stackless = capture.Samples - capture.Stacked;
             if (stackless > 0)
                 notes.Add("A further " + Samples(stackless) + " arrived without a stack, left out of everything " +
@@ -349,7 +370,11 @@ namespace VsDbgMcp.Shim
 
             var blind = capture.Unresolved();
             var total = Math.Max(1, capture.Stacks.Sum(s => s.Samples));
-            foreach (var row in blind.Where(r => r.Samples > total * 0.02).Take(3))
+            var worst = blind.Where(r => r.Samples > total * 0.02).ToList();
+            if (worst.Count > 3)
+                notes.Add(worst.Count + " modules took time with no symbols; the three largest are named below.");
+
+            foreach (var row in worst.Take(3))
                 notes.Add(row.Module + " took " + Share(row.Samples, total) +
                           " and has no symbols, so its frames are one row rather than functions. " +
                           "symbols(\"" + row.Module + "\", load: true) names them.");

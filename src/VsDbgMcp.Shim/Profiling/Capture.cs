@@ -34,6 +34,16 @@ namespace VsDbgMcp.Shim.Profiling
         /// </summary>
         public double? SamplesPerSecond { get; set; }
 
+        /// <summary>
+        /// Set when the reader stopped asking the symbol files for source lines. Some
+        /// functions then have none, and a report that blamed their symbols for it would
+        /// be naming the wrong reason.
+        /// </summary>
+        public bool LinesRanOut { get; set; }
+
+        /// <summary>Stacks that were deeper than the reader would follow, so are not whole.</summary>
+        public int StacksCutShort { get; set; }
+
         public List<Frame> Frames { get; } = new List<Frame>();
         public List<Stack> Stacks { get; } = new List<Stack>();
 
@@ -339,15 +349,23 @@ namespace VsDbgMcp.Shim.Profiling
         /// way puts it on top and says nothing. What is worth reading is where the time
         /// splits, and that is a shape, not an order.
         /// </summary>
+        /// <summary>
+        /// Whether the last Tree call stopped at its row limit rather than because
+        /// everything left was too small to matter. The two look identical on the page.
+        /// </summary>
+        public bool TreeWasCut { get; private set; }
+
         public List<Node> Tree(double prune = 0.01, int limit = 40)
         {
             var nodes = new List<Node>();
+            TreeWasCut = false;
             var live = Stacks.Where(s => s.Frames.Length > 0).ToList();
             var total = live.Sum(s => s.Samples);
             if (total == 0) return nodes;
 
             var from = EntryDepth();
             Walk(live, from, from, total, prune, limit, nodes);
+            TreeWasCut = nodes.Count >= limit;
             return nodes;
         }
 

@@ -350,6 +350,65 @@ namespace VsDbgMcp.Tests
             Assert.Equal("work.cpp:55", row.Source);
         }
 
+        // ---- a reply must not answer a question that was not the one asked ----
+
+        [Fact]
+        public void One_reading_at_a_time_is_answered_and_two_are_refused()
+        {
+            Assert.Null(new ProfileQuery().Conflict(false));
+            Assert.Null(new ProfileQuery { Function = "Work" }.Conflict(false));
+            Assert.Null(new ProfileQuery { Module = "app" }.Conflict(false));
+            Assert.Null(new ProfileQuery { Sort = ProfileQuery.Inclusive }.Conflict(false));
+        }
+
+        [Fact]
+        public void Asking_for_a_tree_of_one_module_is_refused_rather_than_answered_for_everything()
+        {
+            var clash = new ProfileQuery { Module = "app", Sort = ProfileQuery.Inclusive }.Conflict(false);
+
+            Assert.NotNull(clash);
+            Assert.Contains("sort: inclusive", clash);
+            Assert.Contains("module", clash);
+        }
+
+        [Theory]
+        [InlineData("function", "thread")]
+        [InlineData("function", "sort")]
+        [InlineData("thread", "sort")]
+        public void Any_two_readings_clash(string first, string second)
+        {
+            var query = new ProfileQuery();
+            foreach (var one in new[] { first, second })
+            {
+                if (one == "function") query.Function = "Work";
+                if (one == "thread") query.Thread = 7;
+                if (one == "sort") query.Sort = ProfileQuery.Inclusive;
+            }
+
+            Assert.NotNull(query.Conflict(false));
+        }
+
+        [Fact]
+        public void Comparing_two_captures_is_a_reading_of_its_own()
+        {
+            Assert.Null(new ProfileQuery().Conflict(true));
+            Assert.NotNull(new ProfileQuery { Function = "Work" }.Conflict(true));
+        }
+
+        [Fact]
+        public void A_tree_that_hit_its_row_limit_says_so_rather_than_looking_complete()
+        {
+            var wide = new Builder();
+            for (var i = 0; i < 60; i++) wide.Stack("app!main;app!branch" + i, 100);
+            var capture = wide.Done();
+
+            capture.Tree(0.001, 40);
+            Assert.True(capture.TreeWasCut);
+
+            capture.Tree(0.001, 500);
+            Assert.False(capture.TreeWasCut);
+        }
+
         [Fact]
         public void A_thread_is_summed_on_its_own()
         {

@@ -49,7 +49,7 @@ namespace VsDbgMcp.Shim.Tools
             });
 
         [McpServerTool(Name = "profile_report", ReadOnly = true)]
-        [Description("Ask something else of a profile already collected. With no arguments it repeats the most recent one's summary. 'function' gives one function's callers and the functions it called, and its source lines where the debuggee's own symbols carry line numbers. 'module' keeps only frames in that binary, still as shares of the whole capture; 'thread' keeps only one thread, as shares of that thread. sort='inclusive' reads the same samples as a call tree, which says which subsystem costs rather than which function; sort='module' rolls them up per binary, which is the first question to ask of a host with plugins in it. 'against' compares one capture with another and reports what moved, in percentage points rather than as a ratio, because two runs rarely lasted the same time. None of this collects anything, so it is free and can be asked as often as needed.")]
+        [Description("Ask something else of a profile already collected. Each of these is a separate reading and one is answered at a time; asking for two at once is refused rather than quietly answering one of them. With no arguments it repeats the most recent one's summary. 'function' gives one function's callers and the functions it called, and its source lines where the debuggee's own symbols carry line numbers. 'module' keeps only frames in that binary, still as shares of the whole capture; 'thread' keeps only one thread, as shares of that thread. sort='inclusive' reads the same samples as a call tree, which says which subsystem costs rather than which function; sort='module' rolls them up per binary, which is the first question to ask of a host with plugins in it. 'against' compares one capture with another and reports what moved, in percentage points rather than as a ratio, because two runs rarely lasted the same time. None of this collects anything, so it is free and can be asked as often as needed.")]
         public Task<string> ProfileReport(
             [Description("Which capture, by the number the reports print. Omit for the most recent.")] int? capture = null,
             [Description("Compare with this capture, reporting what moved between them.")] int? against = null,
@@ -85,11 +85,21 @@ namespace VsDbgMcp.Shim.Tools
                     Module = string.IsNullOrWhiteSpace(module) ? null : module.Trim(),
                     Thread = thread,
                     Sort = Sorting(sort),
-                    Top = Math.Max(1, Math.Min(top, 200))
+                    Top = Math.Max(1, Math.Min(top, TopLimit))
                 };
 
-                return Render.Profile(one, query, other, taken.All);
+                var clash = query.Conflict(other != null);
+                if (clash != null) return clash;
+
+                var answer = Render.Profile(one, query, other, taken.All);
+                return top > TopLimit
+                    ? answer + "\n\nnote: " + top + " rows were asked for and " + TopLimit + " is the most " +
+                      "this will print, so the fold above happened " + TopLimit + " rows in."
+                    : answer;
             }, function ?? module ?? sort);
+
+        /// <summary>How many rows are worth printing before a reply stops being read.</summary>
+        const int TopLimit = 200;
 
         static string Available(Captures taken)
         {
