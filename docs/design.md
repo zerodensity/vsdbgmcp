@@ -450,10 +450,12 @@ Not a longer tool list — a different one.
   profile of functions.
 
   What sampling cannot see is said rather than left to be inferred. A profile with
-  too few samples refuses to rank them; a process that spent its time blocked says
-  what share of the wall clock it was actually on a processor, because a lock is
+  too few samples refuses to rank them; every profile says how many seconds of
+  processor time were used against how long the clock ran, because a lock is
   invisible to a CPU profiler and silence there reads as nothing being wrong; a
-  module without symbols is one row that names itself and the call that would fix it.
+  module without symbols is one row that names itself and the call that would fix
+  it. Processor time rather than a share of the clock: a process on four busy
+  threads uses four seconds in one, and a share would have to call that 400%.
 - **Crash dumps.** `dump_open(path)` and every inspection tool works unchanged.
   Cheap to support, and it makes the server useful for triage with no live
   process at all.

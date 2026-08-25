@@ -123,12 +123,17 @@ namespace VsDbgMcp.Shim.Profiling
                     if (!(data is SampledProfileTraceData sample) || sample.ProcessID != collection.Pid) continue;
 
                     capture.Samples++;
-                    capture.Threads[sample.ThreadID] =
-                        capture.Threads.TryGetValue(sample.ThreadID, out var had) ? had + 1 : 1;
 
                     var stack = sample.CallStack();
                     if (stack == null) continue;
                     capture.Stacked++;
+
+                    // Counted here rather than above, so that a thread's share and every
+                    // other share in a report are of the same thing: the samples that
+                    // could be attributed. Counting the rest here as well gave a thread
+                    // more than a hundred per cent of a total it was not part of.
+                    capture.Threads[sample.ThreadID] =
+                        capture.Threads.TryGetValue(sample.ThreadID, out var had) ? had + 1 : 1;
 
                     path.Clear();
                     for (var frame = stack; frame != null && path.Count < 128; frame = frame.Caller)

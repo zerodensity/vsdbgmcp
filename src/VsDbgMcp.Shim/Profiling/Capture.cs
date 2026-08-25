@@ -156,20 +156,15 @@ namespace VsDbgMcp.Shim.Profiling
         /// </summary>
         public List<Row> Self()
         {
-            var counts = new Dictionary<string, int>(StringComparer.Ordinal);
-            var first = new Dictionary<string, int>(StringComparer.Ordinal);
+            var byFrame = new Dictionary<int, int>();
 
             foreach (var stack in Stacks)
             {
                 if (stack.Frames.Length == 0) continue;
-
-                var leaf = stack.Frames[stack.Frames.Length - 1];
-                var key = At(leaf).Key;
-                counts[key] = counts.TryGetValue(key, out var had) ? had + stack.Samples : stack.Samples;
-                if (!first.ContainsKey(key)) first[key] = leaf;
+                Count(byFrame, stack.Frames[stack.Frames.Length - 1], stack.Samples);
             }
 
-            return Ranked(counts, first);
+            return Ranked(byFrame);
         }
 
         /// <summary>
@@ -179,8 +174,7 @@ namespace VsDbgMcp.Shim.Profiling
         /// </summary>
         public List<Row> Inclusive()
         {
-            var counts = new Dictionary<string, int>(StringComparer.Ordinal);
-            var first = new Dictionary<string, int>(StringComparer.Ordinal);
+            var byFrame = new Dictionary<int, int>();
             var seen = new HashSet<string>(StringComparer.Ordinal);
 
             foreach (var stack in Stacks)
@@ -188,15 +182,11 @@ namespace VsDbgMcp.Shim.Profiling
                 seen.Clear();
                 foreach (var index in stack.Frames)
                 {
-                    var key = At(index).Key;
-                    if (!seen.Add(key)) continue;
-
-                    counts[key] = counts.TryGetValue(key, out var had) ? had + stack.Samples : stack.Samples;
-                    if (!first.ContainsKey(key)) first[key] = index;
+                    if (seen.Add(At(index).Key)) Count(byFrame, index, stack.Samples);
                 }
             }
 
-            return Ranked(counts, first);
+            return Ranked(byFrame);
         }
 
         /// <summary>Self samples gathered by the binary they landed in.</summary>
@@ -232,8 +222,7 @@ namespace VsDbgMcp.Shim.Profiling
 
         List<Row> Neighbours(string key, int direction)
         {
-            var counts = new Dictionary<string, int>(StringComparer.Ordinal);
-            var first = new Dictionary<string, int>(StringComparer.Ordinal);
+            var byFrame = new Dictionary<int, int>();
 
             foreach (var stack in Stacks)
             {
@@ -244,13 +233,11 @@ namespace VsDbgMcp.Shim.Profiling
                     var side = i + direction;
                     if (side < 0 || side >= stack.Frames.Length) continue;
 
-                    var neighbour = At(stack.Frames[side]).Key;
-                    counts[neighbour] = counts.TryGetValue(neighbour, out var had) ? had + stack.Samples : stack.Samples;
-                    if (!first.ContainsKey(neighbour)) first[neighbour] = stack.Frames[side];
+                    Count(byFrame, stack.Frames[side], stack.Samples);
                 }
             }
 
-            return Ranked(counts, first);
+            return Ranked(byFrame);
         }
 
         /// <summary>
@@ -288,20 +275,15 @@ namespace VsDbgMcp.Shim.Profiling
         /// <summary>What that thread was mostly doing, by self samples.</summary>
         public Row BusiestIn(int threadId)
         {
-            var counts = new Dictionary<string, int>(StringComparer.Ordinal);
-            var first = new Dictionary<string, int>(StringComparer.Ordinal);
+            var byFrame = new Dictionary<int, int>();
 
             foreach (var stack in Stacks)
             {
                 if (stack.ThreadId != threadId || stack.Frames.Length == 0) continue;
-
-                var leaf = stack.Frames[stack.Frames.Length - 1];
-                var key = At(leaf).Key;
-                counts[key] = counts.TryGetValue(key, out var had) ? had + stack.Samples : stack.Samples;
-                if (!first.ContainsKey(key)) first[key] = leaf;
+                Count(byFrame, stack.Frames[stack.Frames.Length - 1], stack.Samples);
             }
 
-            return Ranked(counts, first).FirstOrDefault();
+            return Ranked(byFrame).FirstOrDefault();
         }
 
         /// <summary>
@@ -323,22 +305,16 @@ namespace VsDbgMcp.Shim.Profiling
             var from = EntryDepth();
             for (var depth = from; depth < 64 && path.Count < depthLimit; depth++)
             {
-                var counts = new Dictionary<string, int>(StringComparer.Ordinal);
-                var first = new Dictionary<string, int>(StringComparer.Ordinal);
+                var byFrame = new Dictionary<int, int>();
 
                 foreach (var stack in live)
                 {
-                    if (depth >= stack.Frames.Length) continue;
-
-                    var index = stack.Frames[depth];
-                    var key = At(index).Key;
-                    counts[key] = counts.TryGetValue(key, out var had) ? had + stack.Samples : stack.Samples;
-                    if (!first.ContainsKey(key)) first[key] = index;
+                    if (depth < stack.Frames.Length) Count(byFrame, stack.Frames[depth], stack.Samples);
                 }
 
-                if (counts.Count == 0) break;
+                if (byFrame.Count == 0) break;
 
-                var best = Ranked(counts, first)[0];
+                var best = Ranked(byFrame)[0];
                 if (best.Samples < total * keepAbove) break;
 
                 path.Add(best);
@@ -417,20 +393,14 @@ namespace VsDbgMcp.Shim.Profiling
         {
             if (depth > 48 || nodes.Count >= limit) return;
 
-            var counts = new Dictionary<string, int>(StringComparer.Ordinal);
-            var first = new Dictionary<string, int>(StringComparer.Ordinal);
+            var byFrame = new Dictionary<int, int>();
 
             foreach (var stack in live)
             {
-                if (depth >= stack.Frames.Length) continue;
-
-                var index = stack.Frames[depth];
-                var key = At(index).Key;
-                counts[key] = counts.TryGetValue(key, out var had) ? had + stack.Samples : stack.Samples;
-                if (!first.ContainsKey(key)) first[key] = index;
+                if (depth < stack.Frames.Length) Count(byFrame, stack.Frames[depth], stack.Samples);
             }
 
-            foreach (var row in Ranked(counts, first))
+            foreach (var row in Ranked(byFrame))
             {
                 if (row.Samples < total * prune) break;
                 if (nodes.Count >= limit) return;
@@ -505,25 +475,56 @@ namespace VsDbgMcp.Shim.Profiling
         }
 
         /// <summary>
-        /// How much of the wall clock this process spent on a processor, or null when
-        /// the trace did not say how often it sampled. Everything not on a processor -
-        /// waiting on a lock, on disk, on another thread - is invisible to sampling, and
-        /// a profile that does not say so reads as "nothing was slow".
+        /// How many seconds of processor time this process used, or null when the trace
+        /// did not say how often it sampled.
+        ///
+        /// Processor time rather than a share of the wall clock, because a process on
+        /// four busy threads uses four seconds of processor in one second of wall clock
+        /// and a share would read as 400%. Set against the wall clock it answers the
+        /// question that matters either way: a program that used a tenth of a second in
+        /// nine was waiting, and waiting is what sampling cannot see.
         /// </summary>
-        public double? CpuShare()
+        public double? CpuSeconds()
         {
-            if (SamplesPerSecond == null || Seconds <= 0) return null;
-
-            var possible = SamplesPerSecond.Value * Seconds;
-            return possible <= 0 ? (double?)null : Samples / possible;
+            if (SamplesPerSecond == null || SamplesPerSecond.Value <= 0) return null;
+            return Samples / SamplesPerSecond.Value;
         }
 
-        List<Row> Ranked(Dictionary<string, int> counts, Dictionary<string, int> first) =>
-            counts
-                .Select(c => RowFor(first[c.Key], c.Value))
+        /// <summary>
+        /// Rows from samples counted against individual frames.
+        ///
+        /// One function is many frames, one per address a sample landed on, and a row
+        /// has room for a single source line. It shows the line most of the samples
+        /// landed on rather than whichever frame happened to be seen first: a line
+        /// printed beside a hot function reads as the hot line, so an arbitrary one is
+        /// a wrong answer rather than a missing one.
+        /// </summary>
+        List<Row> Ranked(Dictionary<int, int> byFrame)
+        {
+            var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+            var heaviest = new Dictionary<string, int>(StringComparer.Ordinal);
+            var weight = new Dictionary<string, int>(StringComparer.Ordinal);
+
+            foreach (var entry in byFrame)
+            {
+                var key = At(entry.Key).Key;
+                counts[key] = counts.TryGetValue(key, out var had) ? had + entry.Value : entry.Value;
+
+                if (weight.TryGetValue(key, out var most) && most >= entry.Value) continue;
+
+                weight[key] = entry.Value;
+                heaviest[key] = entry.Key;
+            }
+
+            return counts
+                .Select(c => RowFor(heaviest[c.Key], c.Value))
                 .OrderByDescending(r => r.Samples)
                 .ThenBy(r => r.Key, StringComparer.Ordinal)
                 .ToList();
+        }
+
+        static void Count(Dictionary<int, int> byFrame, int index, int samples) =>
+            byFrame[index] = byFrame.TryGetValue(index, out var had) ? had + samples : samples;
 
         /// <summary>
         /// Matches a row by what a report printed, by the function without its module, or

@@ -39,7 +39,7 @@ namespace VsDbgMcp.Shim
 
             sb.Append("capture #").Append(capture.Id).Append("  ")
               .Append(capture.Seconds.ToString("F1", CultureInfo.InvariantCulture)).Append("s  ")
-              .Append(Samples(capture.Samples)).Append("  ")
+              .Append(Samples(capture.Stacked)).Append("  ")
               .Append(capture.ProcessName).Append(" (").Append(capture.Pid).Append(")  ")
               .AppendLine(scope);
 
@@ -50,7 +50,7 @@ namespace VsDbgMcp.Shim
             else if (query.Sort == ProfileQuery.ByModule) Modules(sb, capture, total);
             else Summary(sb, capture, query, total);
 
-            Notes(sb, capture, query);
+            Notes(sb, capture);
             Footer(sb, capture, taken);
             return sb.ToString().TrimEnd();
         }
@@ -62,7 +62,7 @@ namespace VsDbgMcp.Shim
             if (query.Thread != null) return "thread " + query.Thread.Value + " only";
             if (query.Sort == ProfileQuery.Inclusive) return "inclusive, as a tree";
             if (query.Sort == ProfileQuery.ByModule) return "self time, by module";
-            if (query.Module != null) return "self time, " + query.Module + " only";
+            if (query.Module != null) return "self time in " + query.Module + ", of the whole capture";
             return "self time, all threads";
         }
 
@@ -84,7 +84,18 @@ namespace VsDbgMcp.Shim
         {
             var rows = capture.Self();
             if (query.Module != null)
+            {
                 rows = rows.Where(r => Contains(r.Module, query.Module)).ToList();
+                if (rows.Count == 0)
+                {
+                    sb.Append("  No samples landed in a module whose name contains ").Append(query.Module)
+                      .AppendLine(". These took some:");
+
+                    foreach (var one in capture.ByModule().Take(12))
+                        sb.Append("    ").Append(one.Module).Append("  ").AppendLine(Samples(one.Samples));
+                    return;
+                }
+            }
 
             Flat(sb, rows, query, total);
 
@@ -223,12 +234,14 @@ namespace VsDbgMcp.Shim
             Neighbours(sb, "calls", capture.Callees(key), total);
 
             var lines = capture.Lines(key);
-            if (lines.Count > 0)
-            {
-                sb.AppendLine().AppendLine("lines");
-                foreach (var line in lines.Take(query.Top))
-                    Line(sb, line.Samples, total, line.Source, null);
-            }
+            sb.AppendLine().AppendLine("lines");
+
+            if (lines.Count == 0)
+                sb.AppendLine("  none: source lines are read from the symbols of the debuggee's own modules, " +
+                              "and this function is not in one of those or its symbols carry no line numbers");
+
+            foreach (var line in lines.Take(query.Top))
+                Line(sb, line.Samples, total, line.Source, null);
         }
 
         static void Neighbours(StringBuilder sb, string title, List<Capture.Row> rows, int total)
@@ -246,9 +259,9 @@ namespace VsDbgMcp.Shim
         static void Threads(StringBuilder sb, Capture capture, int total)
         {
             var threads = capture.ByThread();
-            if (threads.Count <= 1) return;
+            if (threads.Count == 0) return;
 
-            sb.AppendLine().AppendLine("threads");
+            sb.AppendLine().AppendLine(threads.Count == 1 ? "thread" : "threads");
             var shown = 0;
 
             foreach (var thread in threads)
@@ -270,9 +283,9 @@ namespace VsDbgMcp.Shim
         static void Diff(StringBuilder sb, Capture now, Capture before)
         {
             sb.Append("  ").Append(before.Seconds.ToString("F1", CultureInfo.InvariantCulture)).Append("s and ")
-              .Append(Samples(before.Samples)).Append(" then, ")
+              .Append(Samples(before.Stacked)).Append(" then, ")
               .Append(now.Seconds.ToString("F1", CultureInfo.InvariantCulture)).Append("s and ")
-              .Append(Samples(now.Samples)).AppendLine(" now");
+              .Append(Samples(now.Stacked)).AppendLine(" now");
             sb.AppendLine("  shares, not counts: two runs of different lengths cannot be compared any other way");
             sb.AppendLine();
 
@@ -306,25 +319,33 @@ namespace VsDbgMcp.Shim
         /// What the numbers above do not cover. Each of these is a way for a profile to
         /// be read as saying something it did not say.
         /// </summary>
-        static void Notes(StringBuilder sb, Capture capture, ProfileQuery query)
+        static void Notes(StringBuilder sb, Capture capture)
         {
             var notes = new List<string>();
 
-            if (capture.Samples < TooFewSamples)
-                notes.Add("Only " + Samples(capture.Samples) + ", which is too few to rank: one sample either " +
+            if (capture.Stacked < TooFewSamples)
+                notes.Add("Only " + Samples(capture.Stacked) + ", which is too few to rank: one sample either " +
                           "way moves any of these lines. Profile for longer.");
 
-            var share = capture.CpuShare();
-            if (share != null && share.Value < 0.5)
-                notes.Add("This process held a processor for about " +
-                          Percent(share.Value * 100) + " of those " +
-                          capture.Seconds.ToString("F1", CultureInfo.InvariantCulture) +
-                          " seconds. The rest of the time it was waiting - on a lock, on a file, on another " +
-                          "thread - and sampling cannot see any of that, so a slow program can look idle here.");
+            var cpu = capture.CpuSeconds();
+            if (cpu != null)
+            {
+                var used = cpu.Value.ToString("F1", CultureInfo.InvariantCulture);
+                var clock = capture.Seconds.ToString("F1", CultureInfo.InvariantCulture);
 
-            if (capture.Stacked < capture.Samples)
-                notes.Add((capture.Samples - capture.Stacked) + " samples arrived without a stack and are counted " +
-                          "in the total but attributed to nothing.");
+                notes.Add(cpu.Value < capture.Seconds * 0.5
+                    ? "It used " + used + " seconds of processor time in " + clock + " seconds of wall clock, " +
+                      "so it spent most of that waiting - on a lock, on a file, on another thread - and " +
+                      "sampling sees none of that. What is ranked above is only the part that was running."
+                    : "It used " + used + " seconds of processor time in " + clock + " seconds of wall clock, " +
+                      "so what is ranked above accounts for most of what it was doing.");
+            }
+
+            var stackless = capture.Samples - capture.Stacked;
+            if (stackless > 0)
+                notes.Add("A further " + Samples(stackless) + " arrived without a stack, left out of everything " +
+                          "above because there is nothing to attribute them to. They are why the seconds of " +
+                          "processor time account for more than the rows do.");
 
             var blind = capture.Unresolved();
             var total = Math.Max(1, capture.Stacks.Sum(s => s.Samples));
@@ -349,7 +370,7 @@ namespace VsDbgMcp.Shim
             {
                 sb.Append("  #").Append(other.Id).Append(" ")
                   .Append(other.Seconds.ToString("F0", CultureInfo.InvariantCulture)).Append("s ")
-                  .Append(Samples(other.Samples));
+                  .Append(Samples(other.Stacked));
                 if (other.Id == capture.Id) sb.Append(" (this)");
             }
             sb.AppendLine();

@@ -8,15 +8,16 @@
   reports where the samples landed, the path most of them went down, and what each
   thread was doing.
 - `profile_report` asks anything else of a profile already taken, without collecting
-  again: one function's callers, the functions it called and which of its source lines
-  the samples landed on; the same samples as a call tree; a roll-up per binary, which is
-  the first question to ask of a host with plugins in it; one thread on its own; or what
-  moved since an earlier capture, in percentage points. Every folded line says which
-  argument unfolds it.
+  again: one function's callers, the functions it called and, where the debuggee's own
+  symbols carry line numbers, which of its source lines the samples landed on; the same
+  samples as a call tree; a roll-up per binary, which is the first question to ask of a
+  host with plugins in it; one thread on its own; or what moved since an earlier
+  capture, in percentage points. Every folded line and every dead end says which
+  argument leads out of it.
 - A profile says what sampling cannot see. Too few samples to rank refuses to rank them;
-  a process that was mostly blocked says what share of the wall clock it was on a
-  processor, because a lock is invisible to a CPU profiler and saying nothing there
-  reads as nothing being wrong; a module without symbols is one row naming the call that
+  every profile says how many seconds of processor time were used against how long the
+  clock ran, which is what tells a program that was waiting on a lock from a program
+  with nothing slow in it; and a module without symbols is one row naming the call that
   would name its functions.
 
 ## 0.3.0

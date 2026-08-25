@@ -14,7 +14,7 @@ namespace VsDbgMcp.Shim.Tools
         public ProfileTools(SessionManager sessions) : base(sessions) { }
 
         [McpServerTool(Name = "profile_start")]
-        [Description("Begin sampling the debuggee's CPU use. Start this, let the work you care about happen - go, run_to, or simply wait - then call profile_stop. Sampling sees only threads that are on a processor: waiting on a lock, on a file or on another thread is invisible to it, and profile_stop says how much of the wall clock was spent running so that a program which was mostly waiting does not read as a program with nothing slow in it. The debuggee keeps running while this collects, and the debugger stays attached.")]
+        [Description("Begin sampling the debuggee's CPU use. Start this, let the work you care about happen - go, run_to, or simply wait - then call profile_stop. Sampling sees only threads that are on a processor: waiting on a lock, on a file or on another thread is invisible to it, so a profile of a program that was blocked will be nearly empty and will say so rather than reporting that nothing was slow. The debuggee keeps running while this collects and the debugger stays attached, so a breakpoint can still stop it - though stopping it means it is not running, and time spent stopped is time not sampled.")]
         public Task<string> ProfileStart(
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
             CancellationToken ct = default)
@@ -25,7 +25,7 @@ namespace VsDbgMcp.Shim.Tools
             });
 
         [McpServerTool(Name = "profile_stop")]
-        [Description("Stop sampling and report where the time went: the functions the samples landed in, the one call path most of them went down, and what each thread was doing. Reading the trace takes a few seconds and the trace is then thrown away, but the counts are kept for the rest of the session, so profile_report can ask other things of this same profile without collecting again.")]
+        [Description("Stop sampling and report where the time went: the functions the samples landed in, the call path most of them went down, and what each thread was doing. Reading the trace takes a few seconds and the trace is then deleted, but the counts are kept for the rest of the session, so profile_report can ask other things of this same profile without collecting again. Function names come from the symbols the debugger has already loaded, so a module whose symbols are not loaded is reported as one row rather than as functions.")]
         public Task<string> ProfileStop(
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
             CancellationToken ct = default)
@@ -49,11 +49,11 @@ namespace VsDbgMcp.Shim.Tools
             });
 
         [McpServerTool(Name = "profile_report", ReadOnly = true)]
-        [Description("Ask something else of a profile already collected. With no arguments it repeats the most recent one's summary. 'function' gives one function's callers, the functions it called, and which of its source lines the samples landed on. 'module' keeps only frames in that binary; 'thread' keeps only one thread. sort='inclusive' reads the same samples as a call tree, which is what says which subsystem costs rather than which function; sort='module' rolls them up per binary, which is the first question to ask of a host with plugins in it. 'against' compares one capture with another and reports what moved, in percentage points. None of this collects anything, so it is free and can be asked as often as needed.")]
+        [Description("Ask something else of a profile already collected. With no arguments it repeats the most recent one's summary. 'function' gives one function's callers and the functions it called, and its source lines where the debuggee's own symbols carry line numbers. 'module' keeps only frames in that binary, still as shares of the whole capture; 'thread' keeps only one thread, as shares of that thread. sort='inclusive' reads the same samples as a call tree, which says which subsystem costs rather than which function; sort='module' rolls them up per binary, which is the first question to ask of a host with plugins in it. 'against' compares one capture with another and reports what moved, in percentage points rather than as a ratio, because two runs rarely lasted the same time. None of this collects anything, so it is free and can be asked as often as needed.")]
         public Task<string> ProfileReport(
             [Description("Which capture, by the number the reports print. Omit for the most recent.")] int? capture = null,
             [Description("Compare with this capture, reporting what moved between them.")] int? against = null,
-            [Description("One function, named as the report prints it or just by its own name.")] string function = null,
+            [Description("One function, named as the report prints it, or by its own name without the module or the namespace. A name that could mean more than one function is refused and the candidates listed.")] string function = null,
             [Description("Keep only frames in modules whose name contains this.")] string module = null,
             [Description("Keep only samples taken in this thread.")] int? thread = null,
             [Description("self for where samples landed, inclusive for a call tree, module to roll up per binary.")] string sort = null,

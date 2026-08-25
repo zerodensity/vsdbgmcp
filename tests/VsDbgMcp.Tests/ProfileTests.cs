@@ -40,6 +40,11 @@ namespace VsDbgMcp.Tests
                 var module = text.Substring(0, bang);
                 var method = text.Substring(bang + 1);
 
+                // "Work@hot" and "Work@cold" are two frames of the one function Work,
+                // which is how one function comes to have more than one source line.
+                var at = method.IndexOf('@');
+                if (at >= 0) method = method.Substring(0, at);
+
                 _capture.Frames.Add(new Capture.Frame
                 {
                     Module = module,
@@ -233,15 +238,32 @@ namespace VsDbgMcp.Tests
         }
 
         [Fact]
-        public void The_share_of_the_wall_clock_is_only_reported_when_the_rate_is_known()
+        public void Processor_time_is_only_reported_when_the_sampling_rate_is_known()
         {
             var capture = Simple();
             capture.Seconds = 10;
 
-            Assert.Null(capture.CpuShare());
+            Assert.Null(capture.CpuSeconds());
 
             capture.SamplesPerSecond = 1000;
-            Assert.Equal(0.01, capture.CpuShare().Value, 3);
+            Assert.Equal(0.1, capture.CpuSeconds().Value, 3);
+        }
+
+        [Fact]
+        public void Several_busy_threads_use_more_processor_time_than_the_clock_ran_for()
+        {
+            // Four threads on four cores for one second is four seconds of processor
+            // time. A share of the wall clock would have to call that 400%.
+            var capture = new Builder()
+                .Stack("app!main;app!Work", 1000, thread: 1)
+                .Stack("app!main;app!Work", 1000, thread: 2)
+                .Stack("app!main;app!Work", 1000, thread: 3)
+                .Stack("app!main;app!Work", 1000, thread: 4)
+                .Done();
+            capture.Seconds = 1;
+            capture.SamplesPerSecond = 1000;
+
+            Assert.Equal(4, capture.CpuSeconds().Value, 3);
         }
 
         [Fact]
@@ -295,6 +317,37 @@ namespace VsDbgMcp.Tests
             var deep = string.Join(";", Enumerable.Range(0, 40).Select(i => "app!f" + i));
 
             Assert.Equal(6, new Builder().Stack(deep, 50).Done().HotPath(0.2, 6).Count);
+        }
+
+        [Fact]
+        public void A_thread_never_holds_more_than_all_of_the_samples()
+        {
+            var capture = new Builder()
+                .Stack("app!main;app!Work", 100, thread: 1)
+                .Done();
+
+            // Samples that carried no stack are counted in the total and attributed to
+            // nothing, so a thread measured against them would run past a hundred.
+            capture.Samples += 40;
+
+            var attributed = capture.Stacks.Sum(s => s.Samples);
+            Assert.True(capture.ByThread()[0].Value <= attributed);
+        }
+
+        [Fact]
+        public void The_line_beside_a_function_is_the_one_most_samples_landed_on()
+        {
+            // Two addresses inside one function, on two different lines. The row has
+            // room for one, and the busier line is the one worth printing.
+            var capture = new Builder()
+                .Stack("app!main;app!Work@cold", 3, file: @"c:\src\work.cpp", line: 10)
+                .Stack("app!main;app!Work@hot", 97, file: @"c:\src\work.cpp", line: 55)
+                .Done();
+
+            // Both frames are the same function, so they are one row.
+            var row = capture.Self().Single(r => r.Key.StartsWith("app!Work"));
+            Assert.Equal(100, row.Samples);
+            Assert.Equal("work.cpp:55", row.Source);
         }
 
         [Fact]
