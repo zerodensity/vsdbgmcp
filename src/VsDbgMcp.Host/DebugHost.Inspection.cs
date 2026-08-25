@@ -563,6 +563,11 @@ namespace VsDbgMcp.Host
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
+            // A running thread has no frames to enumerate, and an empty list reads as a
+            // thread that is somehow sitting on nothing rather than a program that is
+            // still going.
+            RequireStopped();
+
             var thread = threadId.HasValue
                 ? AllThreads().FirstOrDefault(t => ThreadIdOf(t) == threadId.Value)
                 : CurrentThreadObject();

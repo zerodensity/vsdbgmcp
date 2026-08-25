@@ -41,6 +41,7 @@ namespace VsDbgMcp.Host
         bool _framePinned;
 
         TaskCompletionSource<string> _modeWaiter;
+        string _reportedMode = DebugModes.Design;
 
         public DebugHost(VsDbgMcpPackage package, DTE2 dte, IVsSolution solution, IVsDebugger vsDebugger,
             DebugEventSink sink, JoinableTaskFactory jtf, Action<string> log)
@@ -63,7 +64,39 @@ namespace VsDbgMcp.Host
             "launch", "go", "step", "run_to", "restart", "pause"
         };
 
-        public string CurrentMode { get; private set; } = DebugModes.Design;
+        /// <summary>
+        /// The shell's mode, read rather than remembered.
+        ///
+        /// IVsDebuggerEvents.OnModeChange arrives well after the change it announces, and
+        /// everything that asks whether the debuggee is stopped used to answer from it. A
+        /// read issued straight after go was served out of the frame where the program
+        /// last stopped, and pause was refused for nothing running while the program ran.
+        /// The automation model's own mode is right at the moment it is asked, so it is
+        /// asked. Off the UI thread it cannot be, and there the notification is all there
+        /// is.
+        /// </summary>
+        public string CurrentMode => ThreadHelper.CheckAccess() ? ShellMode() : _reportedMode;
+
+        string ShellMode()
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            try
+            {
+                switch (_dte.Debugger.CurrentMode)
+                {
+                    case dbgDebugMode.dbgBreakMode: return DebugModes.Break;
+                    case dbgDebugMode.dbgRunMode: return DebugModes.Run;
+                    case dbgDebugMode.dbgDesignMode: return DebugModes.Design;
+                    default: return _reportedMode;
+                }
+            }
+            catch (Exception)
+            {
+                // The automation model refuses to answer while the shell is busy, which is
+                // exactly when this is asked. What it last announced is what is left.
+                return _reportedMode;
+            }
+        }
 
         public void AttachServer(PipeServer server) => _server = server;
 
@@ -79,7 +112,7 @@ namespace VsDbgMcp.Host
                 _framePinned = false;
             }
 
-            CurrentMode = mode;
+            _reportedMode = mode;
             TaskCompletionSource<string> waiter;
             lock (_modeGate)
             {
