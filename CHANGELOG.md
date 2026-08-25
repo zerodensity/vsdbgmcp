@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
 - `profile_start` and `profile_stop` sample the debuggee's CPU use through Visual
   Studio's own collector, which attaches to a process the debugger already holds, so a
