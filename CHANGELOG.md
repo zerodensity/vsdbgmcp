@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 Nine issues from a second agent-driven session, and what driving a real debugger
 afterwards turned up, recorded in [docs/iteration_2.md](docs/iteration_2.md). The first
