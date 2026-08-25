@@ -134,7 +134,7 @@ Two interfaces cross the pipe. Both are small and version-negotiated.
     events       subscribe -> break, exception, moduleLoad, processExit, output
     breakpoints  set, remove, enable, list (with bind state)
     inspection   threads, stack, frames, eval, expand, memory, registers,
-                 disasm, modules, symbols
+                 disasm, modules, symbols, scratch
     io           consoleRead, consoleWrite, outputRead
     capture      windowCapture
 
@@ -286,12 +286,12 @@ and size; plus condition, hit count, and log message for tracepoints.
 `bp_list()`, `bp_remove(id)`, `bp_enable(id, on)`,
 `trace_read(id, tail?)`, `exceptions_set(category, code, breakOn)`
 
-**Inspection** (13)
+**Inspection** (15)
 `threads(depth?)`, `stack(thread?, count?)`, `select(thread?, frame?)`,
 `freeze(thread, on)`, `eval(expr, opts)`, `vars(scope, depth, filter)`,
 `expand(ref, depth, index?, key?)`, `watch_set(exprs[])`, `memory(addrOrExpr, size, format)`,
 `registers(group?)`, `disasm(addr?, count)`, `modules(filter?)`,
-`symbols(module, load?)`
+`symbols(module, load?)`, `scratch(type?, bytes?)`, `scratch_free(address)`
 
 **Evidence** (2)
 `triage()`, `capture(region?)`
@@ -305,7 +305,7 @@ and size; plus condition, hit count, and log message for tracepoints.
 clean. `build_cancel()`, `build_output(pattern?)`, `config(get|set)`,
 `startup_project(get|set)`
 
-**45 tools.** The ceiling is 50 — past that, an addition has to displace
+**47 tools.** The ceiling is 50 — past that, an addition has to displace
 something. The count is a constraint, not an outcome.
 
 ## 5. Debug semantics
@@ -414,6 +414,13 @@ Not a longer tool list — a different one.
   session into round trips. The reply reports the state after the attempt rather
   than what the load call returned, and says that a load does not survive the
   module reloading.
+- **Somewhere to write.** `scratch(type)` allocates a block of the debuggee's own
+  heap and hands back the address with the cast to paste into `eval`. The
+  expression evaluator will not create a temporary, so a function that writes
+  through a reference has no argument that can be written for it and calling one
+  was simply refused. The block comes from the program's allocator, so taking it
+  runs the program's code and losing track of it leaks in the program under
+  test; `scratch_free` gives it back and every reply lists what is still out.
 - **A remote target says so.** `status` names the machine a debuggee is running on
   and how the debugger reaches it, once the debug server has said the process is
   not local. Without that line a session over msvsmon reads as a dead one: the

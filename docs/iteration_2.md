@@ -306,7 +306,7 @@ had written.
 - `wait` after `stop` then `attach` returns a timeout rather than the previous process
   exiting. That is item 8, reproduced and gone.
 
-### Two things still open
+### One thing still open
 
 **Nested evaluation was not reproduced.** `Fold(Fold(1))` evaluates to 153 on Visual Studio
 2026; this evaluator does not refuse nested calls outright. The wording the issue reported
@@ -314,10 +314,67 @@ must come from a narrower case than the one that was tried, so the advice for it
 and untested. It costs nothing when it does not match, because an unrecognised message is
 passed through untouched.
 
-**`pause` returns before the shell is in break mode.** The stop event arrives from the
-debug engine first and `IVsDebuggerEvents.OnModeChange` follows a moment later, so a read
-issued straight after `pause` returns is refused with "the debuggee is not stopped. Current
-mode: run". It settles within a few seconds. This is not new and is not from this round,
-but it defeats what `pause` says it does — "blocks until it has actually stopped, so the
-frame is safe to inspect afterwards" — which was itself iteration 1's item 1. It wants
-`pause` to wait for the mode as well as the stop.
+## Afterwards: the mode was never being read
+
+`pause` returning before the shell was in break mode was left open above, with the guess
+that `pause` should wait for the mode as well as the stop. Chasing it found something
+larger, and the guess was wrong.
+
+The mode every check consulted was a field set from `IVsDebuggerEvents.OnModeChange`. A
+diagnostic build reported that field beside `DTE.Debugger.CurrentMode`, and after `go` the
+automation model said `run` immediately while the field still said `break` for fourteen
+round trips. The notification does not arrive when the mode changes; it arrives some
+seconds later. Everything that asked whether the debuggee was stopped was asking a value
+that was routinely wrong, in both directions:
+
+- A read issued straight after `go` was answered **from the frame where the program last
+  stopped**, which is the exact failure iteration 1's first item was written to stop.
+- `pause` straight after `go` was refused with "Nothing is running. Current mode: break",
+  which is the opposite of what was true.
+- The original complaint, a read straight after `pause` refused for not being stopped, is
+  the same fault seen from the other side.
+
+The mode is now read from the automation model at the moment it is asked for, and
+remembered only as a fallback for the calls that cannot reach the UI thread. Live, `go`
+followed immediately by `vars` is now refused with "Current mode: run", and `pause`
+followed immediately by `vars` reads `ms = 50`.
+
+The first attempt at this was a wait in the shim: hold a stop back until the mode
+notification said break. It was built, and then removed. The shim learns the mode from the
+same lagging notification, so the wait was satisfied by a stale `break` left over from the
+previous stop — it would have returned immediately whether or not the debuggee had
+stopped, while claiming to have established that it had.
+
+### What else the same run turned up
+
+**`registers` and `disasm` answered with an empty list when the pinned frame could not be
+read**, and the reply explained it as "No registers available. Native debugging only, and
+only in break mode." — three plausible reasons, none of them the actual one. Both now
+return the same refusal every other reader gives, naming the nearest frame that would
+work. `stack` had the same shape of answer for a running debuggee, showing no frames where
+the truth was that the program had not stopped.
+
+**Nothing could allocate in the debuggee**, which is the second half of item 4. The
+evaluator will not call a function it has no type information for, and it only sees
+functions the program imports, so `malloc(32)` is refused outright while
+`((void*(*)(unsigned __int64))malloc)(32)` returns a pointer. The C runtime is not used
+even so: `malloc` resolves in the fixture and `free` does not, and a block that cannot be
+given back is a leak by construction. `scratch` uses the Win32 heap, which every process
+has and which clears the block for us. Proven live by calling
+`Corrupt(Buffer&)` through a scratch block and reading back the seventeen bytes of `0x41`
+that its `memset` writes — a reference out-parameter, which is what item 4 said could not
+be done.
+
+Naming the type is the part that stays awkward, and the awkwardness is the evaluator's.
+It will not name a type in an anonymous namespace under any spelling that was tried, so
+`sizeof(Buffer)` fails where `sizeof(mesh)` works, and the module qualifier does not
+rescue it: `{,,Module}Name` in a type position answers "type name is not allowed", which
+rules out sizing a type from another module as well. So `scratch` takes a size in bytes
+for both cases and says so when it cannot size one itself.
+
+What does work, and is what the messages now point at: cast the function rather than the
+argument, and read the block back through the qualifier where it is allowed. Proven end
+to end by calling the plugin's own `Touch` against a scratch block -
+`((int(*)(void*))DebugPlugin.dll!Touch)((void*)0x...)` - and watching `refCount` go from
+0 to 1 through `expand(typeModule: "DebugPlugin.dll")`, on a type the calling module has
+never heard of.

@@ -2,10 +2,16 @@
 
 ## Unreleased
 
-Nine issues from a second agent-driven session, recorded in
-[docs/iteration_2.md](docs/iteration_2.md). The first two change what existing calls
-return.
+Nine issues from a second agent-driven session, and what driving a real debugger
+afterwards turned up, recorded in [docs/iteration_2.md](docs/iteration_2.md). The first
+three change what existing calls return.
 
+- Reads are refused while the debuggee is running, rather than answered out of the frame
+  where it last stopped. The mode they check is read from the shell as they ask; it used
+  to be taken from a notification that arrives seconds after the change it announces, so
+  a read issued straight after `go` was served from the previous stop, and `pause` was
+  refused for nothing running while the program ran. `stack` says the same rather than
+  showing no frames.
 - After a pause, reads no longer land on the row Visual Studio puts on top of the stack.
   `eval`, `vars`, `memory` and the rest step past it to the innermost frame that can be
   read and say which one that was. A frame pinned with `select(frame: N)` or named in
@@ -25,6 +31,10 @@ return.
   walks, which is why the number was missing. A breakpoint that breaks carries one even
   at zero, so `hits 0` says the line was never reached; a tracepoint carries none,
   because only hits that broke are counted at all.
+- `registers` and `disasm` say why they have nothing instead of returning an empty list
+  that read as "native debugging only". A frame pinned with `select(frame: N)` that
+  cannot be read names the nearest one that can, and both say which frame they read in
+  when it is not the one the call started from. `memory` says so too.
 - `wait` no longer answers with a stop left over from a debug session that has ended.
   Attaching to a debuggee that had been restarted returned the previous process
   exiting, which reads as the current target having died. A process that exited a
@@ -39,11 +49,20 @@ return.
   expression never has to be carried from one call to the next. The key is a walk down
   the elements comparing what each renders as, not a lookup, and it sees only the first
   200 an expansion reads; a refusal says which of those it compared.
+- `scratch(type)` takes a block of the debuggee's own heap and hands back its address
+  with the cast to paste into `eval`, which is what makes a call with a reference
+  out-parameter possible: the evaluator will not create a temporary, so the argument had
+  nowhere to live. `scratch_free` gives a block back and every reply lists what is still
+  out. Blocks come from the process heap, arrive cleared, and are forgotten when the
+  session ends. Taking one runs the program's own allocator. A type the frame's own
+  module does not name has to be given a size in bytes, because the module qualifier is
+  refused in a type position; `expand(typeModule)` reads the block back.
 - Two refusals that come from the native expression evaluator rather than from this
   server now say so, and say what to do instead: evaluate a nested call's inner half on
-  its own, and for a reference out-parameter allocate in the debuggee and pass a
-  dereferenced pointer, which is the caller's to free. Nothing else the evaluator says
-  is touched.
+  its own, and for a reference out-parameter take a block with `scratch` and pass a
+  dereference of its address. Where the evaluator will not name the type at all, which
+  happens to a type in an anonymous namespace, the advice is to cast the function instead
+  and hand it the raw block. Nothing else the evaluator says is touched.
 
 ## 0.2.0
 
