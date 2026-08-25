@@ -748,19 +748,40 @@ namespace VsDbgMcp.Host
             if (chosen.Refusal != null)
                 return new MemoryResult { Address = addressOrExpression, Length = size, Error = chosen.Refusal };
 
-            return NativeReader.ReadMemory(chosen.Frame, addressOrExpression, size);
+            var memory = NativeReader.ReadMemory(chosen.Frame, addressOrExpression, size);
+            memory.Frame = Reported(chosen);
+            memory.FrameNote = chosen.Note;
+            return memory;
         });
 
-        public Task<List<RegisterInfo>> RegistersAsync(string group, CancellationToken ct = default) => UIAsync(() =>
+        public Task<RegistersResult> RegistersAsync(string group, CancellationToken ct = default) => UIAsync(() =>
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            return NativeReader.ReadRegisters(CurrentFrame().Frame, group);
+
+            var chosen = CurrentFrame();
+            if (chosen.Refusal != null) return new RegistersResult { Message = chosen.Refusal };
+
+            return new RegistersResult
+            {
+                Registers = NativeReader.ReadRegisters(chosen.Frame, group),
+                Frame = Reported(chosen),
+                FrameNote = chosen.Note
+            };
         });
 
-        public Task<List<DisasmLine>> DisasmAsync(string address, int count, CancellationToken ct = default) => UIAsync(() =>
+        public Task<DisasmResult> DisasmAsync(string address, int count, CancellationToken ct = default) => UIAsync(() =>
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            return NativeReader.Disassemble(_sink.CurrentProgram, CurrentFrame().Frame, count);
+
+            var chosen = CurrentFrame();
+            if (chosen.Refusal != null) return new DisasmResult { Message = chosen.Refusal };
+
+            return new DisasmResult
+            {
+                Lines = NativeReader.Disassemble(_sink.CurrentProgram, chosen.Frame, count),
+                Frame = Reported(chosen),
+                FrameNote = chosen.Note
+            };
         });
 
         public Task<ModulesResult> ModulesAsync(string filter, CancellationToken ct = default) => UIAsync(() =>

@@ -335,8 +335,8 @@ namespace VsDbgMcp.Tests
         public Task<VarsResult> ExpandAsync(string reference, int depth, string typeModule, int? index, string key, CancellationToken ct = default) => Task.FromResult(new VarsResult());
         public Task<OpResult> WatchSetAsync(string[] expressions, CancellationToken ct = default) => Ok();
         public Task<MemoryResult> MemoryAsync(string addressOrExpression, int size, string format, CancellationToken ct = default) => Task.FromResult(new MemoryResult());
-        public Task<List<RegisterInfo>> RegistersAsync(string group, CancellationToken ct = default) => Task.FromResult(new List<RegisterInfo>());
-        public Task<List<DisasmLine>> DisasmAsync(string address, int count, CancellationToken ct = default) => Task.FromResult(new List<DisasmLine>());
+        public Task<RegistersResult> RegistersAsync(string group, CancellationToken ct = default) => Task.FromResult(new RegistersResult());
+        public Task<DisasmResult> DisasmAsync(string address, int count, CancellationToken ct = default) => Task.FromResult(new DisasmResult());
         /// <summary>
         /// The shape that matters: a plugin whose deployed image is older than the copy
         /// sitting at the same path here, which is the question the identity columns

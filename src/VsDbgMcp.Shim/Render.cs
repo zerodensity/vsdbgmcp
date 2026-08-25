@@ -706,11 +706,63 @@ namespace VsDbgMcp.Shim
             if (!string.IsNullOrEmpty(m.Error)) return "Could not read memory: " + m.Error;
 
             var sb = new StringBuilder();
+            ReadIn(sb, m.Frame, m.FrameNote);
             sb.Append(m.Address).Append("  ").Append(m.Length).AppendLine(" bytes");
             sb.AppendLine(m.Hex);
             if (!string.IsNullOrEmpty(m.Ascii)) sb.AppendLine(m.Ascii);
             foreach (var run in FillPatterns.Runs(m.Hex)) sb.AppendLine(run);
             return sb.ToString().TrimEnd();
+        }
+
+        public static string Registers(RegistersResult result)
+        {
+            if (result == null) return "No result.";
+            if (!string.IsNullOrEmpty(result.Message)) return result.Message;
+
+            var list = result.Registers;
+            if (list == null || list.Count == 0)
+                return "No registers available. Native debugging only, and only in break mode.";
+
+            var sb = new StringBuilder();
+            ReadIn(sb, result.Frame, result.FrameNote);
+
+            var i = 0;
+            foreach (var r in list)
+            {
+                sb.Append(r.Name.PadRight(8)).Append(r.Value.PadRight(20));
+                if (++i % 3 == 0) sb.AppendLine();
+            }
+            return sb.ToString().TrimEnd();
+        }
+
+        public static string Disasm(DisasmResult result)
+        {
+            if (result == null) return "No result.";
+            if (!string.IsNullOrEmpty(result.Message)) return result.Message;
+
+            var lines = result.Lines;
+            if (lines == null || lines.Count == 0) return "No disassembly available.";
+
+            var sb = new StringBuilder();
+            ReadIn(sb, result.Frame, result.FrameNote);
+
+            foreach (var l in lines)
+            {
+                if (!string.IsNullOrEmpty(l.File))
+                    sb.Append("; ").Append(System.IO.Path.GetFileName(l.File)).Append(':').Append(l.Line).AppendLine();
+                sb.Append(l.Address).Append("  ").Append((l.Bytes ?? "").PadRight(18)).AppendLine(l.Text);
+            }
+            return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>
+        /// Names the frame a read came out of, and only when the host said there was
+        /// something to name: a frame nobody chose, or one that had to be stepped past.
+        /// </summary>
+        static void ReadIn(StringBuilder sb, Frame frame, string note)
+        {
+            if (!string.IsNullOrEmpty(note)) sb.AppendLine(note);
+            if (frame != null) sb.AppendLine(Frames(new[] { frame }, frame.Index));
         }
 
         public static string Op(OpResult r, string success)

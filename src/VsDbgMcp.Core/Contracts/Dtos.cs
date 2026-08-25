@@ -532,6 +532,8 @@ namespace VsDbgMcp.Contracts
         public string Hex { get; set; }
         public string Ascii { get; set; }
         public string Error { get; set; }
+        public Frame Frame { get; set; }
+        public string FrameNote { get; set; }
     }
 
     public sealed class RegisterInfo
@@ -548,6 +550,36 @@ namespace VsDbgMcp.Contracts
         public string Text { get; set; }
         public string File { get; set; }
         public int Line { get; set; }
+    }
+
+    /// <summary>
+    /// Registers and the frame they came out of.
+    ///
+    /// An empty list used to be the answer to both "this frame has no registers" and
+    /// "nothing here can be read at all", and the second one has somewhere to send the
+    /// caller. The frame is named whenever it is not the one the call started from,
+    /// because registers read a frame further up are different numbers, not a different
+    /// label on the same ones.
+    /// </summary>
+    public sealed class RegistersResult
+    {
+        public List<RegisterInfo> Registers { get; set; } = new List<RegisterInfo>();
+        public Frame Frame { get; set; }
+        public string FrameNote { get; set; }
+
+        /// <summary>Set when there is nothing to return, saying why.</summary>
+        public string Message { get; set; }
+    }
+
+    /// <summary>Disassembly and the frame whose instruction pointer it started from.</summary>
+    public sealed class DisasmResult
+    {
+        public List<DisasmLine> Lines { get; set; } = new List<DisasmLine>();
+        public Frame Frame { get; set; }
+        public string FrameNote { get; set; }
+
+        /// <summary>Set when there is nothing to return, saying why.</summary>
+        public string Message { get; set; }
     }
 
     public sealed class ConsoleResult

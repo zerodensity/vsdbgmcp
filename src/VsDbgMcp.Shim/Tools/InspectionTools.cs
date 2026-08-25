@@ -166,17 +166,8 @@ namespace VsDbgMcp.Shim.Tools
             CancellationToken ct = default)
             => On(instance, ct, async link =>
             {
-                var list = await link.Debug.RegistersAsync(group, ct).ConfigureAwait(false);
-                if (list == null || list.Count == 0) return "No registers available. Native debugging only, and only in break mode.";
-
-                var sb = new StringBuilder();
-                var i = 0;
-                foreach (var r in list)
-                {
-                    sb.Append(r.Name.PadRight(8)).Append(r.Value.PadRight(20));
-                    if (++i % 3 == 0) sb.AppendLine();
-                }
-                return sb.ToString().TrimEnd();
+                var result = await link.Debug.RegistersAsync(group, ct).ConfigureAwait(false);
+                return Render.Registers(result);
             });
 
         [McpServerTool(Name = "disasm", ReadOnly = true)]
@@ -188,18 +179,9 @@ namespace VsDbgMcp.Shim.Tools
             CancellationToken ct = default)
             => On(instance, ct, async link =>
             {
-                var lines = await link.Debug.DisasmAsync(address, Math.Max(1, Math.Min(count, 200)), ct)
+                var result = await link.Debug.DisasmAsync(address, Math.Max(1, Math.Min(count, 200)), ct)
                     .ConfigureAwait(false);
-                if (lines == null || lines.Count == 0) return "No disassembly available.";
-
-                var sb = new StringBuilder();
-                foreach (var l in lines)
-                {
-                    if (!string.IsNullOrEmpty(l.File))
-                        sb.Append("; ").Append(System.IO.Path.GetFileName(l.File)).Append(':').Append(l.Line).AppendLine();
-                    sb.Append(l.Address).Append("  ").Append((l.Bytes ?? "").PadRight(18)).AppendLine(l.Text);
-                }
-                return sb.ToString().TrimEnd();
+                return Render.Disasm(result);
             });
 
         [McpServerTool(Name = "modules", ReadOnly = true)]
