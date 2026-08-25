@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.1
+
+- `profile_report` answers one reading at a time and refuses two, rather than quietly
+  answering whichever it looked for first. Asking for a call tree of one module returned
+  a call tree of everything, under a header that mentioned neither the module nor the
+  choice it had made.
+- Everywhere a report stops short now says that it stopped: the call tree's row limit, a
+  function's callers and callees, the modules or threads listed when a filter matched
+  nothing, and a row count larger than will ever be printed. A function with no source
+  lines says whether its symbols carry none or the reading stopped looking them up,
+  which are different problems with different answers.
+- Stacks deeper than the reader follows are counted and reported, so a profile missing
+  its outermost callers does not read as one whose callers are the frames it kept.
+
 ## 0.4.0
 
 - `profile_start` and `profile_stop` sample the debuggee's CPU use through Visual
