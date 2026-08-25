@@ -807,6 +807,97 @@ namespace VsDbgMcp.Host
             return SymbolLoad.For(_sink.CurrentProgram, module, load);
         });
 
+        // ---------------------------------------------------------------- profiling
+
+        public Task<OpResult> ProfileStartAsync(CancellationToken ct = default) => UIOpAsync(() =>
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (CurrentMode == DebugModes.Design)
+                return OpResult.Bad("Nothing is being debugged, so there is no process to profile. " +
+                                    "Use launch or attach first.");
+
+            if (_profiler == null)
+            {
+                _profiler = Profiler.Find(DevenvPath(), out var missing);
+                if (_profiler == null) return OpResult.Bad(missing);
+            }
+
+            if (_profiler.Running)
+                return OpResult.Bad("A profile is already being collected. Call profile_stop to end it.");
+
+            var target = ProfileTarget(out var refusal);
+            if (refusal != null) return OpResult.Bad(refusal);
+
+            var failure = _profiler.Start(target.Pid, CapturePath(target.Pid));
+            if (failure != null) return OpResult.Bad(failure);
+
+            _profiled = target;
+            return OpResult.Good("Collecting a profile of " + target.Describe() +
+                                 ". Let it do the work you want measured, then call profile_stop. " +
+                                 "Only threads on the CPU are sampled, so time spent blocked will not appear.");
+        });
+
+        public Task<ProfileCollection> ProfileStopAsync(CancellationToken ct = default) => UIAsync(() =>
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (_profiler == null || !_profiler.Running)
+                return new ProfileCollection { Error = "Nothing is being profiled. Call profile_start first." };
+
+            var failure = _profiler.Stop(out var seconds, out var path);
+            if (failure != null) return new ProfileCollection { Error = failure };
+
+            return new ProfileCollection
+            {
+                Path = path,
+                ProcessName = _profiled.Name,
+                Pid = _profiled.Pid,
+                Seconds = seconds
+            };
+        });
+
+        /// <summary>
+        /// Which process to profile. With one debuggee it is that one; with several the
+        /// caller has to say, because a profile of the launcher when they meant the
+        /// program it started looks like a program that does nothing.
+        /// </summary>
+        ProcessIdentity ProfileTarget(out string refusal)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            refusal = null;
+
+            var current = ProcessIdentity.Of(CurrentThreadObject());
+            if (current.Pid != 0) return current;
+
+            var debugged = DebuggedProcesses();
+            if (debugged.Count == 1)
+                return new ProcessIdentity { Pid = debugged[0].Pid, Name = debugged[0].Name };
+
+            refusal = debugged.Count == 0
+                ? "No process is being debugged in this session."
+                : "This session is debugging " + debugged.Count + " processes and none is current, so " +
+                  "which one to profile is not decided: " +
+                  string.Join(", ", debugged.Select(p => p.Name + " (" + p.Pid + ")").ToArray()) +
+                  ". Use select to pick one.";
+            return default(ProcessIdentity);
+        }
+
+        /// <summary>Where this collection is written. The shim reads it and deletes it.</summary>
+        static string CapturePath(int pid) =>
+            System.IO.Path.Combine(Names.InstanceDir, "captures",
+                pid + "-" + DateTime.UtcNow.ToString("HHmmss") + ".diagsession");
+
+        /// <summary>
+        /// The running Visual Studio's own executable, which is what locates everything
+        /// that ships beside it.
+        /// </summary>
+        string DevenvPath()
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            return Read(() => _dte.FullName, null, "the Visual Studio install path");
+        }
+
         // ---------------------------------------------------------------- scratch
 
         public Task<ScratchResult> ScratchAsync(int bytes, string type, CancellationToken ct = default) => UIAsync(() =>

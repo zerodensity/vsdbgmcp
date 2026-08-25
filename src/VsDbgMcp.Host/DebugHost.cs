@@ -31,6 +31,8 @@ namespace VsDbgMcp.Host
         readonly BreakpointTable _breakpoints = new BreakpointTable();
         readonly Dictionary<int, uint> _suspended = new Dictionary<int, uint>();
         readonly List<ScratchBlock> _scratch = new List<ScratchBlock>();
+        Profiler _profiler;
+        ProcessIdentity _profiled;
         readonly object _modeGate = new object();
 
         PipeServer _server;
@@ -116,7 +118,14 @@ namespace VsDbgMcp.Host
             // Scratch blocks are addresses in the debuggee, and the debuggee is what has
             // just gone. Keeping the list would offer memory in a process that no longer
             // exists, and freeing it later would free somebody else's.
-            if (mode == DebugModes.Design) _scratch.Clear();
+            if (mode == DebugModes.Design)
+            {
+                _scratch.Clear();
+
+                // The process being sampled has gone, so whatever was gathered describes
+                // something that no longer exists and nobody is going to ask for.
+                _profiler?.Abandon();
+            }
 
             _reportedMode = mode;
             TaskCompletionSource<string> waiter;

@@ -21,8 +21,10 @@ namespace VsDbgMcp
         ///    can pick one element out of a container, every read says which frame
         ///    it came out of or why nothing there could be read, and the debuggee's
         ///    heap can be borrowed for an out-parameter.
+        /// 6: a debuggee can be profiled, with the extension collecting and the shim
+        ///    reading what it collected.
         /// </summary>
-        public const int ContractVersion = 5;
+        public const int ContractVersion = 6;
 
         public const string InstanceFilePrefix = "inst-";
         public const string InstanceFileSuffix = ".json";

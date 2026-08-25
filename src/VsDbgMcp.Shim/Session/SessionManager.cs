@@ -40,6 +40,9 @@ namespace VsDbgMcp.Shim.Session
         public string Cwd { get; }
         public EventBus Events { get; } = new EventBus();
 
+        /// <summary>The profiles taken in this session, so one can be read against another.</summary>
+        public Profiling.Captures Captures { get; } = new Profiling.Captures();
+
         public string StickyInstanceId => _sticky;
 
         public async Task<IReadOnlyList<HostLink>> RefreshAsync(bool force, CancellationToken ct)

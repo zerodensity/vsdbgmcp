@@ -66,6 +66,7 @@ namespace VsDbgMcp.Shim
                 .WithTools<ExecutionTools>()
                 .WithTools<BreakpointTools>()
                 .WithTools<InspectionTools>()
+                .WithTools<ProfileTools>()
                 .WithTools<EvidenceTools>()
                 .WithTools<IoTools>()
                 .WithTools<BuildTools>();

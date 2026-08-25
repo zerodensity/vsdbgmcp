@@ -12,7 +12,7 @@ namespace VsDbgMcp.Shim
     /// Turns results into compact text. Every tool answers a question; none of them
     /// hand back a serialized object for the caller to interpret.
     /// </summary>
-    public static class Render
+    public static partial class Render
     {
         public static string Instances(IReadOnlyList<HostLink> links, string cwd, string sticky)
         {

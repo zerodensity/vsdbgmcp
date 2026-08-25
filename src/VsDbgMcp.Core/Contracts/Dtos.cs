@@ -609,6 +609,29 @@ namespace VsDbgMcp.Contracts
         public string Error { get; set; }
     }
 
+    /// <summary>
+    /// A finished profiling collection, as a file on disk for the shim to read.
+    ///
+    /// The extension collects because it is the only side that knows where Visual
+    /// Studio put its collector and which process is being debugged. It does not
+    /// analyse: a trace is tens of megabytes for a few seconds and parsing one inside
+    /// devenv would put that cost in the editor's own process.
+    /// </summary>
+    public sealed class ProfileCollection
+    {
+        /// <summary>The .diagsession the collector wrote. The reader owns it and deletes it.</summary>
+        public string Path { get; set; }
+
+        public string ProcessName { get; set; }
+        public int Pid { get; set; }
+
+        /// <summary>How long collection actually ran.</summary>
+        public double Seconds { get; set; }
+
+        /// <summary>Set when nothing was collected, saying why.</summary>
+        public string Error { get; set; }
+    }
+
     public sealed class ConsoleResult
     {
         public string Text { get; set; }

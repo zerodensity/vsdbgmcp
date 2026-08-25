@@ -97,6 +97,7 @@
     <Compile Include="PipeServer.cs" />
     <Compile Include="ProcessIdentity.cs" />
     <Compile Include="ProjectSystem.cs" />
+    <Compile Include="Profiler.cs" />
     <Compile Include="Scratch.cs" />
     <Compile Include="ShimStaging.cs" />
     <Compile Include="StatusWindow.cs" />

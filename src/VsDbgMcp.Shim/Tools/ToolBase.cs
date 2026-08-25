@@ -66,6 +66,44 @@ namespace VsDbgMcp.Shim.Tools
         }
 
         /// <summary>
+        /// A tool that answers out of what the shim already holds.
+        ///
+        /// It is still shown in the panel when a window is connected, and it still works
+        /// when none is: refusing to re-read a profile that was collected an hour ago
+        /// because Visual Studio has since closed would be a failure with no cause.
+        /// </summary>
+        protected async Task<string> Locally(string instance, CancellationToken ct, Func<string> body,
+            string detail = null, [CallerMemberName] string caller = null)
+        {
+            var started = Stopwatch.StartNew();
+            HostLink link = null;
+
+            try { link = await Sessions.ResolveAsync(instance, ct).ConfigureAwait(false); }
+            catch (Exception) { /* no window is a reason to skip the panel, not to refuse. */ }
+
+            string result;
+            var failed = false;
+
+            try
+            {
+                result = body();
+            }
+            catch (OperationCanceledException)
+            {
+                return "Cancelled.";
+            }
+            catch (Exception ex)
+            {
+                result = "ERROR: " + Flatten(ex);
+                failed = true;
+            }
+
+            started.Stop();
+            Report(link, ToolName(caller), detail, result, (int)started.ElapsedMilliseconds, failed);
+            return result;
+        }
+
+        /// <summary>
         /// One way and never awaited. The panel is worth having, but not at the cost of
         /// slowing a tool down or failing one because the report did not land - including
         /// against an older extension that has no method to receive it.

@@ -63,6 +63,10 @@ namespace VsDbgMcp.Contracts
         Task<ScratchResult> ScratchAsync(int bytes, string type, CancellationToken ct = default);
         Task<ScratchResult> ScratchFreeAsync(string address, CancellationToken ct = default);
 
+        // Profiling: the extension collects, the shim reads what it collected.
+        Task<OpResult> ProfileStartAsync(CancellationToken ct = default);
+        Task<ProfileCollection> ProfileStopAsync(CancellationToken ct = default);
+
         // Evidence
         Task<string> TriageAsync(CancellationToken ct = default);
         Task<CaptureResult> CaptureAsync(int[] region, CancellationToken ct = default);
