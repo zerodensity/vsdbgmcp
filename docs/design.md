@@ -136,6 +136,7 @@ Two interfaces cross the pipe. Both are small and version-negotiated.
     inspection   threads, stack, frames, eval, expand, memory, registers,
                  disasm, modules, symbols, scratch
     io           consoleRead, consoleWrite, outputRead
+    profiling    profileStart, profileStop
     capture      windowCapture
 
 **`IProjectSystem`** — build, launch targets, startup selection, configuration.
@@ -293,6 +294,10 @@ and size; plus condition, hit count, and log message for tracepoints.
 `registers(group?)`, `disasm(addr?, count)`, `modules(filter?)`,
 `symbols(module, load?)`, `scratch(type?, bytes?)`, `scratch_free(address)`
 
+**Profiling** (3)
+`profile_start()`, `profile_stop()`,
+`profile_report(capture?, against?, function?, module?, thread?, sort?, top?)`
+
 **Evidence** (2)
 `triage()`, `capture(region?)`
 
@@ -305,8 +310,9 @@ and size; plus condition, hit count, and log message for tracepoints.
 clean. `build_cancel()`, `build_output(pattern?)`, `config(get|set)`,
 `startup_project(get|set)`
 
-**47 tools.** The ceiling is 50 — past that, an addition has to displace
-something. The count is a constraint, not an outcome.
+**50 tools.** What is held to is what each one is: a tool answers one question.
+A tool that needs a mode argument to say which question it is answering is two
+tools, and a question already answered does not need a second way to ask it.
 
 ## 5. Debug semantics
 
@@ -427,6 +433,27 @@ Not a longer tool list — a different one.
   pid is in no local process list and the paths in every other reply do not
   exist on this disk. Both are correct, and both are what remote debugging looks
   like.
+- **Profiling an agent can read.** `profile_start` and `profile_stop` drive Visual
+  Studio's own sampling collector, which attaches to a process the debugger already
+  holds, so a profile is something taken during a debug session rather than instead
+  of one. What comes back is not a file to open: the trace is read in the shim and
+  reduced to counted stacks, and `profile_report` answers from those - where the
+  samples landed, the path most of them went down, one function's callers and the
+  source lines inside it, a roll-up per binary, or what moved since an earlier
+  capture. The trace is then thrown away; a few seconds of one small program is tens
+  of megabytes, and every later question is a different sum over counts that fit in
+  a few hundred kilobytes.
+
+  The symbols come from the debugger rather than from a symbol server: it has
+  already found the PDB for every module in this session and knows which modules are
+  the user's own, and both of those are what turn a profile of addresses into a
+  profile of functions.
+
+  What sampling cannot see is said rather than left to be inferred. A profile with
+  too few samples refuses to rank them; a process that spent its time blocked says
+  what share of the wall clock it was actually on a processor, because a lock is
+  invisible to a CPU profiler and silence there reads as nothing being wrong; a
+  module without symbols is one row that names itself and the call that would fix it.
 - **Crash dumps.** `dump_open(path)` and every inspection tool works unchanged.
   Cheap to support, and it makes the server useful for triage with no live
   process at all.

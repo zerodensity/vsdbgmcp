@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- `profile_start` and `profile_stop` sample the debuggee's CPU use through Visual
+  Studio's own collector, which attaches to a process the debugger already holds, so a
+  profile is taken during a debug session rather than instead of one. `profile_stop`
+  reports where the samples landed, the path most of them went down, and what each
+  thread was doing.
+- `profile_report` asks anything else of a profile already taken, without collecting
+  again: one function's callers, the functions it called and which of its source lines
+  the samples landed on; the same samples as a call tree; a roll-up per binary, which is
+  the first question to ask of a host with plugins in it; one thread on its own; or what
+  moved since an earlier capture, in percentage points. Every folded line says which
+  argument unfolds it.
+- A profile says what sampling cannot see. Too few samples to rank refuses to rank them;
+  a process that was mostly blocked says what share of the wall clock it was on a
+  processor, because a lock is invisible to a CPU profiler and saying nothing there
+  reads as nothing being wrong; a module without symbols is one row naming the call that
+  would name its functions.
+
 ## 0.3.0
 
 Nine issues from a second agent-driven session, and what driving a real debugger
