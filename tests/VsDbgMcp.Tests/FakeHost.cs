@@ -335,6 +335,8 @@ namespace VsDbgMcp.Tests
         public Task<VarsResult> ExpandAsync(string reference, int depth, string typeModule, int? index, string key, CancellationToken ct = default) => Task.FromResult(new VarsResult());
         public Task<OpResult> WatchSetAsync(string[] expressions, CancellationToken ct = default) => Ok();
         public Task<MemoryResult> MemoryAsync(string addressOrExpression, int size, string format, CancellationToken ct = default) => Task.FromResult(new MemoryResult());
+        public Task<ScratchResult> ScratchAsync(int bytes, string type, CancellationToken ct = default) => Task.FromResult(new ScratchResult());
+        public Task<ScratchResult> ScratchFreeAsync(string address, CancellationToken ct = default) => Task.FromResult(new ScratchResult());
         public Task<RegistersResult> RegistersAsync(string group, CancellationToken ct = default) => Task.FromResult(new RegistersResult());
         public Task<DisasmResult> DisasmAsync(string address, int count, CancellationToken ct = default) => Task.FromResult(new DisasmResult());
         /// <summary>

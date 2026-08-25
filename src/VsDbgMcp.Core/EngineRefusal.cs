@@ -43,10 +43,11 @@ namespace VsDbgMcp
             if (BindsAReference(message))
             {
                 return "The native expression evaluator has no storage to bind a reference parameter " +
-                       "to, so it cannot make this call at all. Allocate in the debuggee yourself and " +
-                       "pass a dereference of that address - f(*(unsigned int*)0x1a9fc170000) - " +
-                       "remembering that the allocation is yours to free, because nothing here " +
-                       "tracks it.";
+                       "to, so it cannot make this call at all. Take a block with scratch and pass a " +
+                       "dereference of its address - f(*(Thing*)0x1a9fc170000) - then give it back with " +
+                       "scratch_free. Where the evaluator will not name the type at all, which happens " +
+                       "to a type in an anonymous namespace, cast the function instead and hand it the " +
+                       "raw block: ((void(*)(void*))Module.exe!Namespace::f)((void*)0x1a9fc170000).";
             }
 
             return null;

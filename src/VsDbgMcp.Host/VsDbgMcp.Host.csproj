@@ -97,6 +97,7 @@
     <Compile Include="PipeServer.cs" />
     <Compile Include="ProcessIdentity.cs" />
     <Compile Include="ProjectSystem.cs" />
+    <Compile Include="Scratch.cs" />
     <Compile Include="ShimStaging.cs" />
     <Compile Include="StatusWindow.cs" />
     <Compile Include="SymbolLoad.cs" />
@@ -118,6 +119,7 @@
     <Compile Include="..\VsDbgMcp.Core\ModuleQualifier.cs" Link="Core\ModuleQualifier.cs" />
     <Compile Include="..\VsDbgMcp.Core\PathUtil.cs" Link="Core\PathUtil.cs" />
     <Compile Include="..\VsDbgMcp.Core\Router.cs" Link="Core\Router.cs" />
+    <Compile Include="..\VsDbgMcp.Core\ScratchAddress.cs" Link="Core\ScratchAddress.cs" />
     <Compile Include="..\VsDbgMcp.Core\SourceFreshness.cs" Link="Core\SourceFreshness.cs" />
     <Compile Include="..\VsDbgMcp.Core\SymbolSearch.cs" Link="Core\SymbolSearch.cs" />
     <Compile Include="..\VsDbgMcp.Core\TraceLog.cs" Link="Core\TraceLog.cs" />

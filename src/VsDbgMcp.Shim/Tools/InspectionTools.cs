@@ -184,6 +184,36 @@ namespace VsDbgMcp.Shim.Tools
                 return Render.Disasm(result);
             });
 
+        [McpServerTool(Name = "scratch", Destructive = true)]
+        [Description("Allocate a block of the debuggee's own heap and return its address, so a call has somewhere to write. This is what makes an out-parameter possible: the evaluator will not create a temporary, so eval(\"Fill(result)\") has nowhere to put result, and eval(\"Fill(*(Result*)ADDRESS)\") does. Give a type to size the block from sizeof and get the expression to paste back into eval, or give bytes for a raw buffer. Calling the allocator runs code in the program being debugged, and the block is the program's to leak: free it with scratch_free. Every reply lists what is still outstanding.")]
+        public Task<string> Scratch(
+            [Description("Type to size the block for, and to cast it back to. It has to be one the frame's own module names: the module qualifier is not allowed in a type position, so for a type from elsewhere pass bytes and read the block back with expand(typeModule).")] string type = null,
+            [Description("Size in bytes. Omit it when a type is given; give it for a raw buffer, or when the type cannot be sized here.")] int bytes = 0,
+            [Description("Instance id. Omit to use the default for this session.")] string instance = null,
+            CancellationToken ct = default)
+            => On(instance, ct, async link =>
+            {
+                const int cap = 1 << 20;
+                if (bytes > cap)
+                    return "That is more than a megabyte. Scratch is for arguments, not for buffers of " +
+                           "that size; allocate one in the program itself if you really need it.";
+
+                var result = await link.Debug.ScratchAsync(bytes, type, ct).ConfigureAwait(false);
+                return Render.Scratch(result);
+            }, type ?? (bytes + " bytes"));
+
+        [McpServerTool(Name = "scratch_free", Destructive = true)]
+        [Description("Give a scratch block back to the debuggee's allocator. Pass 'all' to release every outstanding block. Blocks are forgotten when the debug session ends, because the heap goes with the process, so this matters while a session is still running.")]
+        public Task<string> ScratchFree(
+            [Description("Address of the block, as scratch reported it, or 'all'.")] string address = "all",
+            [Description("Instance id. Omit to use the default for this session.")] string instance = null,
+            CancellationToken ct = default)
+            => On(instance, ct, async link =>
+            {
+                var result = await link.Debug.ScratchFreeAsync(address, ct).ConfigureAwait(false);
+                return Render.Scratch(result);
+            }, address);
+
         [McpServerTool(Name = "modules", ReadOnly = true)]
         [Description("Loaded modules: symbol state, the time stamped into each loaded image, its load path, size and load address, and any source file with a breakpoint in it that is newer than the module it belongs to. Check this first when a breakpoint will not bind or a stack is full of addresses instead of function names: the answer is almost always a module with no symbols loaded, or a source edited since the module was built. Filter to a few modules to see each one's full identity, which is what answers whether a binary deployed elsewhere is the one that was just built. A filtered answer says how many modules it picked from, because more load while the program runs.")]
         public Task<string> Modules(

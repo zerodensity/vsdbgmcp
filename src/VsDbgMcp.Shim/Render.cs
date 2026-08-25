@@ -765,6 +765,54 @@ namespace VsDbgMcp.Shim
             if (frame != null) sb.AppendLine(Frames(new[] { frame }, frame.Index));
         }
 
+        /// <summary>
+        /// What scratch and scratch_free answer with.
+        ///
+        /// The cast is written out rather than left to the caller because that is the
+        /// whole point of the call: an address on its own is what the evaluator already
+        /// refused to take.
+        /// </summary>
+        public static string Scratch(ScratchResult result)
+        {
+            if (result == null) return "No result.";
+
+            var sb = new StringBuilder();
+            if (result.Freed > 0)
+                sb.Append("Freed ").Append(result.Freed).AppendLine(result.Freed == 1 ? " block." : " blocks.");
+
+            var block = result.Block;
+            if (block != null)
+            {
+                sb.Append(block.Address).Append("  ").Append(block.Bytes)
+                  .AppendLine(" bytes from the debuggee's heap, zeroed");
+
+                if (!string.IsNullOrEmpty(block.Type))
+                {
+                    sb.Append("  pass it as   *(").Append(block.Type).Append("*)").AppendLine(block.Address);
+                    sb.Append("  or point at  (").Append(block.Type).Append("*)").AppendLine(block.Address);
+                }
+                else
+                {
+                    sb.Append("  pass it as   (void*)").AppendLine(block.Address);
+                }
+            }
+
+            if (!string.IsNullOrEmpty(result.Error)) sb.AppendLine(result.Error);
+
+            var outstanding = result.Outstanding;
+            if (outstanding != null && outstanding.Count > 0)
+            {
+                sb.Append("Outstanding: ").Append(outstanding.Count)
+                  .Append(outstanding.Count == 1 ? " block, " : " blocks, ")
+                  .Append(outstanding.Sum(b => b.Bytes)).AppendLine(" bytes");
+                foreach (var b in outstanding)
+                    sb.Append("  ").Append(b.Address).Append("  ").Append(b.Bytes)
+                      .Append(" bytes").AppendLine(string.IsNullOrEmpty(b.Type) ? "" : "  " + b.Type);
+            }
+
+            return sb.ToString().TrimEnd();
+        }
+
         public static string Op(OpResult r, string success)
         {
             if (r == null) return "No result.";

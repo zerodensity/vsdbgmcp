@@ -29,7 +29,8 @@ namespace VsDbgMcp.Tests
                 "with a value of type \"unsigned long\"");
 
             Assert.Contains("no storage to bind a reference parameter to", text);
-            Assert.Contains("yours to free", text);
+            Assert.Contains("scratch", text);
+            Assert.Contains("scratch_free", text);
         }
 
         [Fact]

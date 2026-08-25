@@ -582,6 +582,33 @@ namespace VsDbgMcp.Contracts
         public string Message { get; set; }
     }
 
+    /// <summary>
+    /// A block of the debuggee's own heap, handed out so a call has somewhere to write.
+    /// </summary>
+    public sealed class ScratchBlock
+    {
+        public string Address { get; set; }
+        public int Bytes { get; set; }
+
+        /// <summary>The type it was sized for, when it was sized for one.</summary>
+        public string Type { get; set; }
+    }
+
+    public sealed class ScratchResult
+    {
+        /// <summary>The block just allocated. Null when the call was a free or failed.</summary>
+        public ScratchBlock Block { get; set; }
+
+        /// <summary>Everything still allocated in this session, the new block included.</summary>
+        public List<ScratchBlock> Outstanding { get; set; } = new List<ScratchBlock>();
+
+        /// <summary>How many blocks a free actually released.</summary>
+        public int Freed { get; set; }
+
+        /// <summary>Set when nothing was allocated or freed, saying why.</summary>
+        public string Error { get; set; }
+    }
+
     public sealed class ConsoleResult
     {
         public string Text { get; set; }

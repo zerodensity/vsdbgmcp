@@ -807,6 +807,79 @@ namespace VsDbgMcp.Host
             return SymbolLoad.For(_sink.CurrentProgram, module, load);
         });
 
+        // ---------------------------------------------------------------- scratch
+
+        public Task<ScratchResult> ScratchAsync(int bytes, string type, CancellationToken ct = default) => UIAsync(() =>
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            var chosen = CurrentFrame();
+            if (chosen.Refusal != null) return Held(chosen.Refusal);
+
+            if (bytes <= 0 && string.IsNullOrWhiteSpace(type))
+                return Held("Give a size in bytes, or a type to take the size from.");
+
+            if (bytes <= 0)
+            {
+                bytes = Scratch.SizeOf(chosen.Frame, type, out var sizeError);
+                if (bytes <= 0) return Held(sizeError);
+            }
+
+            var block = Scratch.Allocate(chosen.Frame, bytes, type, out var error);
+            if (block == null) return Held(error);
+
+            _scratch.Add(block);
+            return new ScratchResult { Block = block, Outstanding = _scratch.ToList() };
+        });
+
+        public Task<ScratchResult> ScratchFreeAsync(string address, CancellationToken ct = default) => UIAsync(() =>
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (_scratch.Count == 0) return Held("Nothing is allocated.");
+
+            var chosen = CurrentFrame();
+            if (chosen.Refusal != null) return Held(chosen.Refusal);
+
+            var everything = string.Equals(address, "all", StringComparison.OrdinalIgnoreCase);
+            var wanted = _scratch.Where(b => everything || SameAddress(b.Address, address)).ToList();
+            if (wanted.Count == 0)
+                return Held("No block at " + address + " came from scratch. Free one it handed out, or all.");
+
+            var stuck = new List<string>();
+            foreach (var block in wanted)
+            {
+                if (Scratch.Free(chosen.Frame, block, out var error)) _scratch.Remove(block);
+                else stuck.Add(block.Address + ": " + error);
+            }
+
+            return new ScratchResult
+            {
+                Freed = wanted.Count - stuck.Count,
+                Error = stuck.Count == 0 ? null : "Could not free " + string.Join("; ", stuck),
+                Outstanding = _scratch.ToList()
+            };
+        });
+
+        /// <summary>A refusal that still says what is outstanding, so a failed call does not read as an empty session.</summary>
+        ScratchResult Held(string error) => new ScratchResult { Error = error, Outstanding = _scratch.ToList() };
+
+        /// <summary>
+        /// The same address written two ways. A caller reads one out of a reply and may
+        /// well type it back without the leading zeros.
+        /// </summary>
+        static bool SameAddress(string block, string asked)
+        {
+            if (string.IsNullOrWhiteSpace(asked)) return false;
+
+            var text = asked.Trim();
+            if (!text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) text = "0x" + text;
+
+            return ScratchAddress.TryParse(block, out var left) &&
+                   ScratchAddress.TryParse(text, out var right) &&
+                   left == right;
+        }
+
         /// <summary>
         /// Marks the modules whose binary is older than a source file someone has a
         /// breakpoint in. Reading that here costs a line; finding it out from a

@@ -60,6 +60,8 @@ namespace VsDbgMcp.Contracts
         Task<DisasmResult> DisasmAsync(string address, int count, CancellationToken ct = default);
         Task<ModulesResult> ModulesAsync(string filter, CancellationToken ct = default);
         Task<SymbolResult> SymbolsAsync(string module, bool load, CancellationToken ct = default);
+        Task<ScratchResult> ScratchAsync(int bytes, string type, CancellationToken ct = default);
+        Task<ScratchResult> ScratchFreeAsync(string address, CancellationToken ct = default);
 
         // Evidence
         Task<string> TriageAsync(CancellationToken ct = default);

@@ -30,6 +30,7 @@ namespace VsDbgMcp.Host
 
         readonly BreakpointTable _breakpoints = new BreakpointTable();
         readonly Dictionary<int, uint> _suspended = new Dictionary<int, uint>();
+        readonly List<ScratchBlock> _scratch = new List<ScratchBlock>();
         readonly object _modeGate = new object();
 
         PipeServer _server;
@@ -111,6 +112,11 @@ namespace VsDbgMcp.Host
                 _selectedFrame = 0;
                 _framePinned = false;
             }
+
+            // Scratch blocks are addresses in the debuggee, and the debuggee is what has
+            // just gone. Keeping the list would offer memory in a process that no longer
+            // exists, and freeing it later would free somebody else's.
+            if (mode == DebugModes.Design) _scratch.Clear();
 
             _reportedMode = mode;
             TaskCompletionSource<string> waiter;
