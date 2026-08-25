@@ -26,43 +26,7 @@ otherwise fails silently, which is why it is checked rather than assumed.
 
 ## Publish to the Marketplace
 
-The listing text is `marketplace/overview.md`; `marketplace/publishManifest.json` holds
-the rest.
-
-**The first time**, do it through the web form at
-[marketplace.visualstudio.com/manage](https://marketplace.visualstudio.com/manage) — the
-categories, overview and Q&A setting are only editable there, and the extension is not
-public until you pick **Make Public** afterwards.
-
-Take the `.vsix` from the GitHub release the tag produced.
-
-**After that**, from a Developer PowerShell:
-
-```powershell
-& "${env:VSINSTALLDIR}\VSSDK\VisualStudioIntegration\Tools\Bin\VsixPublisher.exe" publish `
-    -payload  "src\VsDbgMcp.Host\bin\Release\VsDbgMcp.Host.vsix" `
-    -publishManifest "marketplace\publishManifest.json" `
-    -personalAccessToken $env:VSMARKETPLACE_PAT
-```
-
-## Things that cannot be undone
-
-- **The version cannot be edited after upload, and must increase.** So can the display
-  name, VSIX ID and supported versions — those are read from the manifest on first
-  upload and fixed from then on.
-- **`internalName` is the URL.** `ZeroDensity` + `vsdbgmcp` gives
-  `marketplace.visualstudio.com/items?itemName=ZeroDensity.vsdbgmcp`.
-- **Removing an extension is irreversible** and asks you to type its name to confirm.
-
-## Signing
-
-The package ships unsigned, which installs with a signature warning and is accepted by
-the Marketplace. What is *not* accepted is a self-signed certificate, so signing means a
-certificate from a real authority — then `sign code` from the
-[Sign CLI](https://github.com/dotnet/sign); `VSIXSignTool` is deprecated.
-
-## Publisher access
-
-Members are added to the publisher account by **User ID**, not email — adding by email
-fails with `TF14045`. The ID is shown by hovering over your name on the Marketplace, with
-a button to copy it.
+Publishing the listing is separate from cutting a release, and a release can ship
+without touching it. See [marketplace.md](marketplace.md) for the listing itself, what
+has to change in it when the product changes, and what cannot be taken back once
+uploaded.

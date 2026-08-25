@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- A profile whose trace did not record how often it sampled now says so, rather than
+  leaving out the one line that separates a program waiting on a lock from a program with
+  nothing slow in it.
+
 ## 0.4.1
 
 - `profile_report` answers one reading at a time and refuses two, rather than quietly

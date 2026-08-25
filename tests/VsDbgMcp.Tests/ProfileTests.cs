@@ -250,6 +250,16 @@ namespace VsDbgMcp.Tests
         }
 
         [Fact]
+        public void A_capture_that_cannot_tell_its_rate_reports_no_processor_time()
+        {
+            var capture = Simple();
+            capture.Seconds = 10;
+            capture.SamplesPerSecond = 0;
+
+            Assert.Null(capture.CpuSeconds());
+        }
+
+        [Fact]
         public void Several_busy_threads_use_more_processor_time_than_the_clock_ran_for()
         {
             // Four threads on four cores for one second is four seconds of processor

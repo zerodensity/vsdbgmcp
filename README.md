@@ -3,8 +3,8 @@
 Drives the Visual Studio debugger from an AI agent, over the Model Context Protocol.
 
 C++ is a first-class target: data breakpoints, disassembly, crash dumps, symbol
-diagnostics, and the debuggee's own console. Several Visual Studio windows can be driven
-from one agent session.
+diagnostics, sampling profiles, and the debuggee's own console. Several Visual Studio
+windows can be driven from one agent session.
 
 ## What it does
 
@@ -21,6 +21,13 @@ value to pass.
 For C++: a breakpoint that cannot bind says so and why, `triage` collects a crash in one
 call, `bp_set` can watch an address for writes, and `console_read` reads the debuggee's
 own stdout.
+
+A profile is something an agent can read rather than a file to open. `profile_start` and
+`profile_stop` drive Visual Studio's own sampling collector against a process the
+debugger is already holding; the trace is read and thrown away, and `profile_report`
+answers from what is left — who calls a hot function, which of its source lines the
+samples landed on, which binary the time went to, or what moved since the last
+capture.
 
 ## Install
 
@@ -122,7 +129,7 @@ connections, and anything that went wrong inside the extension.
 
 ## Tools
 
-45 of them.
+50 of them.
 
 | | |
 |---|---|
@@ -130,7 +137,8 @@ connections, and anything that went wrong inside the extension.
 | **lifecycle** | `status` `launch` `attach` `detach` `stop` `restart` `processes` `dump_open` |
 | **execution** | `wait` `go` `pause` `step` `run_to` `set_next` |
 | **breakpoints** | `bp_set` `bp_list` `bp_remove` `bp_enable` `trace_read` `exceptions_set` |
-| **inspection** | `threads` `stack` `select` `freeze` `eval` `vars` `expand` `watch_set` `memory` `registers` `disasm` `modules` `symbols` |
+| **inspection** | `threads` `stack` `select` `freeze` `eval` `vars` `expand` `watch_set` `memory` `registers` `disasm` `modules` `symbols` `scratch` `scratch_free` |
+| **profiling** | `profile_start` `profile_stop` `profile_report` |
 | **evidence** | `triage` `capture` |
 | **debuggee I/O** | `console_read` `console_send` `output` |
 | **build** | `build` `build_cancel` `build_output` `config` `startup_project` |
@@ -177,6 +185,27 @@ Notes on a few:
 - **`memory`, `eval`, `vars`** — a value that is nothing but an allocator's fill pattern
   is named where it appears, so `0xdddddddddddddddd` reads as freed heap without anyone
   having to remember the table.
+- **`scratch`** — the expression evaluator will not invent a temporary, so a function
+  with a reference out-parameter has no argument that can be written for it and calling
+  one was simply refused. `scratch` takes a block of the debuggee's own heap and hands
+  back the address together with the cast to paste into `eval`; `scratch_free` gives it
+  back, and every reply lists what is still outstanding. Taking a block runs the
+  program's own allocator, and a block is dropped when the session that owns the heap
+  ends.
+- **`profile_start` / `profile_stop`** — Visual Studio's sampling collector, attached to
+  a process the debugger already holds, so a profile is taken *during* a session rather
+  than instead of one. `profile_stop` reports where the samples landed, the path most of
+  them went down, and what each thread was doing. Function names come from the symbols
+  the debugger has already loaded rather than from a symbol server.
+- **`profile_report`** — asks something else of a profile already taken, without
+  collecting again: one function's callers and callees and the source lines inside it,
+  the same samples as a call tree, a roll-up per binary, one thread on its own, or what
+  moved since an earlier capture in percentage points. Each is a separate reading and
+  one is answered at a time; asking for two at once is refused rather than quietly
+  answering one. Everywhere a report stops short it says that it stopped, and every
+  profile accounts for the processor time actually used against how long the clock ran,
+  or says it cannot — because a program waiting on a lock is invisible to a CPU
+  profiler, and silence there reads as nothing being wrong.
 - **`watch_set`** — pins expressions whose values then come back with every `wait` and
   every `status`, instead of several `eval` calls at each stop.
 - **`triage`** — after a crash: exception record, faulting stack, registers, memory at the
@@ -198,7 +227,8 @@ src/VsDbgMcp.Host    the extension; compiles Core's sources in rather than refer
 tests/               routing, discovery, events, and the shim end to end
 marketplace/         listing text and publish manifest
 docs/design.md       why it is shaped this way
-docs/releasing.md    how to cut and publish a release
+docs/releasing.md    how to cut a release
+docs/marketplace.md  what the listing says and what to change when the product does
 ```
 
 `build.ps1` drives two toolchains because the halves need different ones: the shim and
@@ -207,7 +237,7 @@ Studio, since the VSIX packaging tasks are .NET Framework assemblies.
 
 ## Status
 
-215 automated tests cover routing, discovery, the event bus, and the whole shim path —
+336 automated tests cover routing, discovery, the event bus, and the whole shim path —
 discovery file, named pipe, JSON-RPC, rendering — against a stand-in for the extension,
 plus the pure decisions: which expression forms to try against a module, which values are
 allocator fill, whether a source file outran its binary, and what a tracepoint buffer
@@ -238,6 +268,18 @@ The eight changes in [docs/iteration_1.md](docs/iteration_1.md) were driven by h
 same way, against the same fixture. One thing there has still not been seen happen: two
 optimized locals sharing a slot, because no frame in the fixture produced one.
 
+[docs/iteration_2.md](docs/iteration_2.md) records the next round the same way, and is
+worth reading for what hand-testing caught that the test suite did not: a tracepoint
+reporting `hits 0` while its records piled up, a symbol load reported as declining when
+it had searched, a read after `pause` landing in `ntdll`, and — chasing that last one —
+the discovery that the mode every check consulted came from a notification arriving
+seconds late, so a read straight after `go` was being answered from the frame where the
+program had last stopped.
+
+Profiling was built the same way: the collector was proven to attach to a process
+Visual Studio is already debugging before any of it was written, and every reading was
+driven against a program whose call shape was known.
+
 Known gaps:
 
 - **`exceptions_set` does not work.** `DTE.Debugger.ExceptionGroups` returns nothing on
@@ -263,6 +305,16 @@ Known gaps:
 - **Only clients in the same Windows session can use this**, because the client has to
   spawn the shim. WSL, dev containers and remote agents cannot. See the HTTP transport
   entry in [docs/design.md](docs/design.md#13-deferred).
+- **A PDB's GUID and age are not reported.** AD7 does not expose them. `modules` answers
+  the same question by a different route — the time stamped into the loaded image, and
+  the verbose search text from `symbols`, which is where a PDB that is present and does
+  not match says so.
+- **Profiling is CPU sampling only.** Time spent blocked is invisible to it, which every
+  profile says. Allocations and file I/O have collectors of their own that are not
+  wired up.
+- **`eval` refusing a nested call has never been reproduced** on Visual Studio 2026, so
+  the advice written for that refusal has never fired. It costs nothing when it does not
+  match, because an unrecognised message is passed through untouched.
 
 ## Licence
 

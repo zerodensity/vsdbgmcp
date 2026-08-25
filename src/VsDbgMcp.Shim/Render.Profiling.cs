@@ -345,7 +345,16 @@ namespace VsDbgMcp.Shim
                           "way moves any of these lines. Profile for longer.");
 
             var cpu = capture.CpuSeconds();
-            if (cpu != null)
+            if (cpu == null)
+            {
+                // Saying nothing here would leave the one thing sampling cannot see
+                // unmentioned, which is how a profile of a blocked program comes to read
+                // as a program with nothing slow in it.
+                notes.Add("The trace did not record how often it sampled, so how much processor time this " +
+                          "actually used cannot be worked out from it. Sampling sees only threads on a " +
+                          "processor, so time spent waiting is missing from everything above.");
+            }
+            else
             {
                 var used = cpu.Value.ToString("F1", CultureInfo.InvariantCulture);
                 var clock = capture.Seconds.ToString("F1", CultureInfo.InvariantCulture);
