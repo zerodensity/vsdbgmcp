@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -346,14 +346,27 @@ namespace VsDbgMcp.Host
             ThreadHelper.ThrowIfNotOnUIThread();
 
             if (info.Kind != BreakpointKind.Location || string.IsNullOrEmpty(info.File))
+            {
+                // A function breakpoint in a module the debuggee loaded an older copy of
+                // does not bind either, and it carries no file to look an owner up from.
+                if (info.Kind == BreakpointKind.Function)
+                    info.StaleModules = BindFailure.StaleModules(modules.Value);
+
                 return BindFailure.NoCodeHere;
+            }
 
             var owner = OwningModule(info.File, modules.Value);
             var written = SourceFreshness.LastWritten(info.File);
-            var built = owner == null ? null : SourceFreshness.LastWritten(owner.Path);
+
+            // A plugin loaded by a host whose solution does not hold the plugin's
+            // project has no owner to name, which is exactly the session where a stale
+            // deployed binary swallows every breakpoint. Say that the cause is present
+            // rather than pinning it on this file.
+            if (owner == null) info.StaleModules = BindFailure.StaleModules(modules.Value);
 
             return BindFailure.Explain(info.File, owner,
-                SourceFreshness.SourceIsNewer(written, built), SourceFreshness.Show(written));
+                SourceFreshness.WrittenAfter(written, ModuleIdentity.BinaryBuilt(owner)),
+                SourceFreshness.Show(written));
         }
 
         /// <summary>
@@ -986,8 +999,8 @@ namespace VsDbgMcp.Host
                 var owner = OwningModule(file, modules);
                 if (owner == null || !string.IsNullOrEmpty(owner.NewerSource)) continue;
 
-                var newer = SourceFreshness.SourceIsNewer(
-                    SourceFreshness.LastWritten(file), SourceFreshness.LastWritten(owner.Path));
+                var newer = SourceFreshness.WrittenAfter(
+                    SourceFreshness.LastWritten(file), ModuleIdentity.BinaryBuilt(owner));
                 if (newer == true) owner.NewerSource = System.IO.Path.GetFileName(file);
             }
         }

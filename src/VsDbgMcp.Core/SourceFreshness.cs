@@ -15,9 +15,10 @@ namespace VsDbgMcp
     public static class SourceFreshness
     {
         /// <summary>
-        /// How much newer a source has to be before it counts. Build outputs and
-        /// sources can live on file systems whose clocks and timestamp resolution do
-        /// not agree to the second, and a build is not wrong by two seconds.
+        /// How much newer one file has to be than another before it counts. Build
+        /// outputs and sources can live on file systems whose clocks and timestamp
+        /// resolution do not agree to the second, and a build is not wrong by two
+        /// seconds.
         /// </summary>
         static readonly TimeSpan Slack = TimeSpan.FromSeconds(2);
 
@@ -44,13 +45,22 @@ namespace VsDbgMcp
         }
 
         /// <summary>
-        /// True when the source was written after the binary was built, false when it
-        /// was not, null when either time is unknown.
+        /// True when one file was written after another, false when it was not, null
+        /// when either time is unknown. The slack above is what keeps two file systems
+        /// that disagree by a second from reading as an edit.
         /// </summary>
-        public static bool? SourceIsNewer(DateTime? sourceWritten, DateTime? binaryBuilt)
+        public static bool? WrittenAfter(DateTime? written, DateTime? than) =>
+            Later(written, than, Slack);
+
+        /// <summary>
+        /// True when one time is more than <paramref name="by"/> after another, false
+        /// when it is not, null when either is unknown. Null has to stay unknown: a
+        /// time that could not be read is not evidence either way.
+        /// </summary>
+        public static bool? Later(DateTime? time, DateTime? than, TimeSpan by)
         {
-            if (sourceWritten == null || binaryBuilt == null) return null;
-            return sourceWritten.Value - binaryBuilt.Value > Slack;
+            if (time == null || than == null) return null;
+            return time.Value - than.Value > by;
         }
 
         /// <summary>

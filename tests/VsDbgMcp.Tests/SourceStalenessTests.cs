@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using VsDbgMcp.Contracts;
 using VsDbgMcp.Shim;
@@ -18,27 +18,27 @@ namespace VsDbgMcp.Tests
         [Fact]
         public void A_file_written_after_the_build_is_newer()
         {
-            Assert.True(SourceFreshness.SourceIsNewer(Built.AddMinutes(87), Built));
+            Assert.True(SourceFreshness.WrittenAfter(Built.AddMinutes(87), Built));
         }
 
         [Fact]
         public void A_file_written_before_the_build_is_not()
         {
-            Assert.False(SourceFreshness.SourceIsNewer(Built.AddMinutes(-1), Built));
+            Assert.False(SourceFreshness.WrittenAfter(Built.AddMinutes(-1), Built));
         }
 
         [Fact]
         public void A_second_of_difference_is_not_an_edit()
         {
-            Assert.False(SourceFreshness.SourceIsNewer(Built.AddSeconds(1), Built));
+            Assert.False(SourceFreshness.WrittenAfter(Built.AddSeconds(1), Built));
         }
 
         [Fact]
         public void A_time_that_could_not_be_read_stays_unknown()
         {
-            Assert.Null(SourceFreshness.SourceIsNewer(Built.AddHours(1), null));
-            Assert.Null(SourceFreshness.SourceIsNewer(null, Built));
-            Assert.Null(SourceFreshness.SourceIsNewer(null, null));
+            Assert.Null(SourceFreshness.WrittenAfter(Built.AddHours(1), null));
+            Assert.Null(SourceFreshness.WrittenAfter(null, Built));
+            Assert.Null(SourceFreshness.WrittenAfter(null, null));
         }
 
         [Fact]
@@ -59,7 +59,7 @@ namespace VsDbgMcp.Tests
             {
                 File.SetLastWriteTimeUtc(file, Built.AddHours(1));
 
-                Assert.True(SourceFreshness.SourceIsNewer(SourceFreshness.LastWritten(file), Built));
+                Assert.True(SourceFreshness.WrittenAfter(SourceFreshness.LastWritten(file), Built));
             }
             finally
             {
@@ -73,7 +73,7 @@ namespace VsDbgMcp.Tests
             var module = new ModuleInfo { Name = "engine.dll", SymbolsLoaded = true };
 
             var text = BindFailure.Explain(@"D:\repo\Engine\mesh.cpp", module,
-                SourceFreshness.SourceIsNewer(Built.AddHours(1), SourceFreshness.LastWritten(@"D:\gone\engine.dll")),
+                SourceFreshness.WrittenAfter(Built.AddHours(1), SourceFreshness.LastWritten(@"D:\gone\engine.dll")),
                 "2026-08-21 14:32");
 
             Assert.Equal(BindFailure.NoCodeHere, text);

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using VsDbgMcp.Contracts;
 using VsDbgMcp.Shim;
 using Xunit;
@@ -20,20 +20,29 @@ namespace VsDbgMcp.Tests
         [Fact]
         public void An_image_time_is_shown_where_the_reader_is()
         {
-            Assert.Equal(Stamped.ToLocalTime().ToString("yyyy-MM-dd HH:mm"), ModuleIdentity.ImageTime(Stamped));
+            Assert.Equal(Stamped.ToLocalTime().ToString("yyyy-MM-dd HH:mm"),
+                SourceFreshness.Show(ModuleIdentity.BuildTime(Stamped)));
         }
 
         [Fact]
         public void A_header_with_no_stamp_reports_no_time_rather_than_the_epoch()
         {
-            Assert.Equal("", ModuleIdentity.ImageTime(null));
-            Assert.Equal("", ModuleIdentity.ImageTime(new DateTime(1601, 1, 1, 0, 0, 0, DateTimeKind.Utc)));
+            Assert.Null(ModuleIdentity.BuildTime(null));
+            Assert.Null(ModuleIdentity.BuildTime(new DateTime(1601, 1, 1, 0, 0, 0, DateTimeKind.Utc)));
         }
 
         [Fact]
         public void A_stamp_that_could_not_be_a_build_time_is_not_shown_as_one()
         {
-            Assert.Equal("", ModuleIdentity.ImageTime(DateTime.UtcNow.AddYears(30)));
+            Assert.Null(ModuleIdentity.BuildTime(DateTime.UtcNow.AddYears(30)));
+        }
+
+        [Fact]
+        public void A_stamp_that_came_back_as_a_local_time_is_converted_and_not_relabelled()
+        {
+            // The same instant, written two ways. Relabelling the local one as UTC
+            // would move it by the offset and shift every comparison with it.
+            Assert.Equal(Stamped, ModuleIdentity.BuildTime(Stamped.ToLocalTime()));
         }
 
         [Fact]

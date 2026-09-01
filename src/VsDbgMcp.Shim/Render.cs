@@ -305,6 +305,12 @@ namespace VsDbgMcp.Shim
                 if (!b.Bound && !string.IsNullOrEmpty(b.BindState)) sb.Append("  -- ").Append(b.BindState);
                 sb.AppendLine();
             }
+
+            // Once, at the end. It is a fact about the session, so repeating it against
+            // every unbound breakpoint would bury the list it belongs to.
+            var stale = bps.FirstOrDefault(b => !b.Bound && !string.IsNullOrEmpty(b.StaleModules));
+            if (stale != null) sb.AppendLine(stale.StaleModules);
+
             return sb.ToString().TrimEnd();
         }
 
@@ -317,6 +323,7 @@ namespace VsDbgMcp.Shim
             if (!b.Bound && !string.IsNullOrEmpty(b.BindState))
                 sb.Append(" -- ").Append(b.BindState);
             sb.AppendLine();
+            if (!b.Bound && !string.IsNullOrEmpty(b.StaleModules)) sb.AppendLine(b.StaleModules);
             Tracepoint(sb, b);
             return sb.ToString().TrimEnd();
         }
@@ -476,6 +483,12 @@ namespace VsDbgMcp.Shim
             if (!string.IsNullOrEmpty(m.NewerSource))
                 sb.Append("  -- ").Append(m.NewerSource).Append(" was edited after this binary was built");
             sb.AppendLine();
+
+            // On a line of its own, and in a short list as well as a detailed one. It
+            // carries two paths and two times, and it is the answer to a breakpoint
+            // that binds nowhere while everything else looks healthy.
+            if (!string.IsNullOrEmpty(m.StaleDeployment))
+                sb.Append("    -- ").AppendLine(m.StaleDeployment);
 
             if (!detailed) return;
 

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace VsDbgMcp.Contracts
@@ -322,6 +322,14 @@ namespace VsDbgMcp.Contracts
         /// failure says more about where the debugger is than about the expression.
         /// </summary>
         public string LogCheckDeferred { get; set; }
+
+        /// <summary>
+        /// Loaded modules running an older copy than the build beside their symbols,
+        /// set on a breakpoint that did not bind and whose owning module could not be
+        /// named. It is a fact about the session rather than about this breakpoint,
+        /// and the text says so.
+        /// </summary>
+        public string StaleModules { get; set; }
     }
 
     public sealed class EvalOptions
@@ -484,6 +492,22 @@ namespace VsDbgMcp.Contracts
         /// was built. Null when nothing is known to be newer.
         /// </summary>
         public string NewerSource { get; set; }
+
+        /// <summary>
+        /// The time behind <see cref="ImageBuilt"/>, kept because comparing one build
+        /// against another needs a time and not its rendering. Null when the header
+        /// carries nothing that could be a build time. Read inside the extension only;
+        /// everything shown to a caller comes from the two rendered times above.
+        /// </summary>
+        public DateTime? ImageStamp { get; set; }
+
+        /// <summary>
+        /// Said when a build sitting where this module's symbols came from is newer
+        /// than the module the debuggee loaded. Null when the symbols came from the
+        /// directory the image did, when there is no build of this module beside them
+        /// to read, or when the two times are close enough to be one build.
+        /// </summary>
+        public string StaleDeployment { get; set; }
     }
 
     /// <summary>

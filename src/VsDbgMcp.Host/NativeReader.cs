@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using Microsoft.VisualStudio;
@@ -269,21 +269,32 @@ namespace VsDbgMcp.Host
             var got = info[0].dwValidFields;
             var symbolsLoaded = (info[0].m_dwModuleFlags & enum_MODULE_FLAGS.MODULE_FLAG_SYMBOLS) != 0;
             var size = (got & enum_MODULE_INFO_FIELDS.MIF_SIZE) == 0 ? 0 : info[0].m_dwSize;
+            var written = SourceFreshness.LastWritten(info[0].m_bstrUrl);
+            var stamp = ModuleIdentity.BuildTime(Stamp(info[0]));
 
-            return new ModuleInfo
+            var described = new ModuleInfo
             {
                 Name = info[0].m_bstrName,
                 Path = info[0].m_bstrUrl,
-                Built = SourceFreshness.Show(SourceFreshness.LastWritten(info[0].m_bstrUrl)),
-                ImageBuilt = ModuleIdentity.ImageTime(Stamp(info[0])),
+                Built = SourceFreshness.Show(written),
+                ImageBuilt = SourceFreshness.Show(stamp),
                 Size = ModuleIdentity.Size(size),
                 Version = info[0].m_bstrVersion,
                 Address = "0x" + info[0].m_addrLoadAddress.ToString("x"),
                 SymbolsLoaded = symbolsLoaded,
                 SymbolStatus = symbolsLoaded ? null : NormalizeMessage(info[0].m_bstrDebugMessage),
                 SymbolPath = info[0].m_bstrUrlSymbolLocation,
-                IsUserCode = UserCode(module)
+                IsUserCode = UserCode(module),
+                ImageStamp = stamp
             };
+
+            // Up to two more file times per module, and none at all unless its symbols
+            // loaded from a directory other than the one the image came from. What
+            // makes this affordable on a process with several hundred modules is that
+            // it never goes near a source file: the alternative walks every project's
+            // sources on every call.
+            described.StaleDeployment = ModuleIdentity.StaleDeployment(described, written);
+            return described;
         }
 
         /// <summary>
