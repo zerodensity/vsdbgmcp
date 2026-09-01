@@ -44,6 +44,13 @@ namespace VsDbgMcp
             /// stream carrying one cannot claim to know when any of them arrived.
             /// </summary>
             public bool Timed = true;
+
+            /// <summary>
+            /// True once a cap was asked for and a record arrived that it could not be
+            /// applied to. Kept apart from Timed because a caller who asked for no cap
+            /// is owed nothing about one.
+            /// </summary>
+            public bool CapUnused;
         }
 
         readonly Dictionary<int, Stream> _streams = new Dictionary<int, Stream>();
@@ -108,10 +115,17 @@ namespace VsDbgMcp
 
                 if (whenUtc == default(DateTime)) stream.Timed = false;
 
+                // A record with no time cannot be put in one second rather than another,
+                // and a cap that counts them anyway never rolls its window: it keeps the
+                // first few and drops everything after them for as long as the program
+                // runs, while calling itself a rate. So the cap is not applied to an
+                // undated stream, everything is kept, and the reply says which it was.
+                if (stream.MaxPerSecond > 0 && whenUtc == default(DateTime)) stream.CapUnused = true;
+
                 // The cap makes the stream readable. It cannot make the tracepoint
                 // cheaper: the program has already paid for this record by the time it
                 // reaches here, so what the cap throws away is evidence, not overhead.
-                if (stream.MaxPerSecond > 0)
+                if (stream.MaxPerSecond > 0 && whenUtc != default(DateTime))
                 {
                     if (whenUtc - stream.SecondStarted >= TimeSpan.FromSeconds(1))
                     {
@@ -156,6 +170,7 @@ namespace VsDbgMcp
                 result.CutShort = stream.CutShort;
                 result.StartedUtc = stream.StartedUtc;
                 result.Timed = stream.Timed;
+                result.CapUnused = stream.CapUnused;
 
                 var skip = tail > 0 && stream.Records.Count > tail ? stream.Records.Count - tail : 0;
                 foreach (var record in stream.Records)

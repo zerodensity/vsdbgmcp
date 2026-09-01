@@ -275,6 +275,13 @@ namespace VsDbgMcp.Contracts
         /// <summary>Records the per-second cap threw away.</summary>
         public long Dropped { get; set; }
 
+        /// <summary>
+        /// Whether a per-second cap was asked for and could not be applied, because the
+        /// records arrive without times and nothing can put an undated record in one
+        /// second rather than another. Everything is kept when this is set.
+        /// </summary>
+        public bool CapUnused { get; set; }
+
         /// <summary>UTC, when this tracepoint started collecting. The span since is what
         /// gives a rate when the records themselves are not timed.</summary>
         public DateTime StartedUtc { get; set; }
@@ -577,6 +584,13 @@ namespace VsDbgMcp.Contracts
         public int LoadedCount { get; set; }
 
         public string Filter { get; set; }
+
+        /// <summary>
+        /// The process this list belongs to. Modules belong to a process, and a session
+        /// holding several can be looking at one while another is the one that stopped,
+        /// so the list says whose it is rather than leaving it to be assumed.
+        /// </summary>
+        public string Process { get; set; }
     }
 
     /// <summary>

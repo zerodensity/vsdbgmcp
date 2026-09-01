@@ -517,5 +517,35 @@ namespace VsDbgMcp.Tests
 
             Assert.DoesNotContain("should not appear", text);
         }
+
+        /// <summary>
+        /// Modules belong to a process, and a session holding a launcher and what it
+        /// started can be looking at one while the other is the one that stopped. Without
+        /// the name, a module list and an eval read as being about the same program.
+        /// </summary>
+        [Fact]
+        public void A_module_list_names_the_process_it_belongs_to()
+        {
+            var text = Render.Modules(new ModulesResult
+            {
+                Modules = new List<ModuleInfo> { new ModuleInfo { Name = "plugin.dll", SymbolsLoaded = true } },
+                LoadedCount = 1,
+                Process = "nosLauncher (60024)"
+            });
+
+            Assert.Contains("nosLauncher (60024)", text);
+        }
+
+        [Fact]
+        public void A_module_list_from_a_session_that_named_no_process_says_nothing_about_one()
+        {
+            var text = Render.Modules(new ModulesResult
+            {
+                Modules = new List<ModuleInfo> { new ModuleInfo { Name = "plugin.dll", SymbolsLoaded = true } },
+                LoadedCount = 1
+            });
+
+            Assert.DoesNotContain(" in ", text);
+        }
     }
 }

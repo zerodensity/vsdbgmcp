@@ -481,6 +481,18 @@ namespace VsDbgMcp.Shim
                               "than across the records shown.");
             }
 
+            // A cap counts records into one second and then the next, and an undated
+            // record belongs to neither. Counting them anyway keeps the first few and
+            // drops the rest for as long as the program runs, under a heading calling
+            // itself a rate, so the cap is left off and that is said rather than shown.
+            if (t.CapUnused)
+            {
+                sb.AppendLine("The per-second cap was not applied: these records carry no times, so nothing " +
+                              "can put one in a given second. Everything collected was kept, and the buffer " +
+                              "holds the newest " + TraceLog.Capacity + ". Use everyNthHit to thin the " +
+                              "stream instead, which the debug engine counts.");
+            }
+
             // Every record is written between markers of this server's own, which are
             // literal text. One that arrived without its end stopped being built partway,
             // and the record arriving at all is what says the line was reached anyway.
@@ -538,6 +550,11 @@ namespace VsDbgMcp.Shim
                 sb.Append(modules.Count).Append(" of ").Append(loaded).Append(" loaded modules match '")
                   .Append(result.Filter).Append("'; more can load while the program runs");
             }
+
+            // A session can hold a launcher and what it started, and this list is one
+            // process's. Naming it is what stops a module list and an eval in the same
+            // breath from being read as being about the same program.
+            if (!string.IsNullOrEmpty(result.Process)) sb.Append(" in ").Append(result.Process);
 
             if (!detailed) sb.Append(". Filter to see each one's path, size and load address");
             sb.AppendLine();

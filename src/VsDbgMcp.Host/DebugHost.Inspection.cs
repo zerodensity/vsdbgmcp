@@ -961,23 +961,34 @@ namespace VsDbgMcp.Host
         }
 
         /// <summary>
+        /// The process a read is about: the one the caller selected, or the one that
+        /// stopped when they have selected nothing.
+        ///
+        /// Modules belong to a process, and after a select the process being looked at is
+        /// not the one that stopped. Reading the one that stopped is how a module list and
+        /// an eval in the same breath came to be about two different programs.
+        /// </summary>
+        IDebugProgram2 ReadingProgram()
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            var thread = CurrentThreadObject();
+            if (thread != null && thread.GetProgram(out var theirs) == VSConstants.S_OK && theirs != null)
+                return theirs;
+
+            return _sink.CurrentProgram;
+        }
+
+        /// <summary>
         /// What every loaded module is called, and nothing else about it. Reading the rest
         /// means a file time per module, which at several hundred is what this avoids.
-        ///
-        /// Read from the process the caller is looking at rather than the one that stopped,
-        /// because after a select those are different and modules belong to a process.
         /// </summary>
         List<string> LoadedModuleNames()
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            var program = _sink.CurrentProgram;
-            var thread = CurrentThreadObject();
-            if (thread != null && thread.GetProgram(out var theirs) == VSConstants.S_OK && theirs != null)
-                program = theirs;
-
             var names = new List<string>();
-            foreach (var module in NativeReader.Enumerate(program))
+            foreach (var module in NativeReader.Enumerate(ReadingProgram()))
             {
                 var name = NativeReader.NameOf(module);
                 if (!string.IsNullOrEmpty(name)) names.Add(name);
@@ -1081,7 +1092,7 @@ namespace VsDbgMcp.Host
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            var loaded = NativeReader.ReadModules(_sink.CurrentProgram);
+            var loaded = NativeReader.ReadModules(ReadingProgram());
             MarkSourcesNewerThanBinaries(loaded);
 
             return new ModulesResult
@@ -1090,7 +1101,8 @@ namespace VsDbgMcp.Host
                     ? loaded
                     : loaded.Where(m => (m.Name ?? "").IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0).ToList(),
                 LoadedCount = loaded.Count,
-                Filter = filter
+                Filter = filter,
+                Process = ProcessIdentity.Of(ReadingProgram()).Describe()
             };
         });
 

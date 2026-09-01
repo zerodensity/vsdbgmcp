@@ -698,5 +698,70 @@ namespace VsDbgMcp.Tests
 
             Assert.DoesNotContain("It has been collecting for", text);
         }
+
+        /// <summary>
+        /// The cap counts records into one second and then the next. An undated record
+        /// belongs to neither, and the window it never rolls kept the first few and threw
+        /// away everything after them for as long as the program ran - under a heading
+        /// calling itself a rate. Keeping everything is the only honest reading.
+        /// </summary>
+        [Fact]
+        public void A_cap_is_not_applied_to_records_that_carry_no_time()
+        {
+            var log = new TraceLog();
+            log.Start(4, 2, Noon);
+
+            for (var i = 0; i < 10; i++) log.Add(4, "tick " + i, default(DateTime), false);
+
+            var result = log.Read(4, 0);
+
+            Assert.Equal(10, result.Collected);
+            Assert.Equal(0, result.Dropped);
+            Assert.Equal(10, result.Records.Count);
+            Assert.True(result.CapUnused);
+        }
+
+        [Fact]
+        public void A_cap_still_applies_where_the_records_are_timed()
+        {
+            var log = new TraceLog();
+            log.Start(5, 2, Noon);
+
+            for (var i = 0; i < 10; i++) log.Add(5, "tick " + i, Noon.AddMilliseconds(i * 10), false);
+
+            var result = log.Read(5, 0);
+
+            Assert.Equal(10, result.Collected);
+            Assert.Equal(8, result.Dropped);
+            Assert.False(result.CapUnused);
+        }
+
+        [Fact]
+        public void A_stream_with_no_cap_asked_for_says_nothing_about_one()
+        {
+            var log = new TraceLog();
+            log.Start(6, 0, Noon);
+
+            log.Add(6, "tick", default(DateTime), false);
+
+            Assert.False(log.Read(6, 0).CapUnused);
+        }
+
+        [Fact]
+        public void A_cap_that_could_not_be_applied_says_so_instead_of_reporting_a_rate()
+        {
+            var text = Render.Trace(new TraceResult
+            {
+                BreakpointId = 4,
+                Collected = 10,
+                Timed = false,
+                CapUnused = true,
+                StartedUtc = DateTime.UtcNow.AddSeconds(-5),
+                Records = new List<TraceRecord> { new TraceRecord { Hit = 1, Text = "tick" } }
+            });
+
+            Assert.Contains("per-second cap was not applied", text);
+            Assert.Contains("everyNthHit", text);
+        }
     }
 }
