@@ -291,6 +291,81 @@ namespace VsDbgMcp.Tests
             Assert.DoesNotContain("gen 4", text);
             Assert.DoesNotContain("gen ?", text);
         }
+
+        /// <summary>
+        /// Driving a real debugger settled this one. A shim that connected to a Visual
+        /// Studio already debugging reports gen ?, correctly. Restarting from there took
+        /// the number 1 for the new run - and the old process's exit, which arrives
+        /// afterwards, was stamped 1 as well. The process that had just died and the one
+        /// now running were reported as the same run, which is the single thing this
+        /// number exists to rule out.
+        /// </summary>
+        [Fact]
+        public void An_exit_during_a_restart_belongs_to_the_run_that_ended()
+        {
+            var bus = new EventBus();
+            bus.StartingRun("Engine#1");
+
+            var exit = Stop("Engine#1");
+            exit.Reason = StopReason.Exited;
+            exit.Pid = 68476;
+            bus.Publish(exit);
+
+            var fresh = Stop("Engine#1");
+            fresh.Pid = 17624;
+            bus.Publish(fresh);
+
+            Assert.Equal(0, exit.Generation);
+            Assert.Equal(1, fresh.Generation);
+            Assert.NotEqual(exit.Generation, fresh.Generation);
+        }
+
+        [Fact]
+        public void An_exit_during_a_restart_of_a_numbered_run_carries_the_number_it_ended()
+        {
+            var bus = new EventBus();
+            bus.StartingRun("Engine#1");
+            bus.ModeChanged("Engine#1", DebugModes.Run);
+
+            bus.StartingRun("Engine#1");
+            var exit = Stop("Engine#1");
+            exit.Reason = StopReason.Exited;
+            bus.Publish(exit);
+
+            Assert.Equal(1, exit.Generation);
+            Assert.Equal(2, bus.Generation("Engine#1"));
+        }
+
+        /// <summary>
+        /// Only an exit is moved back, and only while a run is starting. An ordinary
+        /// exit belongs to the run that is current, or every program that ends would be
+        /// reported against the one before it.
+        /// </summary>
+        [Fact]
+        public void An_exit_with_no_restart_under_way_belongs_to_the_current_run()
+        {
+            var bus = new EventBus();
+            bus.StartingRun("Engine#1");
+            bus.ModeChanged("Engine#1", DebugModes.Run);
+
+            var exit = Stop("Engine#1");
+            exit.Reason = StopReason.Exited;
+            bus.Publish(exit);
+
+            Assert.Equal(1, exit.Generation);
+        }
+
+        [Fact]
+        public void A_breakpoint_during_a_restart_belongs_to_the_new_run()
+        {
+            var bus = new EventBus();
+            bus.StartingRun("Engine#1");
+
+            var hit = Stop("Engine#1");
+            bus.Publish(hit);
+
+            Assert.Equal(1, hit.Generation);
+        }
     }
 
     /// <summary>

@@ -72,7 +72,7 @@ namespace VsDbgMcp.Shim.Session
             lock (_gate)
             {
                 stop.Seq = ++_seq;
-                stop.Generation = GenerationOf(stop.InstanceId);
+                stop.Generation = GenerationFor(stop);
                 _buffer.AddLast(stop);
                 while (_buffer.Count > BufferSize) _buffer.RemoveFirst();
 
@@ -356,6 +356,35 @@ namespace VsDbgMcp.Shim.Session
 
         int GenerationOf(string instanceId) =>
             _generations.TryGetValue(instanceId ?? "", out var generation) ? generation : 0;
+
+        /// <summary>
+        /// The run a stop belongs to, which is not always the run that is current.
+        ///
+        /// Restarting ends one run and begins another, and the old process's exit
+        /// arrives after the new number has been taken. Stamped with the current number
+        /// it said the process that just died and the process now running were the same
+        /// run - the one thing this number exists to rule out, wrong in the direction
+        /// that misleads.
+        ///
+        /// So an exit that lands while a run is still starting is counted against the
+        /// run that ended. A new run that dies immediately is labelled one too early by
+        /// this, which costs a reader a re-read; the other way costs them a comparison
+        /// they should never have made.
+        ///
+        /// Called with the lock already held.
+        /// </summary>
+        int GenerationFor(StopEvent stop)
+        {
+            var current = GenerationOf(stop.InstanceId);
+
+            if (stop.Reason != StopReason.Exited) return current;
+            if (!_startingRun.Contains(stop.InstanceId ?? "")) return current;
+
+            // Zero is what a run nobody saw begin already reports, so an exit from
+            // before this ever heard of the instance stays unnumbered rather than
+            // borrowing the number in front of it.
+            return current > 0 ? current - 1 : 0;
+        }
 
         /// <summary>
         /// Where each of these instances is sitting, when every one of them stopped and
