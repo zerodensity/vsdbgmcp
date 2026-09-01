@@ -507,9 +507,13 @@ namespace VsDbgMcp.Host
 
         /// <summary>
         /// The setting behind that checkbox, or null if this Visual Studio does not
-        /// offer it. Visual Studio's own settings files call it OutputToImmediate and
-        /// keep it with the debugger's options, but which automation page carries it is
-        /// not documented, so both plausible ones are asked.
+        /// offer it.
+        ///
+        /// Automation calls it RedirectOutputToImmediate and keeps it on the debugger's
+        /// General page, which was read off a running Visual Studio 18 rather than
+        /// worked out from the documentation, because it is not documented. The name in
+        /// Visual Studio's own exported settings is the shorter OutputToImmediate, so
+        /// that spelling is tried too rather than assuming every version agrees.
         /// </summary>
         object OutputToImmediate()
         {
@@ -530,7 +534,11 @@ namespace VsDbgMcp.Host
                     try { name = property.Name; }
                     catch (Exception) { continue; }
 
-                    if (!string.Equals(name, "OutputToImmediate", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!string.Equals(name, "RedirectOutputToImmediate", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(name, "OutputToImmediate", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
 
                     // A property that will not give its value is one page's failure, not
                     // the answer, so the other page is still worth asking.
