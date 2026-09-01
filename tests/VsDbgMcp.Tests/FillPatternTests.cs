@@ -186,13 +186,13 @@ namespace VsDbgMcp.Tests
             var hit = Render.Evals(new[]
             {
                 new EvalResult { Expression = "event->sem", Value = "0xdddddddddddddddd", IsValid = true, Type = "void *" }
-            });
+            }).Text;
             Assert.Equal("event->sem = 0xdddddddddddddddd  (void *)  -- 0xdd freed heap (debug CRT)", hit);
 
             var failed = Render.Evals(new[]
             {
                 new EvalResult { Expression = "0xdddddddddddddddd", IsValid = false, Error = "no symbol" }
-            });
+            }).Text;
             Assert.DoesNotContain("freed heap", failed);
         }
 
@@ -204,7 +204,7 @@ namespace VsDbgMcp.Tests
                 new EvalResult { Expression = "p", Value = "0xdddddddddddddddd", IsValid = true, ThreadId = 11 },
                 new EvalResult { Expression = "p", Value = "0xdddddddddddddddd", IsValid = true, ThreadId = 12 },
                 new EvalResult { Expression = "p", Value = "0x7ff6a1b2c3d4", IsValid = true, ThreadId = 13 }
-            });
+            }).Text;
 
             Assert.Equal(1, Occurrences(text, "freed heap"));
             Assert.Contains("0xdddddddddddddddd  -- 0xdd freed heap (debug CRT)   threads: 11, 12", text);

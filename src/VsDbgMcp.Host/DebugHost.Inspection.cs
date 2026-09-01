@@ -716,7 +716,7 @@ namespace VsDbgMcp.Host
             ThreadHelper.ThrowIfNotOnUIThread();
 
             var chosen = CurrentFrame();
-            if (chosen.Refusal != null) return new VarsResult { Message = chosen.Refusal };
+            if (chosen.Refusal != null) return new VarsResult { Message = chosen.Refusal, Failed = true };
 
             return ReadIn(chosen, ExpressionEval.Scope(chosen.Frame, scope, depth, filter, sharedAddresses));
         });
@@ -726,7 +726,7 @@ namespace VsDbgMcp.Host
             ThreadHelper.ThrowIfNotOnUIThread();
 
             var chosen = CurrentFrame();
-            if (chosen.Refusal != null) return new VarsResult { Message = chosen.Refusal };
+            if (chosen.Refusal != null) return new VarsResult { Message = chosen.Refusal, Failed = true };
 
             return ReadIn(chosen, ExpressionEval.Expand(chosen.Frame, reference, depth, typeModule, index, key));
         });

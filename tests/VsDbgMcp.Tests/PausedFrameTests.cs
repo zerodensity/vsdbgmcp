@@ -90,7 +90,7 @@ namespace VsDbgMcp.Tests
                     Frame = new Frame { Index = 4, Function = "host.exe!main", File = @"D:\repo\main.cpp", Line = 31 },
                     FrameNote = FrameChoice.Moved(0, 4, "host.exe!main")
                 }
-            });
+            }).Text;
 
             Assert.Contains("read in frame 4", text);
             Assert.Contains("#4   host.exe!main  main.cpp:31", text);
@@ -103,7 +103,7 @@ namespace VsDbgMcp.Tests
             var text = Render.Evals(new[]
             {
                 new EvalResult { Expression = "count", Value = "3", IsValid = true }
-            });
+            }).Text;
 
             Assert.Equal("count = 3", text);
         }
@@ -114,7 +114,7 @@ namespace VsDbgMcp.Tests
             var text = Render.Vars(new VarsResult
             {
                 Message = FrameChoice.CannotEvaluate(4, "host.exe!main", 8)
-            });
+            }).Text;
 
             Assert.Contains("no expression context", text);
             Assert.DoesNotContain("(nothing in scope)", text);
@@ -123,7 +123,7 @@ namespace VsDbgMcp.Tests
         [Fact]
         public void A_frame_that_genuinely_holds_nothing_still_says_nothing_is_in_scope()
         {
-            Assert.Equal("  (nothing in scope)", Render.Vars(new VarsResult()));
+            Assert.Equal("  (nothing in scope)", Render.Vars(new VarsResult()).Text);
         }
 
         [Fact]
@@ -134,7 +134,7 @@ namespace VsDbgMcp.Tests
                 Nodes = new List<VarNode> { new VarNode { Name = "argc", Value = "1", Type = "int" } },
                 Frame = new Frame { Index = 4, Function = "host.exe!main" },
                 FrameNote = FrameChoice.Moved(0, 4, "host.exe!main")
-            });
+            }).Text;
 
             Assert.Contains("read in frame 4", text);
             Assert.Contains("#4   host.exe!main", text);

@@ -27,28 +27,31 @@ namespace VsDbgMcp.Shim.Tools
         /// <summary>
         /// Resolves the instance, runs the call, and turns every failure into text the
         /// agent can act on. Routing problems already carry their own fix, so they are
-        /// passed through unchanged rather than wrapped in an error.
+        /// passed through as they are rather than dressed up as an error.
+        ///
+        /// A failure leaves as an exception, which is how this SDK marks a result as an
+        /// error without every tool having to return a protocol object. The text is the
+        /// same either way; what changes is that a caller no longer has to read the words
+        /// to find out whether the call did anything.
         ///
         /// Also the one place every tool passes through, so it is where the call is
         /// reported to the panel inside Visual Studio.
         /// </summary>
-        protected async Task<string> On(string instance, CancellationToken ct, Func<HostLink, Task<string>> body,
+        protected async Task<string> On(string instance, CancellationToken ct, Func<HostLink, Task<Reply>> body,
             string detail = null, [CallerMemberName] string caller = null)
         {
             var started = Stopwatch.StartNew();
             HostLink link = null;
-            string result;
-            var failed = false;
+            Reply reply;
 
             try
             {
                 link = await Sessions.ResolveAsync(instance, ct).ConfigureAwait(false);
-                result = await body(link).ConfigureAwait(false);
+                reply = await body(link).ConfigureAwait(false);
             }
             catch (RoutingException ex)
             {
-                result = ex.Message;
-                failed = true;
+                reply = Reply.Bad(ex.Message);
             }
             catch (OperationCanceledException)
             {
@@ -56,13 +59,11 @@ namespace VsDbgMcp.Shim.Tools
             }
             catch (Exception ex)
             {
-                result = "ERROR: " + Flatten(ex);
-                failed = true;
+                reply = Reply.Bad("ERROR: " + Flatten(ex));
             }
 
             started.Stop();
-            Report(link, ToolName(caller), detail, result, (int)started.ElapsedMilliseconds, failed);
-            return result;
+            return Answer(link, caller, detail, reply, started.ElapsedMilliseconds);
         }
 
         /// <summary>
@@ -72,7 +73,7 @@ namespace VsDbgMcp.Shim.Tools
         /// when none is: refusing to re-read a profile that was collected an hour ago
         /// because Visual Studio has since closed would be a failure with no cause.
         /// </summary>
-        protected async Task<string> Locally(string instance, CancellationToken ct, Func<string> body,
+        protected async Task<string> Locally(string instance, CancellationToken ct, Func<Reply> body,
             string detail = null, [CallerMemberName] string caller = null)
         {
             var started = Stopwatch.StartNew();
@@ -81,12 +82,11 @@ namespace VsDbgMcp.Shim.Tools
             try { link = await Sessions.ResolveAsync(instance, ct).ConfigureAwait(false); }
             catch (Exception) { /* no window is a reason to skip the panel, not to refuse. */ }
 
-            string result;
-            var failed = false;
+            Reply reply;
 
             try
             {
-                result = body();
+                reply = body();
             }
             catch (OperationCanceledException)
             {
@@ -94,13 +94,22 @@ namespace VsDbgMcp.Shim.Tools
             }
             catch (Exception ex)
             {
-                result = "ERROR: " + Flatten(ex);
-                failed = true;
+                reply = Reply.Bad("ERROR: " + Flatten(ex));
             }
 
             started.Stop();
-            Report(link, ToolName(caller), detail, result, (int)started.ElapsedMilliseconds, failed);
-            return result;
+            return Answer(link, caller, detail, reply, started.ElapsedMilliseconds);
+        }
+
+        /// <summary>
+        /// Tells the panel how the call went and hands the text back, as a failure when
+        /// that is what it is.
+        /// </summary>
+        static string Answer(HostLink link, string caller, string detail, Reply reply, long milliseconds)
+        {
+            Report(link, ToolName(caller), detail, reply.Text, (int)milliseconds, reply.Failed);
+            if (reply.Failed) throw new ToolFailure(reply.Text);
+            return reply.Text;
         }
 
         /// <summary>

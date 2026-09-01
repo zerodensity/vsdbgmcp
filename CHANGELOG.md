@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- A call that failed comes back marked as failed, rather than as ordinary text a reader
+  has to recognise a failure in. The reply is the reason and nothing else: the words the
+  debugger or the engine used, with no wrapper naming the tool that was called. The panel
+  inside Visual Studio marks the same calls, where a refused evaluation used to show as
+  one that worked.
+- `eval` says why an evaluation failed instead of "evaluation failed". The engine often
+  hands back its own account of the failure even while failing, and that text now reaches
+  the caller with the return code beside it. A parse error names the expression it is
+  about, which is not what the caller wrote once a module qualifier or a format specifier
+  has been added to it.
+- A value the engine evaluated and then would not describe is no longer passed off as an
+  empty value the program holds.
+- An expansion that read only part of what was there says so. The engine refusing to list
+  a value's contents, giving up partway through, and there simply being more elements than
+  one read returns were all a short list that looked like the whole of it.
+- Watched expressions that cannot be read say so instead of vanishing from `status` and
+  `wait`, where a missing section read as no watches being set at all.
 - A profile whose trace did not record how often it sampled now says so, rather than
   leaving out the one line that separates a program waiting on a lock from a program with
   nothing slow in it.

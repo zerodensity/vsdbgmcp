@@ -90,7 +90,7 @@ namespace VsDbgMcp.Tests
         public async Task The_argument_worth_reading_comes_with_it()
         {
             await new InspectionTools(_sessions)
-                .Eval("mesh.refCount", null, false, false, false, null, 0, null, CancellationToken.None);
+                .Eval("mesh.refCount", null, false, true, false, null, 0, null, CancellationToken.None);
             await Settle();
 
             var report = _host.ReportFor("eval");
@@ -105,19 +105,22 @@ namespace VsDbgMcp.Tests
             await Settle();
 
             _host.FailNextCall = true;
-            await new LifecycleTools(_sessions).Status(null, CancellationToken.None);
+            var text = await Failure.Text(new LifecycleTools(_sessions).Status(null, CancellationToken.None));
             await Settle();
 
             var report = _host.ReportFor("status");
             Assert.NotNull(report);
             Assert.True(report.Failed);
             Assert.Contains("the debugger said no", report.Result);
+
+            // The panel and the agent are told the same thing.
+            Assert.Contains("the debugger said no", text);
         }
 
         [Fact]
         public async Task A_routing_failure_is_reported_rather_than_lost()
         {
-            var text = await new LifecycleTools(_sessions).Status("Nope#1", CancellationToken.None);
+            var text = await Failure.Text(new LifecycleTools(_sessions).Status("Nope#1", CancellationToken.None));
 
             // Routing never resolved an instance, so there is nobody to report to; the
             // caller still gets the message that tells it how to recover.

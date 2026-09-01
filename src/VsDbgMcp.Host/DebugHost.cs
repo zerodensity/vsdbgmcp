@@ -759,12 +759,20 @@ namespace VsDbgMcp.Host
             ThreadHelper.ThrowIfNotOnUIThread();
             if (_watches.Length == 0 || CurrentMode != DebugModes.Break) return null;
 
+            var values = new Dictionary<string, string>();
+
             // Status must answer even when the frame cannot be read, so the refusal that
             // stops a tool from returning stale values only costs the watch values here.
+            // Dropping the whole set with them would read as no watches being set at all,
+            // so each one comes back saying what happened to it.
             var chosen = Read<ChosenFrame>(() => CurrentFrame(), null, "the current frame");
-            if (chosen?.Frame == null || chosen.Refusal != null) return null;
+            if (chosen?.Frame == null || chosen.Refusal != null)
+            {
+                var unread = "<" + (chosen?.Refusal ?? "the current frame could not be read") + ">";
+                foreach (var expression in _watches) values[expression] = unread;
+                return values;
+            }
 
-            var values = new Dictionary<string, string>();
             foreach (var expression in _watches)
             {
                 var result = ExpressionEval.Evaluate(chosen.Frame, new EvalOptions { Expression = expression, TimeoutMs = 1000 });

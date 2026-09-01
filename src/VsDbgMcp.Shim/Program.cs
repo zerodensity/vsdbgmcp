@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
 using VsDbgMcp.Shim.Session;
 using VsDbgMcp.Shim.Tools;
 
@@ -61,6 +62,7 @@ namespace VsDbgMcp.Shim
                     o.ServerInstructions = Instructions;
                 })
                 .WithStdioServerTransport()
+                .WithRequestFilters(f => f.AddCallToolFilter(FailuresKeepTheirOwnWords))
                 .WithTools<SessionTools>()
                 .WithTools<LifecycleTools>()
                 .WithTools<ExecutionTools>()
@@ -85,6 +87,31 @@ namespace VsDbgMcp.Shim
             sessions.Dispose();
             return 0;
         }
+
+        /// <summary>
+        /// A failed call reaches the caller as the reason and nothing else.
+        ///
+        /// Left to the SDK it arrives behind "An error occurred invoking 'eval'", which
+        /// tells the caller only what it already knows and reads as a fault in this
+        /// server rather than an answer about the program being debugged. Only this
+        /// server's own failures are unwrapped; a fault in the protocol is left as it is.
+        /// </summary>
+        static McpRequestFilter<CallToolRequestParams, CallToolResult> FailuresKeepTheirOwnWords =>
+            next => async (context, ct) =>
+            {
+                try
+                {
+                    return await next(context, ct).ConfigureAwait(false);
+                }
+                catch (ToolFailure failure)
+                {
+                    return new CallToolResult
+                    {
+                        IsError = true,
+                        Content = { new TextContentBlock { Text = failure.Message } }
+                    };
+                }
+            };
 
         static string ThisVersion() =>
             typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "0.1.0";

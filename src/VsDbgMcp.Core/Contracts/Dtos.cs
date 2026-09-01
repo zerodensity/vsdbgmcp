@@ -405,6 +405,14 @@ namespace VsDbgMcp.Contracts
 
         /// <summary>Set when there is nothing to return, or something to add, saying what.</summary>
         public string Message { get; set; }
+
+        /// <summary>
+        /// True when the call did not do what it was asked. A message alone does not say
+        /// this: "no variable's name contains 'foo'" is an answer, and "there is no frame
+        /// to list variables in" is not, and only the side that produced them can tell
+        /// them apart.
+        /// </summary>
+        public bool Failed { get; set; }
     }
 
     public sealed class VarNode
@@ -429,6 +437,13 @@ namespace VsDbgMcp.Contracts
         /// from two variables that genuinely hold the same pointer.
         /// </summary>
         public List<string> SameAddressAs { get; set; }
+
+        /// <summary>
+        /// What went wrong or went unread while this node's children were being listed.
+        /// A short list is otherwise a complete one, whether the engine refused, gave up
+        /// partway, or there was simply more than one read returns.
+        /// </summary>
+        public string Note { get; set; }
     }
 
     public sealed class ModuleInfo

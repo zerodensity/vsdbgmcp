@@ -568,9 +568,9 @@ namespace VsDbgMcp.Shim
         /// a frame that was moved past, or an element reference the caller would otherwise
         /// have to copy out of this reply by hand.
         /// </summary>
-        public static string Vars(VarsResult result)
+        public static Reply Vars(VarsResult result)
         {
-            if (result == null) return "No result.";
+            if (result == null) return Reply.Bad("No result.");
 
             var sb = new StringBuilder();
             if (!string.IsNullOrEmpty(result.FrameNote)) sb.AppendLine(result.FrameNote);
@@ -582,7 +582,9 @@ namespace VsDbgMcp.Shim
             else if (string.IsNullOrEmpty(result.Message)) sb.AppendLine("  (nothing in scope)");
 
             if (!string.IsNullOrEmpty(result.Message)) sb.AppendLine(result.Message);
-            return sb.ToString().TrimEnd();
+
+            var text = sb.ToString().TrimEnd();
+            return result.Failed ? Reply.Bad(text) : text;
         }
 
         public static string Vars(IReadOnlyList<VarNode> nodes, int indent = 0)
@@ -609,6 +611,7 @@ namespace VsDbgMcp.Shim
                     sb.Append("  -- same address as ").Append(string.Join(", ", n.SameAddressAs));
                 if (n.HasChildren && (n.Children == null || n.Children.Count == 0))
                     sb.Append("  ... expand ").Append(n.Ref);
+                if (!string.IsNullOrEmpty(n.Note)) sb.Append("  -- ").Append(n.Note);
 
                 // A fill the line above already reported is not reported again on the way
                 // down, because a parent's value holds the very pointers its children are.
@@ -626,9 +629,9 @@ namespace VsDbgMcp.Shim
             }
         }
 
-        public static string Evals(IReadOnlyList<EvalResult> results)
+        public static Reply Evals(IReadOnlyList<EvalResult> results)
         {
-            if (results == null || results.Count == 0) return "No result.";
+            if (results == null || results.Count == 0) return Reply.Bad("No result.");
 
             if (results.Count == 1)
             {
@@ -639,7 +642,10 @@ namespace VsDbgMcp.Shim
                 if (r.Frame != null) head.AppendLine(Frames(new[] { r.Frame }, r.Frame.Index));
 
                 if (!r.IsValid)
-                    return head + r.Expression + " -- " + EngineRefusal.Explain(r.Error ?? "could not be evaluated");
+                {
+                    return Reply.Bad(head + r.Expression + " -- " +
+                                     EngineRefusal.Explain(r.Error ?? "could not be evaluated"));
+                }
 
                 var text = r.Expression + " = " + r.Value;
                 if (!string.IsNullOrEmpty(r.Type)) text += "  (" + r.Type + ")";
@@ -667,7 +673,11 @@ namespace VsDbgMcp.Shim
                 .FirstOrDefault(a => a != null);
             if (advice != null) sb.AppendLine(advice);
 
-            return sb.ToString().TrimEnd();
+            var grouped = sb.ToString().TrimEnd();
+
+            // One thread failing where others answered is a reading of the pool, not a
+            // failed call. Every thread failing is the same failure, said many times.
+            return results.Any(r => r.IsValid) ? grouped : Reply.Bad(grouped);
         }
 
         public static string Build(BuildResult b)
@@ -813,11 +823,11 @@ namespace VsDbgMcp.Shim
             return sb.ToString().TrimEnd();
         }
 
-        public static string Op(OpResult r, string success)
+        public static Reply Op(OpResult r, string success)
         {
-            if (r == null) return "No result.";
+            if (r == null) return Reply.Bad("No result.");
             if (r.Ok) return string.IsNullOrEmpty(r.Message) ? success : r.Message;
-            return "Failed: " + (r.Message ?? "no reason given");
+            return Reply.Bad("Failed: " + (r.Message ?? "no reason given"));
         }
     }
 }

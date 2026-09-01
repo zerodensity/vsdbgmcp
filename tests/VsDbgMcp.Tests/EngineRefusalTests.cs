@@ -68,7 +68,7 @@ namespace VsDbgMcp.Tests
                     IsValid = false,
                     Error = "Nested function evaluation not supported."
                 }
-            });
+            }).Text;
 
             Assert.Contains("IsExternallySynced(*GetDevice()) -- Nested function evaluation not supported.", text);
             Assert.Contains("Evaluate the inner call on its own", text);
@@ -81,7 +81,7 @@ namespace VsDbgMcp.Tests
             {
                 new EvalResult { Expression = "f(*g())", IsValid = false, Error = "Nested function evaluation not supported.", ThreadId = 11 },
                 new EvalResult { Expression = "f(*g())", IsValid = false, Error = "Nested function evaluation not supported.", ThreadId = 12 }
-            });
+            }).Text;
 
             Assert.Equal(1, Occurrences(text, "Evaluate the inner call on its own"));
         }

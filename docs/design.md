@@ -772,6 +772,12 @@ that turns a failure into text for the agent, and one helper that reads a single
 automation property and logs when the shell refuses — because `status` is more
 useful degraded than failed. Nothing swallows an error without saying so.
 
+That boundary marks the reply as well as writing it. A tool answers with text and
+whether the call failed, decided by the side that produced it rather than read back
+out of the words — "No variable's name contains 'mesh'" is an answer and "there is
+no frame to list variables in" is not, and no sentence says which it is. A failure
+leaves as an error result carrying the reason and nothing else.
+
 ## 15. Open
 
 - Tool naming convention. Short and unprefixed reads well, but it is worth

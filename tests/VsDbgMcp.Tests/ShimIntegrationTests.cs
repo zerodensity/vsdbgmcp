@@ -159,7 +159,7 @@ namespace VsDbgMcp.Tests
             await new LifecycleTools(_sessions).Status(null, CancellationToken.None);
             _host.PauseResult = OpResult.Bad("Nothing is running. Current mode: design.");
 
-            var text = await new ExecutionTools(_sessions).Pause(null, CancellationToken.None);
+            var text = await Failure.Text(new ExecutionTools(_sessions).Pause(null, CancellationToken.None));
 
             Assert.Contains("Nothing is running", text);
         }
@@ -290,7 +290,8 @@ namespace VsDbgMcp.Tests
         {
             var tools = new InspectionTools(_sessions);
 
-            var refused = await tools.Eval("v.size()", null, false, false, false, null, 0, null, CancellationToken.None);
+            var refused = await Failure.Text(
+                tools.Eval("v.size()", null, false, false, false, null, 0, null, CancellationToken.None));
             Assert.Contains("allowSideEffects", refused);
 
             var allowed = await tools.Eval("v.size()", null, false, true, false, null, 0, null, CancellationToken.None);
@@ -322,7 +323,7 @@ namespace VsDbgMcp.Tests
         [Fact]
         public async Task Asking_for_an_instance_that_is_not_there_lists_the_ones_that_are()
         {
-            var text = await new LifecycleTools(_sessions).Status("Nope#1", CancellationToken.None);
+            var text = await Failure.Text(new LifecycleTools(_sessions).Status("Nope#1", CancellationToken.None));
 
             Assert.Contains("App#", text);
             Assert.Contains("instance=", text);
@@ -339,12 +340,12 @@ namespace VsDbgMcp.Tests
         }
 
         [Fact]
-        public async Task A_failure_on_the_far_side_comes_back_as_readable_text()
+        public async Task A_failure_on_the_far_side_comes_back_as_a_readable_failure()
         {
             await new LifecycleTools(_sessions).Status(null, CancellationToken.None);
             _host.FailNextCall = true;
 
-            var text = await new LifecycleTools(_sessions).Status(null, CancellationToken.None);
+            var text = await Failure.Text(new LifecycleTools(_sessions).Status(null, CancellationToken.None));
 
             Assert.Contains("the debugger said no", text);
         }

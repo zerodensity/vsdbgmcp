@@ -150,7 +150,7 @@ namespace VsDbgMcp.Tests
             {
                 Ref = chosen.Ref,
                 Nodes = new List<VarNode> { chosen }
-            });
+            }).Text;
 
             Assert.Contains("ref: ((pair*)&$LinkedListItem(0))->_Myval", text);
             Assert.Contains("first = 3833460691349555506", text);

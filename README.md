@@ -237,7 +237,7 @@ Studio, since the VSIX packaging tasks are .NET Framework assemblies.
 
 ## Status
 
-336 automated tests cover routing, discovery, the event bus, and the whole shim path —
+347 automated tests cover routing, discovery, the event bus, and the whole shim path —
 discovery file, named pipe, JSON-RPC, rendering — against a stand-in for the extension,
 plus the pure decisions: which expression forms to try against a module, which values are
 allocator fill, whether a source file outran its binary, and what a tracepoint buffer

@@ -116,8 +116,8 @@ namespace VsDbgMcp.Tests
         [Fact]
         public async Task An_unknown_thread_names_the_threads_that_do_exist()
         {
-            var text = await new InspectionTools(_sessions)
-                .Select(9999, null, null, null, CancellationToken.None);
+            var text = await Failure.Text(new InspectionTools(_sessions)
+                .Select(9999, null, null, null, CancellationToken.None));
 
             // The error is the fix: it says which ids exist and which process each is in.
             Assert.Contains("No thread 9999", text);
@@ -128,8 +128,8 @@ namespace VsDbgMcp.Tests
         [Fact]
         public async Task An_unknown_process_names_the_ones_that_do_exist()
         {
-            var text = await new InspectionTools(_sessions)
-                .Select(null, "nosNothing", null, null, CancellationToken.None);
+            var text = await Failure.Text(new InspectionTools(_sessions)
+                .Select(null, "nosNothing", null, null, CancellationToken.None));
 
             Assert.Contains("No process matching 'nosNothing'", text);
             Assert.Contains("nosLauncher.exe", text);

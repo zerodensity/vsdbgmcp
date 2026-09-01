@@ -73,14 +73,23 @@ namespace VsDbgMcp.Host
             }
 
             var timeout = (uint)Math.Max(200, options.TimeoutMs);
-            if (expression.EvaluateSync(flags, timeout, null, out var property) != VSConstants.S_OK || property == null)
+            var evaluated = expression.EvaluateSync(flags, timeout, null, out var property);
+            if (evaluated != VSConstants.S_OK || property == null)
             {
-                result.Error = "evaluation failed" +
-                               (options.AllowSideEffects ? "" : ". If it needs to call a function, set allowSideEffects");
+                result.Error = WhyNothingCameBack(evaluated, property);
+                if (!options.AllowSideEffects)
+                    result.Error += ". If it needs to call a function, set allowSideEffects";
                 return result;
             }
 
-            var info = ReadInfo(property);
+            if (!ReadInfo(property, out var info))
+            {
+                // The engine evaluated something and then would not say what. Left
+                // unchecked this reads back as an empty value the program really holds.
+                result.Error = "the engine evaluated this and then would not describe the result";
+                return result;
+            }
+
             result.Value = info.bstrValue;
             result.Type = info.bstrType;
             result.IsValid = (info.dwAttrib & enum_DBG_ATTRIB_FLAGS.DBG_ATTRIB_VALUE_ERROR) == 0;
@@ -92,25 +101,51 @@ namespace VsDbgMcp.Host
         }
 
         /// <summary>
+        /// Why the engine returned no value. It often hands back a property holding its
+        /// own account of the failure even while failing, and that text is worth far more
+        /// than the code beside it, so this reads it before falling back to the code.
+        /// </summary>
+        static string WhyNothingCameBack(int hr, IDebugProperty2 property)
+        {
+            var said = property != null && ReadInfo(property, out var info) ? info.bstrValue : null;
+
+            var text = "evaluation failed";
+            if (!string.IsNullOrWhiteSpace(said)) text += ": " + said.Trim();
+            return text + " (" + Code(hr) + ")";
+        }
+
+        /// <summary>The engine's own return code, for a failure it has no words for.</summary>
+        static string Code(int hr) => "HRESULT 0x" + hr.ToString("X8");
+
+        /// <summary>
         /// Parses the expression, trying each way of naming the module in turn. The native
         /// parser resolves identifiers, so a type the module does not have fails here
         /// rather than during evaluation, which is what makes trying more than one form
-        /// both cheap and honest. The error left behind belongs to the last form, the one
-        /// the caller actually wrote.
+        /// both cheap and honest. The complaint left behind belongs to the last form
+        /// tried, which is not what the caller wrote once a module qualifier or a format
+        /// specifier has been added to it, so the text it is about comes with it.
         /// </summary>
         static IDebugExpression2 Parse(IDebugExpressionContext2 context, string expression,
             string typeModule, string format, bool raw, out string error)
         {
             error = null;
+            string tried = null;
+
             foreach (var form in ModuleQualifier.Forms(expression, typeModule))
             {
                 var text = Decorate(form, format, raw);
                 if (context.ParseText(text, enum_PARSEFLAGS.PARSE_EXPRESSION, 10,
-                        out var parsed, out error, out _) == VSConstants.S_OK && parsed != null)
+                        out var parsed, out var complaint, out _) == VSConstants.S_OK && parsed != null)
                 {
                     return parsed;
                 }
+
+                tried = text;
+                error = complaint;
             }
+
+            if (!string.IsNullOrEmpty(error) && tried != expression)
+                error += "  -- as it was written for the engine: " + tried;
             return null;
         }
 
@@ -139,6 +174,7 @@ namespace VsDbgMcp.Host
             if (frame == null)
             {
                 result.Message = "there is no frame to list variables in";
+                result.Failed = true;
                 return result;
             }
 
@@ -149,6 +185,7 @@ namespace VsDbgMcp.Host
                 // Not the same as a frame with no locals, and the difference is the whole
                 // reason to say anything: an empty list here would read as one.
                 result.Message = "the engine would not list variables in this frame";
+                result.Failed = true;
                 return result;
             }
 
@@ -156,7 +193,8 @@ namespace VsDbgMcp.Host
             var properties = new List<IDebugProperty2>();
             var inScope = 0;
 
-            foreach (var info in Drain(enumerator, 500))
+            var rows = Drain(enumerator, 500, out var listing);
+            foreach (var info in rows)
             {
                 inScope++;
                 if (!string.IsNullOrEmpty(filter) &&
@@ -167,7 +205,11 @@ namespace VsDbgMcp.Host
                 }
 
                 var node = ToNode(info);
-                if (depth > 1 && node.HasChildren) node.Children = Children(info.pProperty, depth - 1);
+                if (depth > 1 && node.HasChildren)
+                {
+                    node.Children = Children(info.pProperty, depth - 1, out var deeper);
+                    node.Note = deeper;
+                }
                 nodes.Add(node);
                 properties.Add(info.pProperty);
             }
@@ -177,6 +219,8 @@ namespace VsDbgMcp.Host
                 result.Message = "No variable's name contains '" + filter + "'. " + inScope +
                                  " were read in this frame; drop the filter to see them.";
             }
+
+            result.Message = Also(result.Message, listing);
 
             if (sharedAddresses) MarkSharedAddresses(nodes, properties);
             return result;
@@ -263,12 +307,14 @@ namespace VsDbgMcp.Host
             if (frame == null)
             {
                 result.Message = "there is no frame to expand this in";
+                result.Failed = true;
                 return result;
             }
 
             if (frame.GetExpressionContext(out var context) != VSConstants.S_OK || context == null)
             {
                 result.Message = FrameChoice.NoContext;
+                result.Failed = true;
                 return result;
             }
 
@@ -278,19 +324,24 @@ namespace VsDbgMcp.Host
                 result.Message = string.IsNullOrEmpty(parseError)
                     ? "could not parse '" + reference + "'"
                     : parseError;
+                result.Failed = true;
                 return result;
             }
 
-            if (expression.EvaluateSync(enum_EVALFLAGS.EVAL_NOSIDEEFFECTS | enum_EVALFLAGS.EVAL_NOFUNCEVAL,
-                    5000, null, out var property) != VSConstants.S_OK || property == null)
+            var evaluated = expression.EvaluateSync(enum_EVALFLAGS.EVAL_NOSIDEEFFECTS | enum_EVALFLAGS.EVAL_NOFUNCEVAL,
+                5000, null, out var property);
+            if (evaluated != VSConstants.S_OK || property == null)
             {
-                result.Message = "'" + reference + "' could not be evaluated in this frame";
+                result.Message = "'" + reference + "' could not be evaluated in this frame: " +
+                                 WhyNothingCameBack(evaluated, property);
+                result.Failed = true;
                 return result;
             }
 
             if (index == null && key == null)
             {
-                result.Nodes = Children(property, depth);
+                result.Nodes = Children(property, depth, out var note);
+                result.Message = note;
                 return result;
             }
 
@@ -307,11 +358,17 @@ namespace VsDbgMcp.Host
         {
             // A key is compared against the element's own key, which for a map is its
             // "first" child, so a key search has to read one level deeper than an index.
-            var rows = Children(property, key == null ? 1 : 2);
+            var rows = Children(property, key == null ? 1 : 2, out var note);
             var elements = ContainerElement.In(rows);
 
             if (elements.Count == 0)
-                return new VarsResult { Message = ContainerElement.NotAContainer(reference, rows) };
+            {
+                return new VarsResult
+                {
+                    Message = Also(ContainerElement.NotAContainer(reference, rows), note),
+                    Failed = true
+                };
+            }
 
             var chosen = index.HasValue
                 ? ContainerElement.At(elements, index.Value)
@@ -321,7 +378,8 @@ namespace VsDbgMcp.Host
             {
                 return new VarsResult
                 {
-                    Message = ContainerElement.NotFound(reference, elements, index, key, MaxChildren)
+                    Message = Also(ContainerElement.NotFound(reference, elements, index, key, MaxChildren), note),
+                    Failed = true
                 };
             }
 
@@ -354,35 +412,96 @@ namespace VsDbgMcp.Host
         /// </summary>
         const int MaxChildren = 200;
 
-        static List<VarNode> Children(IDebugProperty2 property, int depth)
+        /// <summary>Both, when there are both.</summary>
+        static string Also(string message, string note)
         {
+            if (string.IsNullOrEmpty(note)) return message;
+            return string.IsNullOrEmpty(message) ? note : message + " " + note;
+        }
+
+        /// <summary>
+        /// What is inside a value, and a note when that is not all of it. An empty list
+        /// is the same shape whether the value holds nothing or the engine refused to
+        /// say, and the two call for opposite next moves, so the refusal is named.
+        /// </summary>
+        static List<VarNode> Children(IDebugProperty2 property, int depth, out string note)
+        {
+            note = null;
             var nodes = new List<VarNode>();
             if (property == null || depth <= 0) return nodes;
 
             var guid = Guid.Empty;
-            if (property.EnumChildren(PropertyFields, 10, ref guid, enum_DBG_ATTRIB_FLAGS.DBG_ATTRIB_ALL,
-                    null, 5000, out var enumerator) != VSConstants.S_OK || enumerator == null)
+            var hr = property.EnumChildren(PropertyFields, 10, ref guid, enum_DBG_ATTRIB_FLAGS.DBG_ATTRIB_ALL,
+                null, 5000, out var enumerator);
+            if (hr < 0)
             {
+                note = "The engine would not list what is inside this (" + Code(hr) + ").";
                 return nodes;
             }
 
-            foreach (var info in Drain(enumerator, MaxChildren))
+            if (enumerator == null)
+            {
+                note = "The engine gave nothing to read the contents from.";
+                return nodes;
+            }
+
+            foreach (var info in Drain(enumerator, MaxChildren, out note))
             {
                 var node = ToNode(info);
-                if (depth > 1 && node.HasChildren) node.Children = Children(info.pProperty, depth - 1);
+                if (depth > 1 && node.HasChildren)
+                {
+                    node.Children = Children(info.pProperty, depth - 1, out var deeper);
+                    node.Note = deeper;
+                }
                 nodes.Add(node);
             }
 
             return nodes;
         }
 
-        static IEnumerable<DEBUG_PROPERTY_INFO> Drain(IEnumDebugPropertyInfo2 enumerator, int limit)
+        /// <summary>
+        /// Up to <paramref name="limit"/> rows, and a note when they are not all there
+        /// was. A list that simply stops shows neither the engine giving up partway nor
+        /// the limit here, and both leave a caller certain it has seen everything.
+        /// </summary>
+        static List<DEBUG_PROPERTY_INFO> Drain(IEnumDebugPropertyInfo2 enumerator, int limit, out string note)
         {
+            note = null;
+            var rows = new List<DEBUG_PROPERTY_INFO>();
             var buffer = new DEBUG_PROPERTY_INFO[1];
-            for (var count = 0; count < limit; count++)
+
+            while (rows.Count < limit)
             {
-                if (enumerator.Next(1, buffer, out var fetched) != VSConstants.S_OK || fetched != 1) yield break;
-                yield return buffer[0];
+                var hr = enumerator.Next(1, buffer, out var fetched);
+                if (hr < 0)
+                {
+                    note = "The engine stopped after " + rows.Count + " of these (" + Code(hr) +
+                           "), so this is not all of them.";
+                    return rows;
+                }
+
+                // S_FALSE and a short fetch are how an enumeration ends.
+                if (hr != VSConstants.S_OK || fetched != 1) return rows;
+                rows.Add(buffer[0]);
+            }
+
+            var total = Total(enumerator);
+            if (total > rows.Count) note = "These are the first " + rows.Count + " of " + total + ".";
+            else if (total < 0)
+                note = "These are the first " + rows.Count + ", which is as many as one read returns.";
+            return rows;
+        }
+
+        /// <summary>How many rows there are altogether, or -1 when the engine will not say.</summary>
+        static int Total(IEnumDebugPropertyInfo2 enumerator)
+        {
+            try
+            {
+                return enumerator.GetCount(out var count) == VSConstants.S_OK ? (int)count : -1;
+            }
+            catch (COMException)
+            {
+                return -1;
             }
         }
 
@@ -400,11 +519,21 @@ namespace VsDbgMcp.Host
             Readable = (info.dwAttrib & enum_DBG_ATTRIB_FLAGS.DBG_ATTRIB_VALUE_ERROR) == 0
         };
 
-        static DEBUG_PROPERTY_INFO ReadInfo(IDebugProperty2 property)
+        /// <summary>
+        /// The engine's description of a value, or false when it would not give one.
+        ///
+        /// A zeroed struct has no value, no type and no attributes, which is exactly what
+        /// a successful read of an empty string looks like: taken for a description it
+        /// turns a failure into a value the program appears to hold. Anything the engine
+        /// does not call a failure is kept, because some of them fill the struct and
+        /// return S_FALSE.
+        /// </summary>
+        static bool ReadInfo(IDebugProperty2 property, out DEBUG_PROPERTY_INFO info)
         {
-            var info = new DEBUG_PROPERTY_INFO[1];
-            property.GetPropertyInfo(PropertyFields, 10, 5000, null, 0, info);
-            return info[0];
+            var buffer = new DEBUG_PROPERTY_INFO[1];
+            var hr = property.GetPropertyInfo(PropertyFields, 10, 5000, null, 0, buffer);
+            info = buffer[0];
+            return hr >= 0;
         }
 
         static Guid ScopeFilter(string scope)
