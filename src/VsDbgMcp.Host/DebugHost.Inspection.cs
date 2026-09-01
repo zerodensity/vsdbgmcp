@@ -847,12 +847,30 @@ namespace VsDbgMcp.Host
             ThreadHelper.ThrowIfNotOnUIThread();
             var results = new List<EvalResult>();
 
+            // Before anything about the expression, because a debuggee that is running is
+            // the reason a read fails whatever else is wrong with the call.
+            RequireStopped();
+
+            var wrongModule = WhyTypeModuleWontDo(options.TypeModule);
+            if (wrongModule != null)
+            {
+                results.Add(new EvalResult { Expression = options.Expression, Error = wrongModule });
+                return results;
+            }
+
+            // The shim refuses these before the call; this is for anyone reaching the host
+            // by another route, and it is the same wording either way.
+            var conflict = ContainerElement.CannotEnumerate(options.Count, options.Member, options.AllThreads);
+            if (conflict != null)
+            {
+                results.Add(new EvalResult { Expression = options.Expression, Error = conflict });
+                return results;
+            }
+
+            if (options.Count > 0) return Indexes(CurrentFrame(options.FrameIndex), options);
+
             if (options.AllThreads)
             {
-                // The per-thread frames below are enumerated fresh, so the state check
-                // that CurrentFrame does has to be asked for here.
-                RequireStopped();
-
                 foreach (var thread in AllThreads())
                 {
                     var result = Evaluate(ChooseFrame(thread, options.FrameIndex), options);
@@ -865,6 +883,107 @@ namespace VsDbgMcp.Host
             results.Add(Evaluate(CurrentFrame(options.FrameIndex), options));
             return results;
         });
+
+        /// <summary>
+        /// One row per index of a raw array, from one call. The visualizer's view of the
+        /// same memory is what hides a repeated block in it, and reading around that by
+        /// hand costs one eval per element.
+        /// </summary>
+        static List<EvalResult> Indexes(ChosenFrame chosen, EvalOptions options)
+        {
+            var results = new List<EvalResult>();
+
+            if (chosen.Refusal != null)
+            {
+                // Once, rather than the same refusal repeated for every index.
+                results.Add(new EvalResult { Expression = options.Expression, Error = chosen.Refusal });
+                return results;
+            }
+
+            var count = Math.Min(options.Count, ContainerElement.IndexLimit);
+            string firstError = null;
+            var allFailedTheSameWay = true;
+
+            for (var i = 0; i < count; i++)
+            {
+                var result = ExpressionEval.Evaluate(chosen.Frame, AtIndex(options, i));
+                result.Index = i;
+
+                // Every row was read in the same frame, so it is said once.
+                if (i == 0)
+                {
+                    result.Frame = Reported(chosen);
+                    result.FrameNote = chosen.Note;
+                    firstError = result.IsValid ? null : result.Error;
+                }
+
+                results.Add(result);
+                if (result.IsValid || result.Error != firstError) allFailedTheSameWay = false;
+
+                // An expression that is wrong fails the same way at every index. Each of
+                // these runs the engine synchronously inside Visual Studio, so two hundred
+                // more of them would hold the IDE to prove nothing. The reply says the run
+                // stopped, rather than letting the short list read as the whole of it.
+                if (allFailedTheSameWay && results.Count >= FailuresBeforeStopping) break;
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// How many identical failures it takes to call the expression wrong rather than one
+        /// element unreadable. One is an element; three in a row is the expression.
+        /// </summary>
+        const int FailuresBeforeStopping = 3;
+
+        static EvalOptions AtIndex(EvalOptions options, int index) => new EvalOptions
+        {
+            Expression = ContainerElement.Indexed(options.Expression, index, options.Member),
+            Format = options.Format,
+            Raw = options.Raw,
+            AllowSideEffects = options.AllowSideEffects,
+            TypeModule = options.TypeModule,
+            FrameIndex = options.FrameIndex,
+            TimeoutMs = options.TimeoutMs
+        };
+
+        /// <summary>
+        /// Why a module named for type lookup cannot be used, or null. Only asked when one
+        /// was given, because the answer needs the engine's module list and reading that is
+        /// not free.
+        /// </summary>
+        string WhyTypeModuleWontDo(string typeModule)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (string.IsNullOrWhiteSpace(typeModule)) return null;
+
+            return ModuleQualifier.NotLoaded(typeModule, LoadedModuleNames());
+        }
+
+        /// <summary>
+        /// What every loaded module is called, and nothing else about it. Reading the rest
+        /// means a file time per module, which at several hundred is what this avoids.
+        ///
+        /// Read from the process the caller is looking at rather than the one that stopped,
+        /// because after a select those are different and modules belong to a process.
+        /// </summary>
+        List<string> LoadedModuleNames()
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            var program = _sink.CurrentProgram;
+            var thread = CurrentThreadObject();
+            if (thread != null && thread.GetProgram(out var theirs) == VSConstants.S_OK && theirs != null)
+                program = theirs;
+
+            var names = new List<string>();
+            foreach (var module in NativeReader.Enumerate(program))
+            {
+                var name = NativeReader.NameOf(module);
+                if (!string.IsNullOrEmpty(name)) names.Add(name);
+            }
+            return names;
+        }
 
         /// <summary>
         /// Evaluates in a frame that has already been settled on, so a frame nothing can
@@ -898,6 +1017,9 @@ namespace VsDbgMcp.Host
 
             var chosen = CurrentFrame();
             if (chosen.Refusal != null) return new VarsResult { Message = chosen.Refusal, Failed = true };
+
+            var wrongModule = WhyTypeModuleWontDo(typeModule);
+            if (wrongModule != null) return new VarsResult { Message = wrongModule, Failed = true };
 
             return ReadIn(chosen, ExpressionEval.Expand(chosen.Frame, reference, depth, typeModule, index, key));
         });

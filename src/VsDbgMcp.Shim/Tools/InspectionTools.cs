@@ -71,19 +71,25 @@ namespace VsDbgMcp.Shim.Tools
             }, thread.ToString());
 
         [McpServerTool(Name = "eval", ReadOnly = true)]
-        [Description("Evaluate an expression in the current frame, through the same visualizers the debugger uses, so a std::vector prints as its elements. Function calls are refused by default: the native evaluator would really run them and change the program. Set allowSideEffects only when you intend that. The evaluator will not run one call inside another and has nothing to bind a reference out-parameter to; where it refuses for either reason the reply says whose limit it is and what to do instead.")]
+        [Description("Evaluate an expression in the current frame, through the same visualizers the debugger uses, so a std::vector prints as its elements. Function calls are refused by default: the native evaluator would really run them and change the program. Set allowSideEffects only when you intend that. The evaluator will not run one call inside another and has nothing to bind a reference out-parameter to; where it refuses for either reason the reply says whose limit it is and what to do instead. Pass count to read a raw array one index at a time, which is how you check a container's own view against the memory behind it.")]
         public Task<string> Eval(
             [Description("Expression in the language of the current frame.")] string expression,
             [Description("Format specifier without the comma: x for hex, d for decimal, su for a unicode string, or '[n]' to show n elements.")] string format = null,
             [Description("Bypass visualizers and show the raw layout, the ',!' specifier.")] bool raw = false,
             [Description("Allow the expression to call functions, which executes code in the debuggee.")] bool allowSideEffects = false,
             [Description("Evaluate on every thread and group the results. Use this to compare one value across a worker pool.")] bool allThreads = false,
-            [Description("Look type names up in this module, by file name, for example 'MyPlugin.dll'. Pass it when a cast fails with 'identifier X is undefined' because the type belongs to a module other than the one the frame is in. Write the expression the way you would normally; nothing else about it changes.")] string typeModule = null,
+            [Description("Look type names up in this module, by file name, for example 'MyPlugin.dll'. Pass it when a cast fails with 'identifier X is undefined' because the type belongs to a module other than the one the frame is in. Write the expression the way you would normally; nothing else about it changes. A module that is not loaded is refused rather than passed on, because the qualifier would then name nothing and the type would resolve in the frame's own module. Nothing can check a cast you named no module for: a same-named type in the frame's module answers with a value that looks like data.")] string typeModule = null,
             [Description("Frame index to evaluate in. Omit to use the selected frame, which steps past the pseudo-frame a pause leaves on top of the stack; naming a frame pins this call to it and reports a failure there rather than reading somewhere else.")] int? frame = null,
+            [Description("Read this many indexes of the expression instead of the expression itself: (expr)[0], (expr)[1], one row per index. Twenty-eight rows in one call rather than twenty-eight calls, and the reply counts how many of the values were distinct - a repeated block is what a container's view hides. Capped at 256. The run stops early when the first few indexes all fail the same way, and either way the reply says why it is shorter than what was asked for.")] int count = 0,
+            [Description("What to read on each element, written the way it follows it: '->Name' for an array of pointers, '.Name' for an array of objects. A bare name is read as '.Name'. Needs count; on its own it is refused rather than dropped.")] string member = null,
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
             CancellationToken ct = default)
             => On(instance, ct, async link =>
             {
+                var asked = Math.Max(0, count);
+                var conflict = ContainerElement.CannotEnumerate(asked, member, allThreads);
+                if (conflict != null) return Reply.Bad(conflict);
+
                 var results = await link.Debug.EvalAsync(new EvalOptions
                 {
                     Expression = expression,
@@ -92,9 +98,13 @@ namespace VsDbgMcp.Shim.Tools
                     AllowSideEffects = allowSideEffects,
                     AllThreads = allThreads,
                     TypeModule = typeModule,
-                    FrameIndex = frame
+                    FrameIndex = frame,
+                    Count = Math.Min(asked, ContainerElement.IndexLimit),
+                    Member = member
                 }, ct).ConfigureAwait(false);
-                return Render.Evals(results);
+
+                return Render.Evals(results,
+                    asked > 0 ? ContainerElement.Enumeration(asked, member, results) : null);
             }, expression);
 
         [McpServerTool(Name = "vars", ReadOnly = true)]
@@ -114,11 +124,11 @@ namespace VsDbgMcp.Shim.Tools
             }, scope);
 
         [McpServerTool(Name = "expand", ReadOnly = true)]
-        [Description("Expand one variable or expression by the reference that vars or eval returned, so you pay for only the part of a large structure you actually need. Pass index or key to pick a single element out of a container: the reply carries that element's own reference, so a deeper call never has to repeat the visualizer's expression for it.")]
+        [Description("Expand one variable or expression by the reference that vars or eval returned, so you pay for only the part of a large structure you actually need. Pass index or key to pick a single element out of a container: the reply carries that element's own reference, so a deeper call never has to repeat the visualizer's expression for it. A container whose visualizer shows no elements is read a second time with the visualizer off, and the reply reports what the raw layout holds - a map that renders as empty while its own count field is not zero is otherwise indistinguishable from an empty one.")]
         public Task<string> Expand(
             [Description("Reference from a previous vars or eval reply.")] string reference,
             [Description("How many levels to expand.")] int depth = 1,
-            [Description("Look type names up in this module, by file name, for example 'MyPlugin.dll'. Pass it when the reference casts to a type that belongs to a module other than the one the frame is in.")] string typeModule = null,
+            [Description("Look type names up in this module, by file name, for example 'MyPlugin.dll'. Pass it when the reference casts to a type that belongs to a module other than the one the frame is in. A module that is not loaded is refused rather than passed on, because the qualifier would then name nothing and the type would resolve in the frame's own module instead.")] string typeModule = null,
             [Description("Element at this position, as the visualizer numbers them: [0], [1], and so on. Exact, and no more work than expanding the container.")] int? index = null,
             [Description("Element whose key renders as this text. A walk down the container's elements comparing each one's rendered key - a map element's 'first', the element itself for a set or vector - not a hash lookup, and it sees only the first 200 elements an expansion reads.")] string key = null,
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,

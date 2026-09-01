@@ -342,19 +342,94 @@ namespace VsDbgMcp.Host
             {
                 result.Nodes = Children(property, depth, out var note);
                 result.Message = note;
+
+                if (ContainerElement.In(result.Nodes).Count == 0)
+                    AlsoRaw(context, result, reference, typeModule, ValueOf(property), result.Nodes.Count);
+
                 return result;
             }
 
-            return Element(frame, property, reference, depth, typeModule, index, key);
+            return Element(frame, context, property, reference, depth, typeModule, index, key);
         }
+
+        /// <summary>
+        /// How deep the raw layout is read. Deep enough for a count kept behind three
+        /// wrappers, which is where a std container keeps its size; the visualizer is off
+        /// by then, so nothing at these levels expands into elements.
+        /// </summary>
+        const int RawDepth = 4;
+
+        /// <summary>
+        /// A container the visualizer renders as empty is the one wrong answer a caller
+        /// cannot see, because an empty list reads as an answer. Where the summary claims
+        /// there is nothing inside, the same value is read again with the ",!" specifier
+        /// and both views are reported - including when they agree, which is a better
+        /// answer than the silence it replaces.
+        ///
+        /// Nothing here knows one library's layout from another's. It reports what the raw
+        /// view holds and leaves the reader to see the disagreement.
+        /// </summary>
+        static void AlsoRaw(IDebugExpressionContext2 context, VarsResult result, string reference,
+            string typeModule, string shown, int shownRows)
+        {
+            if (!ContainerElement.LooksEmpty(shown)) return;
+
+            var rows = RawRows(context, reference, typeModule, out var why, out var note);
+            if (rows == null)
+            {
+                result.Message = Also(result.Message,
+                    ContainerElement.RawUnreadable(reference, shown, shownRows, why));
+                return;
+            }
+
+            result.Message = Also(result.Message,
+                Also(ContainerElement.RawView(reference, shown, shownRows, rows), note));
+
+            if (rows.Count == 0) return;
+
+            result.Nodes.Add(new VarNode
+            {
+                Name = "[raw layout]",
+                Value = "read with ',!' because the visualizer showed no elements",
+                HasChildren = true,
+                Children = rows
+            });
+        }
+
+        /// <summary>
+        /// The same reference read with the visualizer turned off, or null when that read
+        /// would not run - which is a third answer and not an empty one.
+        /// </summary>
+        static List<VarNode> RawRows(IDebugExpressionContext2 context, string reference, string typeModule,
+            out string why, out string note)
+        {
+            note = null;
+
+            var expression = Parse(context, reference, typeModule, null, true, out why);
+            if (expression == null) return null;
+
+            var evaluated = expression.EvaluateSync(
+                enum_EVALFLAGS.EVAL_NOSIDEEFFECTS | enum_EVALFLAGS.EVAL_NOFUNCEVAL, 5000, null, out var property);
+            if (evaluated != VSConstants.S_OK || property == null)
+            {
+                why = WhyNothingCameBack(evaluated, property);
+                return null;
+            }
+
+            return Children(property, RawDepth, out note);
+        }
+
+        /// <summary>The value the visualizer renders, or null when the engine would not say.</summary>
+        static string ValueOf(IDebugProperty2 property) =>
+            ReadInfo(property, out var info) ? info.bstrValue : null;
 
         /// <summary>
         /// One element out of a container, chosen from the rows the visualizer already
         /// produces. Each row's full name is the expression that reaches that element, so
         /// this picks a row rather than writing any C++ of its own.
         /// </summary>
-        static VarsResult Element(IDebugStackFrame2 frame, IDebugProperty2 property, string reference,
-            int depth, string typeModule, int? index, string key)
+        static VarsResult Element(IDebugStackFrame2 frame, IDebugExpressionContext2 context,
+            IDebugProperty2 property, string reference, int depth, string typeModule, int? index, string key)
         {
             // A key is compared against the element's own key, which for a map is its
             // "first" child, so a key search has to read one level deeper than an index.
@@ -363,11 +438,16 @@ namespace VsDbgMcp.Host
 
             if (elements.Count == 0)
             {
-                return new VarsResult
+                var refusal = new VarsResult
                 {
                     Message = Also(ContainerElement.NotAContainer(reference, rows), note),
                     Failed = true
                 };
+
+                // The container the visualizer says is empty is exactly the one somebody
+                // is asking for an element of, so the raw view belongs in the refusal.
+                AlsoRaw(context, refusal, reference, typeModule, ValueOf(property), rows.Count);
+                return refusal;
             }
 
             var chosen = index.HasValue

@@ -401,6 +401,18 @@ namespace VsDbgMcp.Contracts
         public string TypeModule { get; set; }
 
         public int TimeoutMs { get; set; } = 5000;
+
+        /// <summary>
+        /// Read this many indexes of the expression instead of the expression itself, one
+        /// result each. A raw array carries no length, so the count is the caller's to give.
+        /// </summary>
+        public int Count { get; set; }
+
+        /// <summary>
+        /// What to read on each element, written the way it follows it: "-&gt;Name", ".Name".
+        /// Only used when Count is set.
+        /// </summary>
+        public string Member { get; set; }
     }
 
     public sealed class EvalResult
@@ -422,6 +434,13 @@ namespace VsDbgMcp.Contracts
 
         /// <summary>Set when that is not the frame the call started from, saying why it moved.</summary>
         public string FrameNote { get; set; }
+
+        /// <summary>
+        /// Which index of a raw array this row is, when the call asked for a run of them.
+        /// Null for an ordinary evaluation, including one done on every thread, and that is
+        /// what tells a list of indexes from a list of threads.
+        /// </summary>
+        public int? Index { get; set; }
     }
 
     /// <summary>

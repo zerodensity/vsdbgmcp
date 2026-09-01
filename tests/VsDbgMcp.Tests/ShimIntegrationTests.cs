@@ -312,10 +312,10 @@ namespace VsDbgMcp.Tests
             var tools = new InspectionTools(_sessions);
 
             var refused = await Failure.Text(
-                tools.Eval("v.size()", null, false, false, false, null, 0, null, CancellationToken.None));
+                tools.Eval("v.size()", frame: 0, ct: CancellationToken.None));
             Assert.Contains("allowSideEffects", refused);
 
-            var allowed = await tools.Eval("v.size()", null, false, true, false, null, 0, null, CancellationToken.None);
+            var allowed = await tools.Eval("v.size()", allowSideEffects: true, frame: 0, ct: CancellationToken.None);
             Assert.Contains("42", allowed);
         }
 
@@ -323,11 +323,51 @@ namespace VsDbgMcp.Tests
         public async Task Evaluating_across_threads_groups_equal_values()
         {
             var text = await new InspectionTools(_sessions)
-                .Eval("m_state", null, false, false, true, null, 0, null, CancellationToken.None);
+                .Eval("m_state", allThreads: true, frame: 0, ct: CancellationToken.None);
 
             // Two threads share a value and one differs; the odd one out should stand out.
             Assert.Contains("10, 11", text);
             Assert.Contains("12", text);
+        }
+
+        [Fact]
+        public async Task Reading_a_raw_array_by_index_returns_one_row_each()
+        {
+            var text = await new InspectionTools(_sessions)
+                .Eval("RawParams->Pins", count: 28, member: "->Name", ct: CancellationToken.None);
+
+            Assert.Contains("(RawParams->Pins)[0]->Name = \"Pin0\"", text);
+            Assert.Contains("(RawParams->Pins)[27]->Name = \"Pin3\"", text);
+
+            // The repeated block is the finding, and counting it is what makes it visible.
+            Assert.Contains("28 values read, 12 of them distinct.", text);
+        }
+
+        [Fact]
+        public async Task Two_readings_asked_for_at_once_are_refused()
+        {
+            var text = await Failure.Text(new InspectionTools(_sessions)
+                .Eval("Pins", allThreads: true, count: 4, ct: CancellationToken.None));
+
+            Assert.Contains("Ask for one of them", text);
+        }
+
+        [Fact]
+        public async Task A_member_with_nothing_to_read_it_on_is_refused()
+        {
+            var text = await Failure.Text(new InspectionTools(_sessions)
+                .Eval("Pins", member: "->Name", ct: CancellationToken.None));
+
+            Assert.Contains("no count was given", text);
+        }
+
+        [Fact]
+        public async Task Asking_for_more_indexes_than_the_cap_says_so()
+        {
+            var text = await new InspectionTools(_sessions)
+                .Eval("Pins", count: 4000, ct: CancellationToken.None);
+
+            Assert.Contains("4000 indexes were asked for and 256 read", text);
         }
 
         [Fact]

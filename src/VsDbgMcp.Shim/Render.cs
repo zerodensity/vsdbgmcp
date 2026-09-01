@@ -738,9 +738,11 @@ namespace VsDbgMcp.Shim
             }
         }
 
-        public static Reply Evals(IReadOnlyList<EvalResult> results)
+        public static Reply Evals(IReadOnlyList<EvalResult> results, string note = null)
         {
             if (results == null || results.Count == 0) return Reply.Bad("No result.");
+
+            if (results[0].Index.HasValue) return Indexed(results, note);
 
             if (results.Count == 1)
             {
@@ -787,6 +789,51 @@ namespace VsDbgMcp.Shim
             // One thread failing where others answered is a reading of the pool, not a
             // failed call. Every thread failing is the same failure, said many times.
             return results.Any(r => r.IsValid) ? grouped : Reply.Bad(grouped);
+        }
+
+        /// <summary>
+        /// One row per index, in the order they were read. The rows themselves are the
+        /// answer: a block of repeated values is only visible with them side by side, and
+        /// that is the thing a container's own view had already hidden.
+        ///
+        /// The type is printed where it changes rather than on every row, because
+        /// twenty-eight copies of it buries what is being looked at.
+        /// </summary>
+        static Reply Indexed(IReadOnlyList<EvalResult> results, string note)
+        {
+            var sb = new StringBuilder();
+            var first = results[0];
+            if (!string.IsNullOrEmpty(first.FrameNote)) sb.AppendLine(first.FrameNote);
+            if (first.Frame != null) sb.AppendLine(Frames(new[] { first.Frame }, first.Frame.Index));
+
+            string lastType = null;
+            foreach (var r in results)
+            {
+                sb.Append("  ").Append(r.Expression);
+                if (!r.IsValid)
+                {
+                    sb.Append("  -- ").AppendLine(r.Error);
+                    continue;
+                }
+
+                sb.Append(" = ").Append(r.Value);
+                if (!string.IsNullOrEmpty(r.Type) && r.Type != lastType)
+                {
+                    sb.Append("  (").Append(r.Type).Append(')');
+                    lastType = r.Type;
+                }
+
+                if (r.HasChildren && !string.IsNullOrEmpty(r.Ref)) sb.Append("  ... expand ").Append(r.Ref);
+
+                var fills = FillPatterns.Notes(r.Value);
+                if (fills.Count > 0) sb.Append("  -- ").Append(string.Join("; ", fills));
+                sb.AppendLine();
+            }
+
+            if (!string.IsNullOrEmpty(note)) sb.AppendLine(note);
+
+            var text = sb.ToString().TrimEnd();
+            return results.Any(r => r.IsValid) ? text : Reply.Bad(text);
         }
 
         public static string Build(BuildResult b)

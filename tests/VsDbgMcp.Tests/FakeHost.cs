@@ -230,6 +230,24 @@ namespace VsDbgMcp.Tests
             Record(nameof(EvalAsync));
             var results = new List<EvalResult>();
 
+            if (options.Count > 0)
+            {
+                // A run of pin names with the twelfth repeating the first, which is the
+                // shape the container view had hidden.
+                for (var i = 0; i < options.Count; i++)
+                {
+                    results.Add(new EvalResult
+                    {
+                        Expression = ContainerElement.Indexed(options.Expression, i, options.Member),
+                        Value = "\"Pin" + (i % 12) + "\"",
+                        Type = "FName",
+                        IsValid = true,
+                        Index = i
+                    });
+                }
+                return Task.FromResult(results);
+            }
+
             if (options.AllThreads)
             {
                 results.Add(new EvalResult { Expression = options.Expression, Value = "1", IsValid = true, ThreadId = 10 });
