@@ -263,6 +263,25 @@ namespace VsDbgMcp.Tests
             Assert.Contains("publish samples=1024", text);
         }
 
+        /// <summary>
+        /// The whole path, because this is the reply that read as an answer: a
+        /// tracepoint that has collected nothing used to come back saying it had not
+        /// been hit, and a function that was executing was reported as dead.
+        /// </summary>
+        [Fact]
+        public async Task A_collecting_tracepoint_with_nothing_in_it_does_not_report_no_hits()
+        {
+            var tools = new BreakpointTools(_sessions);
+            await tools.BpSet(file: @"D:\repo\Engine\audio.cpp", line: 214,
+                logMessage: "publish samples={n}", collect: true, ct: CancellationToken.None);
+
+            var text = await tools.TraceRead(7, 50, null, CancellationToken.None);
+
+            Assert.DoesNotContain("has not been hit", text);
+            Assert.Contains("never reached this buffer", text);
+            Assert.Contains("What settles it", text);
+        }
+
         [Fact]
         public async Task Reading_a_tracepoint_that_is_not_collecting_says_which_ones_are()
         {

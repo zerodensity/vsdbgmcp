@@ -178,8 +178,8 @@ namespace VsDbgMcp.Host
                     // the shared stream. Everything else carries on, including a record
                     // whose breakpoint has stopped collecting - it keeps its text and
                     // loses only the marker.
-                    var body = TraceMessage.Unmark(text, out var breakpointId);
-                    if (Trace.Add(breakpointId, body, DateTime.UtcNow)) return;
+                    var body = TraceMessage.Unmark(text, out var breakpointId, out var cutShort);
+                    if (Trace.Add(breakpointId, body, DateTime.UtcNow, cutShort)) return;
 
                     OutputOccurred?.Invoke(new OutputEvent { Pane = "Debug", Text = body });
                 }

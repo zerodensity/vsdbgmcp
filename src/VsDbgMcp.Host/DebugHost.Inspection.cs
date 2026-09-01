@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -277,7 +278,7 @@ namespace VsDbgMcp.Host
                 : BreakpointKind.Location;
 
             var message = Read(() => (breakpoint as EnvDTE80.Breakpoint2)?.Message, null, "the tracepoint message");
-            if (!string.IsNullOrEmpty(message)) info.LogMessage = TraceMessage.Unmark(message, out _);
+            if (!string.IsNullOrEmpty(message)) info.LogMessage = TraceMessage.Unmark(message, out _, out _);
             info.Collecting = _sink.Trace.IsCollecting(info.Id);
 
             // The breakpoint the automation model hands out is the pending one; binding
@@ -408,8 +409,165 @@ namespace VsDbgMcp.Host
             // Reading them now is what makes this work at all on such a Visual Studio;
             // where the watch did attach this finds nothing new and costs a string.
             _package.PumpTrace(DebugPaneText());
-            return _sink.Trace.Read(id, tail);
+
+            // Then try to attach again, because the pane does not exist until something
+            // has been debugged and the only other attempt is when a tracepoint is set.
+            // Reading first means nothing already in the pane is skipped by attaching.
+            _package.EnsureTraceWatch();
+
+            var result = _sink.Trace.Read(id, tail);
+
+            // A tracepoint that is collecting and has nothing is where the breakpoint's
+            // own state, and a setting of Visual Studio's own, can be the whole answer.
+            if (result.Collected == 0 && _sink.Trace.IsCollecting(id))
+            {
+                result.TracepointState = TracepointState(id);
+                result.OutputRedirect = OutputRedirectNote();
+            }
+            return result;
         });
+
+        /// <summary>
+        /// What the breakpoint itself says about a tracepoint that has logged nothing.
+        /// Disabled, unbound, or filtered all keep a line that really was reached from
+        /// writing a record, and each is a different answer from the line not running.
+        /// </summary>
+        string TracepointState(int id)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            var breakpoint = _breakpoints.Find(id, _dte.Debugger.Breakpoints);
+            if (breakpoint == null) return null;
+
+            var said = new List<string>();
+
+            if (!Read(() => breakpoint.Enabled, true, "whether the tracepoint is enabled"))
+                said.Add("it is disabled");
+
+            // The pending breakpoint gets children when it binds, and an unbound one
+            // cannot log at all. Before launch nothing has bound yet, which is not the
+            // same thing and is not worth reporting as a fault.
+            var bound = Read(() => breakpoint.Children, null, "the bound breakpoints");
+            if (CurrentMode == DebugModes.Design) said.Add("nothing is being debugged yet");
+            else if (bound == null || bound.Count == 0) said.Add("it is not bound, so it cannot log");
+
+            var condition = Read(() => breakpoint.Condition, null, "the tracepoint condition");
+            if (!string.IsNullOrEmpty(condition))
+                said.Add("it only logs when '" + condition + "' is true");
+
+            // The same target means different things depending on the type: one hit in
+            // N from everyNthHit, or only hit N from hitCount.
+            var target = Read(() => breakpoint.HitCountTarget, 0, "the tracepoint hit filter");
+            var filter = Read(() => breakpoint.HitCountType, dbgHitCountType.dbgHitCountTypeNone,
+                              "the tracepoint hit filter type");
+
+            if (target > 1 && filter == dbgHitCountType.dbgHitCountTypeMultiple)
+                said.Add("it logs one hit in " + target);
+            else if (target > 0 && filter == dbgHitCountType.dbgHitCountTypeEqual)
+                said.Add("it only logs on hit " + target);
+
+            if (said.Count == 0) return null;
+
+            return "The breakpoint says " + string.Join(", and ", said.ToArray()) + ". " +
+                   (said.Count == 1 ? "That keeps" : "Each of those keeps") +
+                   " a line that was reached from logging anything.";
+        }
+
+        /// <summary>
+        /// What Tools > Options > Debugging > General says about sending Output window
+        /// text to the Immediate window. With that on, Visual Studio writes a
+        /// tracepoint's records there and the Debug pane never sees them, so a
+        /// collecting tracepoint stays empty however often its line runs.
+        ///
+        /// The automation model does not promise this property, so a lookup that finds
+        /// nothing says that rather than reporting the setting as off.
+        /// </summary>
+        string OutputRedirectNote()
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            const string where = "Tools > Options > Debugging > General, " +
+                                 "'Redirect all Output Window text to the Immediate Window'";
+
+            var on = Read<bool?>(() => IsOn(OutputToImmediate()), null, "the Immediate window redirect setting");
+
+            if (on == null)
+            {
+                return "Whether Visual Studio is redirecting Output window text to the Immediate window " +
+                       "could not be read here. With that on (" + where + ") the records go to the " +
+                       "Immediate window and never reach the Debug pane this reads, so it is worth a look.";
+            }
+
+            if (on == false) return null;
+
+            return "Visual Studio is redirecting Output window text to the Immediate window (" + where +
+                   "), so this tracepoint's records are not being written to the Debug pane this reads. " +
+                   "Turn that off and set the tracepoint again.";
+        }
+
+        /// <summary>
+        /// The setting behind that checkbox, or null if this Visual Studio does not
+        /// offer it. Visual Studio's own settings files call it OutputToImmediate and
+        /// keep it with the debugger's options, but which automation page carries it is
+        /// not documented, so both plausible ones are asked.
+        /// </summary>
+        object OutputToImmediate()
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            foreach (var page in new[] { "General", "Output Window" })
+            {
+                Properties properties;
+                try { properties = _dte.Properties["Debugging", page]; }
+                catch (Exception) { continue; }
+                if (properties == null) continue;
+
+                foreach (Property property in properties)
+                {
+                    // One property refusing to give its name is no reason to stop
+                    // looking at the rest of the page.
+                    string name;
+                    try { name = property.Name; }
+                    catch (Exception) { continue; }
+
+                    if (!string.Equals(name, "OutputToImmediate", StringComparison.OrdinalIgnoreCase)) continue;
+
+                    // A property that will not give its value is one page's failure, not
+                    // the answer, so the other page is still worth asking.
+                    try { return property.Value; }
+                    catch (Exception) { break; }
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// A checkbox comes back as a bool from one Visual Studio, as 0 or 1 from
+        /// another, and as text from a third. Null for a value this does not recognise,
+        /// because reading an unrecognised value as off is the answer that hides the
+        /// whole problem.
+        /// </summary>
+        static bool? IsOn(object value)
+        {
+            if (value is bool flag) return flag;
+
+            if (value is string text)
+            {
+                if (bool.TryParse(text, out var parsed)) return parsed;
+                return long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number)
+                    ? number != 0
+                    : (bool?)null;
+            }
+
+            if (value is sbyte || value is byte || value is short || value is ushort ||
+                value is int || value is uint || value is long || value is ulong)
+            {
+                return Convert.ToInt64(value, CultureInfo.InvariantCulture) != 0;
+            }
+
+            return null;
+        }
 
         /// <summary>
         /// The whole Debug pane as text, or null if the shell will not hand it over.

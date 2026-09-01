@@ -22,10 +22,11 @@ namespace VsDbgMcp.Tests
         {
             var marked = TraceMessage.Mark(7, "mic tick publish, n=42");
 
-            var body = TraceMessage.Unmark(marked, out var id);
+            var body = TraceMessage.Unmark(marked, out var id, out var cutShort);
 
             Assert.Equal(7, id);
             Assert.Equal("mic tick publish, n=42", body);
+            Assert.False(cutShort);
         }
 
         [Fact]
@@ -33,7 +34,7 @@ namespace VsDbgMcp.Tests
         {
             var text = "[submix] callback 47/s";
 
-            var body = TraceMessage.Unmark(text, out var id);
+            var body = TraceMessage.Unmark(text, out var id, out _);
 
             Assert.Equal(0, id);
             Assert.Same(text, body);
@@ -44,9 +45,9 @@ namespace VsDbgMcp.Tests
         {
             var log = new TraceLog();
 
-            var body = TraceMessage.Unmark(TraceMessage.Mark(9, "still logging"), out var id);
+            var body = TraceMessage.Unmark(TraceMessage.Mark(9, "still logging"), out var id, out _);
 
-            Assert.False(log.Add(id, body, Noon));
+            Assert.False(log.Add(id, body, Noon, false));
             Assert.Equal("still logging", body);
         }
 
@@ -56,8 +57,8 @@ namespace VsDbgMcp.Tests
             var log = new TraceLog();
             log.Start(7, 0, DateTime.UtcNow);
 
-            Assert.True(log.Add(7, "first", Noon));
-            Assert.True(log.Add(7, "second", Noon.AddMilliseconds(20)));
+            Assert.True(log.Add(7, "first", Noon, false));
+            Assert.True(log.Add(7, "second", Noon.AddMilliseconds(20), false));
 
             var result = log.Read(7, 0);
 
@@ -73,7 +74,7 @@ namespace VsDbgMcp.Tests
             log.Start(7, 0, DateTime.UtcNow);
 
             for (var i = 1; i <= TraceLog.Capacity + 500; i++)
-                log.Add(7, "tick " + i, Noon.AddMilliseconds(i * 20));
+                log.Add(7, "tick " + i, Noon.AddMilliseconds(i * 20), false);
 
             var result = log.Read(7, 0);
 
@@ -90,7 +91,7 @@ namespace VsDbgMcp.Tests
         {
             var log = new TraceLog();
             log.Start(7, 0, DateTime.UtcNow);
-            for (var i = 1; i <= 10; i++) log.Add(7, "tick " + i, Noon.AddMilliseconds(i * 20));
+            for (var i = 1; i <= 10; i++) log.Add(7, "tick " + i, Noon.AddMilliseconds(i * 20), false);
 
             var result = log.Read(7, 3);
 
@@ -105,8 +106,8 @@ namespace VsDbgMcp.Tests
             var log = new TraceLog();
             log.Start(7, 2, DateTime.UtcNow);
 
-            for (var i = 1; i <= 5; i++) log.Add(7, "tick " + i, Noon.AddMilliseconds(i * 10));
-            log.Add(7, "next second", Noon.AddSeconds(2));
+            for (var i = 1; i <= 5; i++) log.Add(7, "tick " + i, Noon.AddMilliseconds(i * 10), false);
+            log.Add(7, "next second", Noon.AddSeconds(2), false);
 
             var result = log.Read(7, 0);
 
@@ -123,7 +124,7 @@ namespace VsDbgMcp.Tests
         {
             var log = new TraceLog();
             log.Start(7, 0, DateTime.UtcNow);
-            log.Add(7, "before", Noon);
+            log.Add(7, "before", Noon, false);
 
             log.Start(7, 0, DateTime.UtcNow);
 
@@ -137,13 +138,13 @@ namespace VsDbgMcp.Tests
         {
             var log = new TraceLog();
             log.Start(9, 0, DateTime.UtcNow);
-            log.Add(9, "tick", Noon);
+            log.Add(9, "tick", Noon, false);
 
             var result = log.Read(3, 0);
 
             Assert.Empty(result.Records);
             Assert.Contains("#3 is not collecting", result.Message);
-            Assert.Contains("#9 (1 records)", result.Message);
+            Assert.Contains("#9 (1 record)", result.Message);
         }
 
         [Fact]
@@ -162,7 +163,7 @@ namespace VsDbgMcp.Tests
             log.Forget(7);
 
             Assert.False(log.IsCollecting(7));
-            Assert.False(log.Add(7, "tick", Noon));
+            Assert.False(log.Add(7, "tick", Noon, false));
         }
 
         [Fact]
@@ -293,8 +294,8 @@ namespace VsDbgMcp.Tests
             var log = new TraceLog();
             log.Start(7, 0, DateTime.UtcNow);
 
-            log.Add(7, "first", default(DateTime));
-            log.Add(7, "second", default(DateTime));
+            log.Add(7, "first", default(DateTime), false);
+            log.Add(7, "second", default(DateTime), false);
 
             var result = log.Read(7, 0);
 
@@ -309,7 +310,7 @@ namespace VsDbgMcp.Tests
             var log = new TraceLog();
             log.Start(7, 0, DateTime.UtcNow);
 
-            log.Add(7, "first", new DateTime(2026, 8, 21, 12, 0, 0, DateTimeKind.Utc));
+            log.Add(7, "first", new DateTime(2026, 8, 21, 12, 0, 0, DateTimeKind.Utc), false);
 
             Assert.True(log.Read(7, 0).Timed);
         }
@@ -357,6 +358,345 @@ namespace VsDbgMcp.Tests
 
             Assert.DoesNotContain("read back out of the Debug pane", text);
             Assert.Contains("/s over", text);
+        }
+
+        // An empty stream used to say the tracepoint had not been hit. Three collecting
+        // tracepoints in three modules reported bound and collected nothing, one of them
+        // on a line a thread had just been caught sitting on, and that sentence is what
+        // turned it into "this function is never executing". The buffer knows no such
+        // thing: a record that was never written and a record that never arrived look
+        // exactly alike from here.
+
+        [Fact]
+        public void An_empty_stream_does_not_claim_the_tracepoint_was_never_hit()
+        {
+            var log = new TraceLog();
+            log.Start(7, 0, DateTime.UtcNow);
+
+            var message = log.Read(7, 0).Message;
+
+            Assert.DoesNotContain("has not been hit", message);
+            Assert.Contains("never hit", message);
+            Assert.Contains("never reached this buffer", message);
+            Assert.Contains("tells those apart", message);
+        }
+
+        /// <summary>
+        /// The experiment proves the difference is this tracepoint. That is not the same
+        /// as the line not running: a condition, a hit filter, a disabled or unbound
+        /// tracepoint all keep a line that really was reached silent, so the advice stops
+        /// where the evidence does.
+        /// </summary>
+        [Fact]
+        public void What_would_settle_it_claims_only_what_the_experiment_shows()
+        {
+            var log = new TraceLog();
+            log.Start(7, 0, DateTime.UtcNow);
+
+            var settles = log.Read(7, 0).Settles;
+
+            Assert.Contains("a line you have already watched the debugger stop on", settles);
+            Assert.Contains("the difference is this tracepoint", settles);
+            Assert.Contains("condition or hit filter", settles);
+            Assert.DoesNotContain("this line is not being reached", settles);
+        }
+
+        /// <summary>
+        /// Whether records are picked up as they land or recovered from the pane's text
+        /// afterwards changes what an empty stream is worth. It says which of the two it
+        /// is doing and nothing about why, because not watching can mean this Visual
+        /// Studio will not allow it or only that the pane did not exist yet.
+        /// </summary>
+        [Fact]
+        public void An_empty_stream_says_whether_the_pane_is_being_watched()
+        {
+            var log = new TraceLog();
+            log.Start(7, 0, DateTime.UtcNow);
+
+            var unwatched = log.Read(7, 0).Message;
+            Assert.Contains("not being watched here", unwatched);
+            Assert.DoesNotContain("cannot be watched on this Visual Studio", unwatched);
+
+            log.PaneWatched = true;
+            Assert.Contains("being watched as it fills", log.Read(7, 0).Message);
+        }
+
+        /// <summary>
+        /// Another tracepoint collecting normally is the strongest evidence available
+        /// here, because every record comes through the same pane. It rules the path in
+        /// and leaves the question about this line alone.
+        /// </summary>
+        [Fact]
+        public void An_empty_stream_reports_that_records_are_arriving_elsewhere()
+        {
+            var log = new TraceLog();
+            log.Start(7, 0, DateTime.UtcNow);
+            log.Start(9, 0, DateTime.UtcNow);
+            log.Add(9, "tick", Noon, false);
+
+            var message = log.Read(7, 0).Message;
+
+            Assert.Contains("#9 (1 record)", message);
+            Assert.Contains("so that path does work", message);
+            Assert.Contains("this tracepoint not logging", message);
+        }
+
+        [Fact]
+        public void With_no_record_anywhere_the_reply_rules_nothing_in_or_out()
+        {
+            var log = new TraceLog();
+            log.Start(7, 0, DateTime.UtcNow);
+            log.Start(9, 0, DateTime.UtcNow);
+
+            var message = log.Read(7, 0).Message;
+
+            Assert.Contains("No tracepoint here has collected a record at all", message);
+            Assert.Contains("nothing rules that path in or out", message);
+            Assert.DoesNotContain("#9", message);
+        }
+
+        /// <summary>
+        /// Records that arrived and were thrown away are not records that never came,
+        /// so the explanation for an empty stream belongs only to a stream nothing has
+        /// ever reached.
+        /// </summary>
+        [Fact]
+        public void A_stream_the_cap_thinned_carries_no_explanation_for_being_empty()
+        {
+            var log = new TraceLog();
+            log.Start(7, 1, DateTime.UtcNow);
+            log.Add(7, "first", Noon, false);
+            log.Add(7, "second", Noon.AddMilliseconds(10), false);
+
+            var result = log.Read(7, 0);
+
+            Assert.Equal(2L, result.Collected);
+            Assert.Equal(1L, result.Dropped);
+            Assert.Null(result.Message);
+        }
+
+        // The message is written between markers of this server's own. Both are literal
+        // text, so the debugger copies them whatever the {expr} parts do: a record that
+        // arrives proves the line was reached, and one that arrives without its end was
+        // cut short before the message was finished.
+
+        [Fact]
+        public void A_whole_record_carries_both_markers_and_neither_reaches_the_reader()
+        {
+            var body = TraceMessage.Unmark(TraceMessage.Mark(7, "publish n=1024"), out var id, out var cutShort);
+
+            Assert.Equal(7, id);
+            Assert.Equal("publish n=1024", body);
+            Assert.False(cutShort);
+            Assert.DoesNotContain("vsdbg", body);
+        }
+
+        [Fact]
+        public void A_record_that_stopped_before_the_end_marker_is_marked_as_cut_short()
+        {
+            var body = TraceMessage.Unmark("[vsdbg:7] publish n=", out var id, out var cutShort);
+
+            Assert.Equal(7, id);
+            Assert.Equal("publish n=", body);
+            Assert.True(cutShort);
+        }
+
+        /// <summary>
+        /// The pane's last line has nothing after it yet, so the reader cannot tell a
+        /// finished record from one still being written. The end marker is what settles
+        /// that, and a line without it waits rather than arriving half read.
+        /// </summary>
+        [Fact]
+        public void Only_a_record_carrying_its_end_counts_as_finished()
+        {
+            Assert.True(TraceMessage.Finished(TraceMessage.Mark(7, "publish n=1024")));
+            Assert.False(TraceMessage.Finished("[vsdbg:7] publish n="));
+            Assert.False(TraceMessage.Finished("[submix] callback 47/s"));
+            Assert.False(TraceMessage.Finished(""));
+            Assert.False(TraceMessage.Finished(null));
+        }
+
+        /// <summary>
+        /// A message a user wrote with the end marker in it survives, because the last
+        /// one is the one taken off. Anything else would eat the reader's own text.
+        /// </summary>
+        [Fact]
+        public void A_message_that_ends_the_way_the_marker_does_keeps_its_own_text()
+        {
+            var body = TraceMessage.Unmark(TraceMessage.Mark(7, "done [/vsdbg]"), out var id, out var cutShort);
+
+            Assert.Equal(7, id);
+            Assert.Equal("done [/vsdbg]", body);
+            Assert.False(cutShort);
+        }
+
+        /// <summary>
+        /// The pane hands lines over with their line endings still on, which is what the
+        /// end marker has to be recognised through.
+        /// </summary>
+        [Fact]
+        public void A_record_still_carrying_its_line_ending_is_read_as_whole()
+        {
+            var body = TraceMessage.Unmark(TraceMessage.Mark(7, "publish n=1024") + "\r\n",
+                                           out var id, out var cutShort);
+
+            Assert.Equal(7, id);
+            Assert.Equal("publish n=1024", body);
+            Assert.False(cutShort);
+        }
+
+        [Fact]
+        public void An_empty_message_leaves_an_empty_record_and_not_a_marker()
+        {
+            var body = TraceMessage.Unmark(TraceMessage.Mark(7, ""), out var id, out var cutShort);
+
+            Assert.Equal(7, id);
+            Assert.Equal("", body);
+            Assert.False(cutShort);
+        }
+
+        [Fact]
+        public void Cut_short_records_are_counted_separately_and_still_kept()
+        {
+            var log = new TraceLog();
+            log.Start(7, 0, DateTime.UtcNow);
+
+            log.Add(7, "publish n=1024", Noon, false);
+            log.Add(7, "publish n=", Noon.AddMilliseconds(20), true);
+
+            var result = log.Read(7, 0);
+
+            Assert.Equal(2L, result.Collected);
+            Assert.Equal(1L, result.CutShort);
+            Assert.Equal(new[] { "publish n=1024", "publish n=" }, result.Records.Select(r => r.Text).ToArray());
+        }
+
+        /// <summary>
+        /// What stopped the message is not known from here, so it is not named. What is
+        /// known is that a record arrived, and a record arriving means the line ran.
+        /// </summary>
+        [Fact]
+        public void A_cut_short_record_says_the_line_was_reached_without_naming_a_cause()
+        {
+            var text = Render.Trace(new TraceResult
+            {
+                BreakpointId = 7,
+                Collected = 2,
+                CutShort = 2,
+                Records = new List<TraceRecord>
+                {
+                    new TraceRecord { Hit = 1, Time = Noon, Text = "publish n=" },
+                    new TraceRecord { Hit = 2, Time = Noon.AddMilliseconds(20), Text = "publish n=" }
+                }
+            });
+
+            Assert.Contains("2 of the records collected arrived without the end marker", text);
+            Assert.Contains("The line itself was reached", text);
+            Assert.DoesNotContain("would not evaluate in that frame", text);
+        }
+
+        [Fact]
+        public void Records_dropped_by_the_cap_and_records_cut_short_are_both_reported()
+        {
+            var text = Render.Trace(new TraceResult
+            {
+                BreakpointId = 7,
+                Collected = 400,
+                Dropped = 350,
+                CutShort = 12,
+                Records = new List<TraceRecord> { new TraceRecord { Hit = 400, Time = Noon, Text = "tick" } }
+            });
+
+            Assert.Contains("350 dropped by the per-second cap", text);
+            Assert.Contains("12 of the records collected arrived without the end marker", text);
+        }
+
+        [Fact]
+        public void A_whole_stream_says_nothing_about_records_being_cut_short()
+        {
+            var text = Render.Trace(new TraceResult
+            {
+                BreakpointId = 7,
+                Collected = 1,
+                Records = new List<TraceRecord> { new TraceRecord { Hit = 1, Time = Noon, Text = "publish n=1024" } }
+            });
+
+            Assert.DoesNotContain("end marker", text);
+        }
+
+        /// <summary>
+        /// Tools > Options > Debugging > "Redirect all Output Window text to the
+        /// Immediate Window" sends a tracepoint's records somewhere this cannot read,
+        /// which is exactly a stream that stays empty however often the line runs.
+        /// </summary>
+        [Fact]
+        public void An_empty_stream_carries_what_Visual_Studio_s_own_settings_say()
+        {
+            var text = Render.Trace(new TraceResult
+            {
+                BreakpointId = 7,
+                Records = new List<TraceRecord>(),
+                Message = "#7 has collected nothing.",
+                OutputRedirect = "Visual Studio is redirecting Output window text to the Immediate window."
+            });
+
+            Assert.Contains("#7 has collected nothing.", text);
+            Assert.Contains("redirecting Output window text to the Immediate window", text);
+        }
+
+        /// <summary>
+        /// A cause already found makes the experiment pointless, so the experiment is
+        /// read after it rather than before.
+        /// </summary>
+        [Fact]
+        public void What_to_do_about_an_empty_stream_is_read_after_why_it_is_empty()
+        {
+            var text = Render.Trace(new TraceResult
+            {
+                BreakpointId = 7,
+                Records = new List<TraceRecord>(),
+                Message = "#7 has collected nothing.",
+                TracepointState = "The breakpoint says it is disabled.",
+                OutputRedirect = "Visual Studio is redirecting Output window text to the Immediate window.",
+                Settles = "What settles it: set a collecting tracepoint on a line already seen to stop."
+            });
+
+            Assert.True(text.IndexOf("disabled", StringComparison.Ordinal) <
+                        text.IndexOf("Immediate window", StringComparison.Ordinal));
+            Assert.True(text.IndexOf("Immediate window", StringComparison.Ordinal) <
+                        text.IndexOf("What settles it", StringComparison.Ordinal));
+        }
+
+        /// <summary>
+        /// Nothing after a moment and nothing after ten minutes of running are different
+        /// evidence, and a reply that leaves the span out reads the same either way.
+        /// </summary>
+        [Fact]
+        public void An_empty_stream_says_how_long_it_has_been_collecting()
+        {
+            var text = Render.Trace(new TraceResult
+            {
+                BreakpointId = 7,
+                Records = new List<TraceRecord>(),
+                Message = "#7 has collected nothing.",
+                StartedUtc = DateTime.UtcNow.AddSeconds(-42)
+            });
+
+            Assert.Contains("It has been collecting for 42", text);
+            Assert.Contains("time the debuggee spent stopped", text);
+        }
+
+        [Fact]
+        public void A_stream_that_never_started_reports_no_span_at_all()
+        {
+            var text = Render.Trace(new TraceResult
+            {
+                BreakpointId = 3,
+                Records = new List<TraceRecord>(),
+                Message = "Tracepoint #3 is not collecting."
+            });
+
+            Assert.DoesNotContain("It has been collecting for", text);
         }
     }
 }

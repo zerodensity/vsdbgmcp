@@ -31,6 +31,7 @@ namespace VsDbgMcp.Host
         IConnectionPoint _connection;
         int _cookie;
         int _seen;
+        bool _saidNoBuffer;
 
         public TracePaneWatch(TraceLog trace, Action<string> log)
         {
@@ -58,8 +59,15 @@ namespace VsDbgMcp.Host
             var lines = BufferOf(pane);
             if (lines == null)
             {
-                _log("trace: the Debug pane is not a text buffer on this Visual Studio, " +
-                     "so tracepoint records cannot be timed as they arrive");
+                // Attaching is tried again on every read, because the pane does not exist
+                // until something has been debugged. Saying this each time would bury the
+                // log, so it is said once.
+                if (!_saidNoBuffer)
+                {
+                    _saidNoBuffer = true;
+                    _log("trace: the Debug pane is not a text buffer on this Visual Studio, " +
+                         "so tracepoint records cannot be timed as they arrive");
+                }
                 return false;
             }
 
@@ -76,6 +84,10 @@ namespace VsDbgMcp.Host
                 _connection = connection;
                 _lines = lines;
 
+                // A stream that collects nothing means different things watched and
+                // unwatched, so the buffer is told which of the two it is.
+                _trace.PaneWatched = true;
+
                 // Everything already in the pane belongs to before this tracepoint
                 // existed, so start from the end rather than replaying history.
                 _seen = LineCount(lines);
@@ -84,7 +96,11 @@ namespace VsDbgMcp.Host
             }
             catch (Exception ex)
             {
-                _log("trace: could not watch the Debug pane: " + ex.Message);
+                if (!_saidNoBuffer)
+                {
+                    _saidNoBuffer = true;
+                    _log("trace: could not watch the Debug pane: " + ex.Message);
+                }
                 return false;
             }
         }
@@ -103,11 +119,16 @@ namespace VsDbgMcp.Host
 
             var lines = paneText.Replace("\r\n", "\n").Split('\n');
 
-            // The final line has nothing after it yet, so it may still be half written.
-            for (; _seen < lines.Length - 1; _seen++)
+            while (_seen < lines.Length)
             {
-                var body = TraceMessage.Unmark(lines[_seen], out var breakpointId);
-                if (breakpointId > 0) _trace.Add(breakpointId, body, default(DateTime));
+                // The final line has nothing after it yet, so it may still be half
+                // written. A record ends with a marker of its own, so one carrying that
+                // is finished; anything else waits until something follows it.
+                if (_seen == lines.Length - 1 && !TraceMessage.Finished(lines[_seen])) break;
+
+                var body = TraceMessage.Unmark(lines[_seen], out var breakpointId, out var cutShort);
+                if (breakpointId > 0) _trace.Add(breakpointId, body, default(DateTime), cutShort);
+                _seen++;
             }
         }
 
@@ -171,19 +192,22 @@ namespace VsDbgMcp.Host
             try
             {
                 var count = LineCount(_lines);
-
-                // The last line has no newline behind it yet, so it may still be half
-                // written. It is read on the next change, once something follows it.
-                for (; _seen < count - 1; _seen++)
-                {
-                    var text = LineAt(_lines, _seen);
-                    if (string.IsNullOrEmpty(text)) continue;
-
-                    var body = TraceMessage.Unmark(text, out var breakpointId);
-                    if (breakpointId > 0) _trace.Add(breakpointId, body, arrived);
-                }
-
                 if (_seen > count) _seen = count;
+
+                while (_seen < count)
+                {
+                    var text = LineAt(_lines, _seen) ?? "";
+
+                    // The last line has no newline behind it yet, so it may still be
+                    // half written. A record ends with a marker of its own, so one
+                    // carrying that is finished; anything else is read on a later
+                    // change, once something follows it.
+                    if (_seen == count - 1 && !TraceMessage.Finished(text)) break;
+
+                    var body = TraceMessage.Unmark(text, out var breakpointId, out var cutShort);
+                    if (breakpointId > 0) _trace.Add(breakpointId, body, arrived, cutShort);
+                    _seen++;
+                }
             }
             catch (Exception ex)
             {
@@ -208,6 +232,7 @@ namespace VsDbgMcp.Host
             var connection = _connection;
             _connection = null;
             _lines = null;
+            _trace.PaneWatched = false;
 
             if (connection == null) return;
             try { connection.Unadvise(_cookie); }

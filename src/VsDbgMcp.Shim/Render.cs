@@ -359,8 +359,33 @@ namespace VsDbgMcp.Shim
         public static string Trace(TraceResult t)
         {
             if (t == null) return "No records.";
+
+            // An empty stream is the reply that reads as an answer when it is not one, so
+            // everything known about why it is empty goes out with it, and what to do
+            // about it goes last - after any cause that would make the doing pointless.
             if (t.Records == null || t.Records.Count == 0)
-                return t.Message ?? "Tracepoint #" + t.BreakpointId + " has collected nothing.";
+            {
+                var empty = new StringBuilder();
+                empty.AppendLine(t.Message ?? "Tracepoint #" + t.BreakpointId + " has collected nothing.");
+
+                // Nothing after 300 ms and nothing after ten minutes of running are very
+                // different evidence, and without this they read the same.
+                if (t.StartedUtc != default(DateTime))
+                {
+                    var collecting = (DateTime.UtcNow - t.StartedUtc).TotalSeconds;
+                    if (collecting > 0)
+                    {
+                        empty.Append("It has been collecting for ");
+                        empty.Append(collecting.ToString("0.#", CultureInfo.InvariantCulture));
+                        empty.AppendLine("s of wall clock, which counts any time the debuggee spent stopped.");
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(t.TracepointState)) empty.AppendLine(t.TracepointState);
+                if (!string.IsNullOrEmpty(t.OutputRedirect)) empty.AppendLine(t.OutputRedirect);
+                if (!string.IsNullOrEmpty(t.Settles)) empty.AppendLine(t.Settles);
+                return empty.ToString().TrimEnd();
+            }
 
             var sb = new StringBuilder();
             sb.Append('#').Append(t.BreakpointId).Append("  ").Append(t.Records.Count);
@@ -396,6 +421,19 @@ namespace VsDbgMcp.Shim
                 sb.AppendLine("These records were read back out of the Debug pane, which keeps their order " +
                               "and not their times, so the rate above is over the whole collection rather " +
                               "than across the records shown.");
+            }
+
+            // Every record is written between markers of this server's own, which are
+            // literal text. One that arrived without its end stopped being built partway,
+            // and the record arriving at all is what says the line was reached anyway.
+            // What stopped the message is not known from here, so it is not named.
+            if (t.CutShort > 0)
+            {
+                sb.Append(t.CutShort);
+                sb.AppendLine(" of the records collected arrived without the end marker this server " +
+                              "writes after the message, so the message did not finish. The line itself " +
+                              "was reached: the markers are literal text and do not depend on the {expr} " +
+                              "parts evaluating. bp_set reports which of those will evaluate.");
             }
 
             if (!string.IsNullOrEmpty(t.Message)) sb.AppendLine(t.Message);

@@ -208,9 +208,16 @@ namespace VsDbgMcp.Tests
 
         readonly TraceLog _trace = new TraceLog();
 
-        /// <summary>Feeds a record in the way the event sink would, so trace_read has something to answer with.</summary>
-        public void RaiseTrace(int breakpointId, string text, DateTime whenUtc) =>
-            _trace.Add(breakpointId, text, whenUtc);
+        /// <summary>
+        /// Feeds a record in the way the event sink would, so trace_read has something to
+        /// answer with. It goes through the marker both ways, because that round trip is
+        /// what the extension does with every line the Debug pane hands it.
+        /// </summary>
+        public void RaiseTrace(int breakpointId, string text, DateTime whenUtc)
+        {
+            var body = TraceMessage.Unmark(TraceMessage.Mark(breakpointId, text), out var id, out var cutShort);
+            _trace.Add(id, body, whenUtc, cutShort);
+        }
 
         public Task<TraceResult> TraceReadAsync(int id, int tail, CancellationToken ct = default)
         {

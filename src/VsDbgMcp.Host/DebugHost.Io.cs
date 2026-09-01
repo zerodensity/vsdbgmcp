@@ -104,7 +104,7 @@ namespace VsDbgMcp.Host
                 var kept = new List<string>();
                 foreach (var line in lines)
                 {
-                    var body = TraceMessage.Unmark(line, out var breakpointId);
+                    var body = TraceMessage.Unmark(line, out var breakpointId, out _);
                     if (_sink.Trace.IsCollecting(breakpointId)) continue;
                     kept.Add(body);
                 }

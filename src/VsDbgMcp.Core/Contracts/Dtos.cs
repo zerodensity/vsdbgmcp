@@ -282,6 +282,34 @@ namespace VsDbgMcp.Contracts
 
         /// <summary>Set when there is nothing to return, saying why.</summary>
         public string Message { get; set; }
+
+        /// <summary>
+        /// Records that arrived without the end marker this server writes after the
+        /// message. Both ends are literal text, so a record carrying its end was built
+        /// past every {expr} in the message; one without it stopped partway.
+        /// </summary>
+        public long CutShort { get; set; }
+
+        /// <summary>
+        /// Set when a tracepoint has collected nothing and Visual Studio's own settings
+        /// bear on why: with Output window text redirected to the Immediate window, a
+        /// record never reaches the Debug pane this reads. Also set when that setting
+        /// could not be read, because a silent check reads as a check that passed.
+        /// </summary>
+        public string OutputRedirect { get; set; }
+
+        /// <summary>
+        /// Set when a tracepoint has collected nothing and the breakpoint itself says
+        /// something about why: disabled, unbound, or filtered by a condition or a hit
+        /// filter. Each of those keeps a line that really was reached from logging.
+        /// </summary>
+        public string TracepointState { get; set; }
+
+        /// <summary>
+        /// What would settle an empty stream. Kept apart from the facts so it is read
+        /// last, after anything already found that would make the experiment pointless.
+        /// </summary>
+        public string Settles { get; set; }
     }
 
     public sealed class BreakpointInfo

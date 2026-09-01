@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using VsDbgMcp.Contracts;
 
 namespace VsDbgMcp
@@ -11,9 +12,9 @@ namespace VsDbgMcp
     /// Visual Studio writes tracepoint records to the Debug pane, mixed in with
     /// everything else the program logs. On a hot path that makes both unreadable, and
     /// reading cadence out of how two streams interleave is guesswork. So a collected
-    /// tracepoint marks its message with the breakpoint's id, the event sink pulls the
-    /// marked records back out of the stream, and they land here with the time they
-    /// arrived and which hit they were.
+    /// tracepoint wraps its message in a marker carrying the breakpoint's id, the event
+    /// sink pulls the marked records back out of the stream, and they land here with the
+    /// time they arrived and which hit they were.
     ///
     /// Each buffer keeps the newest records and no more, because the callback filling
     /// it can run tens of times a second for as long as the program does.
@@ -31,6 +32,7 @@ namespace VsDbgMcp
             public readonly Queue<TraceRecord> Records = new Queue<TraceRecord>();
             public long Arrived;
             public long Dropped;
+            public long CutShort;
             public int MaxPerSecond;
             public DateTime SecondStarted;
             public int InThisSecond;
@@ -46,6 +48,13 @@ namespace VsDbgMcp
 
         readonly Dictionary<int, Stream> _streams = new Dictionary<int, Stream>();
         readonly object _gate = new object();
+
+        /// <summary>
+        /// Whether records are picked up from the Debug pane as they land, rather than
+        /// recovered from its text when somebody reads. An empty stream means different
+        /// things in the two cases, so the reply says which one it is.
+        /// </summary>
+        public bool PaneWatched { get; set; }
 
         /// <summary>
         /// Begins collecting for a breakpoint, throwing away anything kept for it
@@ -79,8 +88,11 @@ namespace VsDbgMcp
         /// Takes one record, and says whether it belonged here. A record for a
         /// breakpoint that is not collecting is not this buffer's, and the caller
         /// should let it through as ordinary output rather than lose it.
+        ///
+        /// <paramref name="cutShort"/> is for a record that arrived without the end
+        /// marker, which means the debugger stopped building the message partway.
         /// </summary>
-        public bool Add(int breakpointId, string text, DateTime whenUtc)
+        public bool Add(int breakpointId, string text, DateTime whenUtc, bool cutShort)
         {
             if (breakpointId <= 0) return false;
 
@@ -92,6 +104,7 @@ namespace VsDbgMcp
                 // Counted before the cap, so a record's hit number stays the number of
                 // the hit that produced it and a gap in the numbers shows what was lost.
                 stream.Arrived++;
+                if (cutShort) stream.CutShort++;
 
                 if (whenUtc == default(DateTime)) stream.Timed = false;
 
@@ -140,6 +153,7 @@ namespace VsDbgMcp
 
                 result.Collected = stream.Arrived;
                 result.Dropped = stream.Dropped;
+                result.CutShort = stream.CutShort;
                 result.StartedUtc = stream.StartedUtc;
                 result.Timed = stream.Timed;
 
@@ -151,10 +165,70 @@ namespace VsDbgMcp
                 }
 
                 if (result.Records.Count == 0)
-                    result.Message = "Nothing collected yet: the tracepoint has not been hit since it was set.";
+                {
+                    result.Message = Empty(breakpointId, stream);
+                    if (stream.Arrived == 0) result.Settles = Settles;
+                }
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// The one experiment that separates the two cases an empty stream cannot. It
+        /// says what it proves and no more: a tracepoint that logs nothing where another
+        /// one does is a tracepoint that is not logging, which is not the same as a line
+        /// that is not running.
+        /// </summary>
+        const string Settles =
+            "What settles it: set a collecting tracepoint on a line you have already watched the debugger " +
+            "stop on. If that one collects and this one does not, the difference is this tracepoint rather " +
+            "than the pane or the pipeline - check that it is enabled, bound, and carries no condition or " +
+            "hit filter, before concluding the line is not running.";
+
+        /// <summary>
+        /// What an empty stream establishes, which is less than it looks like. It is
+        /// what a tracepoint nobody reached looks like and what a tracepoint whose
+        /// records went somewhere else looks like, and this buffer cannot tell those
+        /// apart. So it says both, reports the evidence it does have, and names what
+        /// would settle it. Called with the lock already held.
+        /// </summary>
+        string Empty(int breakpointId, Stream stream)
+        {
+            // Records that arrived and were then thrown away are not records that never
+            // came. The cap keeps the first record of every second, so an empty buffer
+            // that collected something cannot happen today; if it ever can, everything
+            // below it would be a wrong answer rather than a missing one.
+            if (stream.Arrived > 0)
+            {
+                return "Tracepoint #" + breakpointId + " has collected " + stream.Arrived + " records, " +
+                       stream.Dropped + " of them dropped by the per-second cap, and none of them is in " +
+                       "the buffer. Setting maxPerSecond to 0 keeps every record.";
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine("Tracepoint #" + breakpointId + " has collected nothing. That is what a tracepoint " +
+                          "that was never hit looks like, and also what a tracepoint whose records never " +
+                          "reached this buffer looks like. Nothing here tells those apart.");
+
+            sb.Append(PaneWatched
+                ? "The Debug pane is being watched as it fills, so a record written to it arrives here at once."
+                : "The Debug pane is not being watched here, so records are recovered from its text when " +
+                  "you read.");
+            sb.AppendLine(" A record that never reached that pane is invisible from here either way.");
+
+            var elsewhere = _streams
+                .Where(s => s.Key != breakpointId && s.Value.Arrived > 0)
+                .OrderBy(s => s.Key)
+                .Select(s => "#" + s.Key + " (" + Records(s.Value.Arrived) + ")")
+                .ToArray();
+
+            sb.Append(elsewhere.Length > 0
+                ? "Records have reached this buffer from " + string.Join(", ", elsewhere) + ", so that path " +
+                  "does work. What is left is this line not being reached, or this tracepoint not logging."
+                : "No tracepoint here has collected a record at all, so nothing rules that path in or out.");
+
+            return sb.ToString();
         }
 
         /// <summary>
@@ -168,9 +242,11 @@ namespace VsDbgMcp
 
             return "Collecting now: " + string.Join(", ", _streams
                 .OrderBy(s => s.Key)
-                .Select(s => "#" + s.Key + " (" + s.Value.Arrived + " records)")
+                .Select(s => "#" + s.Key + " (" + Records(s.Value.Arrived) + ")")
                 .ToArray()) + ".";
         }
+
+        static string Records(long count) => count + (count == 1 ? " record" : " records");
 
         static string Shorten(string text)
         {
@@ -192,16 +268,24 @@ namespace VsDbgMcp
         // it in the Debug pane. Nothing a program prints starts with this.
         const string Open = "[vsdbg:";
 
+        // And after it. Both ends are literal text, so the debugger copies them whatever
+        // the {expr} parts of the message do. A record that arrives at all therefore
+        // proves the path from the tracepoint to this buffer, and one that arrives
+        // without its end was cut short before the message was finished.
+        const string Close = "[/vsdbg]";
+
         public static string Mark(int breakpointId, string message) =>
-            Open + breakpointId + "] " + (message ?? "");
+            Open + breakpointId + "] " + (string.IsNullOrEmpty(message) ? "" : message + " ") + Close;
 
         /// <summary>
-        /// Takes the marker back off. Text that never carried one comes back unchanged
-        /// with an id of zero, so no record is lost to a parse that did not match.
+        /// Takes the marker back off, and says whether the record carried its end. Text
+        /// that never carried a marker comes back unchanged with an id of zero, so no
+        /// record is lost to a parse that did not match.
         /// </summary>
-        public static string Unmark(string text, out int breakpointId)
+        public static string Unmark(string text, out int breakpointId, out bool cutShort)
         {
             breakpointId = 0;
+            cutShort = false;
             if (string.IsNullOrEmpty(text) || !text.StartsWith(Open, StringComparison.Ordinal)) return text;
 
             var end = Open.Length;
@@ -213,7 +297,27 @@ namespace VsDbgMcp
 
             breakpointId = id;
             var body = text.Substring(end + 1);
-            return body.Length > 0 && body[0] == ' ' ? body.Substring(1) : body;
+            if (body.Length > 0 && body[0] == ' ') body = body.Substring(1);
+
+            var trimmed = body.TrimEnd();
+            if (!trimmed.EndsWith(Close, StringComparison.Ordinal))
+            {
+                cutShort = true;
+                return trimmed;
+            }
+
+            return trimmed.Substring(0, trimmed.Length - Close.Length).TrimEnd();
+        }
+
+        /// <summary>
+        /// Whether a line of the pane holds a record that is finished. The reader cannot
+        /// know whether the pane's last line is complete or still being written, and a
+        /// record's end marker is what answers that.
+        /// </summary>
+        public static bool Finished(string line)
+        {
+            Unmark(line, out var breakpointId, out var cutShort);
+            return breakpointId > 0 && !cutShort;
         }
 
         /// <summary>
