@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
@@ -15,6 +16,59 @@ namespace VsDbgMcp.Shim.Tools
     {
         public LifecycleTools(SessionManager sessions) : base(sessions) { }
 
+        /// <summary>
+        /// Said by everything that starts a run.
+        ///
+        /// One session ran the editor as five pids and the launcher as four, and an
+        /// address was compared across a restart without anyone noticing. Nothing here
+        /// can tell when an address was captured, so a check that fired sometimes would
+        /// be worse than the rule stated plainly every time.
+        /// </summary>
+        const string NewRun =
+            "Every pid, thread id, address and container reference read before this call belongs to a " +
+            "different run of the debuggee and names nothing now. status and wait carry a generation " +
+            "number; compare it before comparing any of them.";
+
+        /// <summary>
+        /// Attaching may join a session that is already being debugged instead of
+        /// starting one, and nothing here knows which it did.
+        /// </summary>
+        const string MaybeNewRun =
+            "If this started a run rather than joining one already being debugged, every pid, thread id, " +
+            "address and container reference read before it names nothing now. status and wait carry a " +
+            "generation number; compare it before comparing any of them.";
+
+        /// <summary>
+        /// Runs a call that begins a run, and keeps the run count honest around it.
+        ///
+        /// The count moves before the call goes out, so the first stop of the new run
+        /// already carries the new number rather than the old one. If the call then did
+        /// not start anything the bus is told, because it would otherwise take the next
+        /// run somebody starts from the IDE for the confirmation of this one and leave
+        /// that run uncounted. One place, so no tool can do half of it.
+        /// </summary>
+        async Task<Reply> StartRun(HostLink link, Func<Task<OpResult>> call, string success, string note)
+        {
+            Sessions.Events.StartingRun(link.Id);
+
+            OpResult result;
+            try
+            {
+                result = await call().ConfigureAwait(false);
+            }
+            catch
+            {
+                Sessions.Events.RunNotStarted(link.Id);
+                throw;
+            }
+
+            var reply = Render.Op(result, success);
+            if (!reply.Failed) return reply.Text + "\n" + note;
+
+            Sessions.Events.RunNotStarted(link.Id);
+            return reply;
+        }
+
         [McpServerTool(Name = "status", ReadOnly = true)]
         [Description("Where the debugger is right now: solution, debugger mode (design, run, break), current thread and frame, the top of the call stack, any pending exception, debugged processes, and the pinned watch values. Call this first when you do not know the state; it is cheap and always works.")]
         public Task<string> Status(
@@ -23,7 +77,7 @@ namespace VsDbgMcp.Shim.Tools
             => On(instance, ct, async link =>
             {
                 var status = await link.Debug.GetStatusAsync(ct).ConfigureAwait(false);
-                return Render.Status(status);
+                return Render.Status(status, Sessions.Events.Generation(link.Id));
             });
 
         [McpServerTool(Name = "launch")]
@@ -37,15 +91,23 @@ namespace VsDbgMcp.Shim.Tools
             CancellationToken ct = default)
             => On(instance, ct, async link =>
             {
-                Sessions.Events.MarkSeen();
-                var result = await link.Debug.LaunchAsync(new LaunchRequest
+                var request = new LaunchRequest
                 {
                     Project = project,
                     Args = args,
                     StopAtEntry = stopAtEntry,
                     NoDebug = noDebug
-                }, ct).ConfigureAwait(false);
-                return Render.Op(result, "Launched.");
+                };
+
+                // Ctrl+F5 starts nothing under the debugger, so it begins no run and
+                // moves no debuggee that is sitting in break. Saying either would be this
+                // tool inventing a state change it did not cause.
+                if (noDebug)
+                    return Render.Op(await link.Debug.LaunchAsync(request, ct).ConfigureAwait(false), "Launched.");
+
+                Sessions.Events.MarkSeen(link.Id);
+                return await StartRun(link, () => link.Debug.LaunchAsync(request, ct), "Launched.", NewRun)
+                    .ConfigureAwait(false);
             }, args ?? project);
 
         [McpServerTool(Name = "attach")]
@@ -55,12 +117,11 @@ namespace VsDbgMcp.Shim.Tools
             [Description("Regular expression matched against process names, for example 'engine.*'.")] string nameRegex = null,
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
             CancellationToken ct = default)
-            => On(instance, ct, async link =>
-            {
-                var result = await link.Debug.AttachAsync(new AttachRequest { Pid = pid, NameRegex = nameRegex }, ct)
-                    .ConfigureAwait(false);
-                return Render.Op(result, "Attached.");
-            }, nameRegex ?? pid?.ToString());
+            => On(instance, ct, link =>
+                StartRun(link,
+                    () => link.Debug.AttachAsync(new AttachRequest { Pid = pid, NameRegex = nameRegex }, ct),
+                    "Attached.", MaybeNewRun),
+                nameRegex ?? pid?.ToString());
 
         [McpServerTool(Name = "detach")]
         [Description("Detach the debugger and leave the process running. Pass a pid to detach from one process of a multi-process session.")]
@@ -70,6 +131,10 @@ namespace VsDbgMcp.Shim.Tools
             CancellationToken ct = default)
             => On(instance, ct, async link =>
             {
+                // A detached process runs free, so where it last stopped is not where it
+                // is. Without this, wait would answer with that frame and tell the caller
+                // to resume something the debugger no longer holds.
+                Sessions.Events.MarkSeen(link.Id);
                 var result = await link.Debug.DetachAsync(pid, ct).ConfigureAwait(false);
                 return Render.Op(result, "Detached.");
             });
@@ -82,7 +147,7 @@ namespace VsDbgMcp.Shim.Tools
             CancellationToken ct = default)
             => On(instance, ct, async link =>
             {
-                Sessions.Events.MarkSeen();
+                Sessions.Events.MarkSeen(link.Id);
                 var result = await link.Debug.StopAsync(pid, ct).ConfigureAwait(false);
                 return Render.Op(result, "Stopped.");
             });
@@ -92,11 +157,10 @@ namespace VsDbgMcp.Shim.Tools
         public Task<string> Restart(
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
             CancellationToken ct = default)
-            => On(instance, ct, async link =>
+            => On(instance, ct, link =>
             {
-                Sessions.Events.MarkSeen();
-                var result = await link.Debug.RestartAsync(ct).ConfigureAwait(false);
-                return Render.Op(result, "Restarted.");
+                Sessions.Events.MarkSeen(link.Id);
+                return StartRun(link, () => link.Debug.RestartAsync(ct), "Restarted.", NewRun);
             });
 
         [McpServerTool(Name = "processes", ReadOnly = true)]
@@ -131,10 +195,8 @@ namespace VsDbgMcp.Shim.Tools
             [Description("Full path to the .dmp file.")] string path,
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
             CancellationToken ct = default)
-            => On(instance, ct, async link =>
-            {
-                var result = await link.Debug.OpenDumpAsync(path, ct).ConfigureAwait(false);
-                return Render.Op(result, "Dump opened.");
-            }, path);
+            => On(instance, ct,
+                link => StartRun(link, () => link.Debug.OpenDumpAsync(path, ct), "Dump opened.", NewRun),
+                path);
     }
 }

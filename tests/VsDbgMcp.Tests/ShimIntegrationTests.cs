@@ -172,7 +172,9 @@ namespace VsDbgMcp.Tests
             var text = await new ExecutionTools(_sessions).Wait(1, instance: null, ct: CancellationToken.None);
 
             Assert.Contains("timeout", text);
-            Assert.Contains("Still running", text);
+
+            // Nothing was asked about the debuggee, so nothing may be said about it.
+            Assert.DoesNotContain("Still running", text);
         }
 
         [Fact]

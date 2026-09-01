@@ -108,7 +108,7 @@ namespace VsDbgMcp.Tests
 
             // What go() does before it resumes, so the next wait reports the coming
             // stop rather than the one the caller has already seen.
-            bus.MarkSeen();
+            bus.MarkSeen("Engine#1");
 
             Assert.Null(await bus.WaitAsync(null, TimeSpan.FromMilliseconds(30), CancellationToken.None));
         }
@@ -328,7 +328,7 @@ namespace VsDbgMcp.Tests
 
             // go() discards stops the caller has already seen. A module that is loaded
             // stays loaded, so it is still an answer.
-            bus.MarkSeen();
+            bus.MarkSeen("Engine#1");
 
             Assert.NotNull(await bus.WaitForModuleAsync(null, "MyPlugin", TimeSpan.FromMilliseconds(50), CancellationToken.None));
         }

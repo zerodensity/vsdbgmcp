@@ -52,7 +52,7 @@ namespace VsDbgMcp.Shim
             return pid == 0 ? name : name + " (" + pid + ")";
         }
 
-        public static string Status(HostStatus s)
+        public static string Status(HostStatus s, int generation = 0)
         {
             if (s == null) return "No status returned.";
 
@@ -61,6 +61,9 @@ namespace VsDbgMcp.Shim
             if (!string.IsNullOrEmpty(s.ActiveConfiguration)) sb.Append("  ").Append(s.ActiveConfiguration);
             if (!string.IsNullOrEmpty(s.StartupProject)) sb.Append("  startup: ").Append(s.StartupProject);
             sb.AppendLine();
+
+            var run = Generation(s.Mode, generation);
+            if (run != null) sb.AppendLine(run);
 
             if (s.Workspace != null)
                 sb.Append("workspace: ").AppendLine(s.Workspace.File ?? s.Workspace.Root);
@@ -104,6 +107,29 @@ namespace VsDbgMcp.Shim
 
             sb.Append("breakpoints: ").Append(s.BreakpointCount);
             return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>
+        /// Which run of the debuggee this is, or null when there is none to label.
+        ///
+        /// One session ran the editor as five different pids and the launcher as four,
+        /// and an address was once compared across a restart without anyone noticing.
+        /// Nothing here can tell when an address was captured, so this says which run is
+        /// current and leaves the comparing to the caller.
+        /// </summary>
+        static string Generation(string mode, int number)
+        {
+            // In design mode there is no run to number.
+            if (string.Equals(mode ?? DebugModes.Design, DebugModes.Design, StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            if (number <= 0)
+                return "gen ? - nothing here saw this run begin, so it has no number and nothing read " +
+                       "under an earlier one can be told apart from something read now.";
+
+            return "gen " + number.ToString(CultureInfo.InvariantCulture) +
+                   " - the same number means the same run. A pid, thread id, address or container " +
+                   "reference read under a different one names nothing here.";
         }
 
         /// <summary>
@@ -166,10 +192,16 @@ namespace VsDbgMcp.Shim
 
         public static string Stop(StopEvent e)
         {
-            if (e == null) return "timeout: execution did not stop within the timeout. Still running.";
+            // Nothing was asked and nothing answered, so the timeout says only that.
+            // "Still running" was a claim, and nothing had established it.
+            if (e == null)
+                return "timeout: no stop arrived within the timeout. That is neither evidence that the " +
+                       "debuggee is running nor evidence that a breakpoint was never reached - nothing " +
+                       "here checked either. status reads the debugger's mode live.";
 
             var sb = new StringBuilder();
-            sb.Append(e.InstanceId).Append("  stopped: ").Append(e.Reason);
+            sb.Append(e.InstanceId).Append("  gen ").Append(e.Generation > 0 ? e.Generation.ToString(CultureInfo.InvariantCulture) : "?");
+            sb.Append("  stopped: ").Append(e.Reason);
 
             var process = Process(e.ProcessName, e.Pid);
             if (!string.IsNullOrEmpty(process)) sb.Append(" in ").Append(process);
@@ -207,10 +239,36 @@ namespace VsDbgMcp.Shim
             return sb.ToString().TrimEnd();
         }
 
+        /// <summary>
+        /// The answer to a wait that could only have timed out, because the debuggee has
+        /// not run since it stopped.
+        ///
+        /// The stop is reprinted as it was read, values and all, so the caveat has to
+        /// say that: this is the last stop again, not a reading taken now.
+        /// </summary>
+        public static string AlreadyStopped(IReadOnlyList<StopEvent> sitting)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine(sitting.Count == 1
+                ? sitting[0].InstanceId + " has not run since it stopped here, so waiting could only have " +
+                  "sat out the timeout. Call go, then wait."
+                : "No connected instance has run since it stopped, so waiting could only have sat out the " +
+                  "timeout. Call go, then wait.");
+
+            foreach (var e in sitting) sb.AppendLine(Stop(e));
+
+            sb.AppendLine("This is that stop again, not a reading taken now.");
+            sb.Append("Break mode belongs to the whole Visual Studio window rather than to one process, so ");
+            sb.Append("another process here can be running; threads lists them. Anything done from the IDE ");
+            sb.Append("rather than from here takes a few seconds to reach this; status reads the mode live.");
+            return sb.ToString().TrimEnd();
+        }
+
         public static string ModuleLoad(ModuleLoadEvent e, string pattern)
         {
             if (e == null)
-                return "timeout: no module matching \"" + pattern + "\" loaded within the timeout. Still running.";
+                return "timeout: no module matching \"" + pattern + "\" loaded within the timeout. Nothing " +
+                       "here checked whether the debuggee is running; status reads the mode live.";
 
             var sb = new StringBuilder();
             sb.Append(e.InstanceId).Append("  module loaded: ").Append(e.Name ?? "?");

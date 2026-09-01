@@ -64,6 +64,13 @@ namespace VsDbgMcp.Contracts
         public Frame Frame { get; set; }
         public Dictionary<string, string> Watches { get; set; }
         public string Mode { get; set; }
+
+        /// <summary>
+        /// Which debug session of that window this stop belongs to, stamped by the shim
+        /// the way Seq is. The pid, the thread id and every address here name nothing
+        /// once the number has moved. Zero when the shim never saw that session begin.
+        /// </summary>
+        public int Generation { get; set; }
     }
 
     /// <summary>

@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ModelContextProtocol.Server;
@@ -14,9 +16,9 @@ namespace VsDbgMcp.Shim.Tools
         public ExecutionTools(SessionManager sessions) : base(sessions) { }
 
         [McpServerTool(Name = "wait", ReadOnly = true)]
-        [Description("Block until the debuggee stops, then report why: which breakpoint, which exception, a completed step, or the process exiting. This is the correct way to find out that execution stopped - never call status in a loop. Returns the pinned watch values along with the stop. With for='module:NAME' it waits for a module to load instead.")]
+        [Description("Block until the debuggee stops, then report why: which breakpoint, which exception, a completed step, or the process exiting. This is the correct way to find out that execution stopped - never call status in a loop. Returns the pinned watch values along with the stop. If the debuggee has not run since it last stopped it says so at once rather than sitting out the timeout. With for='module:NAME' it waits for a module to load instead.")]
         public async Task<string> Wait(
-            [Description("How long to wait before giving up, in seconds. On timeout the program is still running and you can wait again.")] int timeoutSeconds = 30,
+            [Description("How long to wait before giving up, in seconds. A timeout says only that no stop arrived; it is not evidence that the program is running or that a breakpoint is never reached.")] int timeoutSeconds = 30,
             [Description("What to wait for. Omit it for the next execution stop. 'module:NAME' returns when a module whose name contains NAME loads, which is how to arm breakpoints in a plugin the host has not loaded yet without polling modules or bp_list; it returns straight away if that module already loaded. Waiting for a stop never returns on a module load.")] string @for = null,
             [Description("Instance id. Omit for the session default, or pass 'any' to return as soon as any connected instance stops - useful when debugging two processes in two windows.")] string instance = null,
             CancellationToken ct = default)
@@ -37,11 +39,13 @@ namespace VsDbgMcp.Shim.Tools
             }
 
             string target;
+            IReadOnlyList<string> instances;
             if (string.Equals(instance, "any", StringComparison.OrdinalIgnoreCase))
             {
                 // Make sure every instance is connected, or a stop over there is never seen here.
-                await Sessions.RefreshAsync(true, ct).ConfigureAwait(false);
+                var links = await Sessions.RefreshAsync(true, ct).ConfigureAwait(false);
                 target = null;
+                instances = links.Where(l => l.IsConnected).Select(l => l.Id).ToList();
             }
             else
             {
@@ -49,6 +53,7 @@ namespace VsDbgMcp.Shim.Tools
                 {
                     var link = await Sessions.ResolveAsync(instance, ct).ConfigureAwait(false);
                     target = link.Id;
+                    instances = new[] { link.Id };
                 }
                 catch (RoutingException ex)
                 {
@@ -63,6 +68,14 @@ namespace VsDbgMcp.Shim.Tools
                 return Render.ModuleLoad(module, modulePattern);
             }
 
+            // A stop cannot arrive from a debuggee that is already sitting in break, so
+            // waiting for one is a timeout the caller then has to interpret - and reading
+            // that timeout as "this code is never reached" is what it cost twice in one
+            // session. With instance='any' every window has to be sitting still, because
+            // one that is running can still stop.
+            var sitting = Sessions.Events.AlreadyStopped(target, instances);
+            if (sitting.Count > 0) return Render.AlreadyStopped(sitting);
+
             var stop = await Sessions.Events.WaitAsync(target, TimeSpan.FromSeconds(seconds), ct).ConfigureAwait(false);
             return Render.Stop(stop);
         }
@@ -74,7 +87,7 @@ namespace VsDbgMcp.Shim.Tools
             CancellationToken ct = default)
             => On(instance, ct, async link =>
             {
-                Sessions.Events.MarkSeen();
+                Sessions.Events.MarkSeen(link.Id);
                 var result = await link.Debug.GoAsync(ct).ConfigureAwait(false);
                 return Render.Op(result, "Running.");
             });
@@ -86,7 +99,7 @@ namespace VsDbgMcp.Shim.Tools
             CancellationToken ct = default)
             => On(instance, ct, async link =>
             {
-                Sessions.Events.MarkSeen();
+                Sessions.Events.MarkSeen(link.Id);
                 var result = await link.Debug.PauseAsync(ct).ConfigureAwait(false);
                 if (!result.Ok) return Render.Op(result, null);
 
@@ -112,7 +125,7 @@ namespace VsDbgMcp.Shim.Tools
                 if (normalized != StepKind.Into && normalized != StepKind.Over && normalized != StepKind.Out)
                     return "kind must be into, over, or out.";
 
-                Sessions.Events.MarkSeen();
+                Sessions.Events.MarkSeen(link.Id);
                 var result = await link.Debug.StepAsync(normalized, Math.Max(1, count), ct).ConfigureAwait(false);
                 if (!result.Ok) return Render.Op(result, null);
 
@@ -129,7 +142,7 @@ namespace VsDbgMcp.Shim.Tools
             CancellationToken ct = default)
             => On(instance, ct, async link =>
             {
-                Sessions.Events.MarkSeen();
+                Sessions.Events.MarkSeen(link.Id);
                 var result = await link.Debug.RunToAsync(file, line, ct).ConfigureAwait(false);
                 if (!result.Ok) return Render.Op(result, null);
 

@@ -30,6 +30,9 @@ namespace VsDbgMcp.Shim.Session
         readonly List<ModuleWaiter> _moduleWaiters = new List<ModuleWaiter>();
         readonly Dictionary<string, string> _modes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         readonly Dictionary<string, long> _sessionStart = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        readonly Dictionary<string, int> _generations = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        readonly HashSet<string> _startingRun = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        readonly Dictionary<string, StopEvent> _stoppedAt = new Dictionary<string, StopEvent>(StringComparer.OrdinalIgnoreCase);
         long _seq;
         long _cursor;
 
@@ -69,8 +72,16 @@ namespace VsDbgMcp.Shim.Session
             lock (_gate)
             {
                 stop.Seq = ++_seq;
+                stop.Generation = GenerationOf(stop.InstanceId);
                 _buffer.AddLast(stop);
                 while (_buffer.Count > BufferSize) _buffer.RemoveFirst();
+
+                // A stop is the only thing that says the debuggee is sitting still, and
+                // it is pushed as it happens. The mode notification is not: it arrives
+                // seconds after the change it announces, so a break it reports can
+                // belong to a stop the caller has already resumed from.
+                if (IsBreak(stop.Mode)) _stoppedAt[stop.InstanceId ?? ""] = stop;
+                else _stoppedAt.Remove(stop.InstanceId ?? "");
 
                 for (var i = _waiters.Count - 1; i >= 0; i--)
                 {
@@ -222,10 +233,19 @@ namespace VsDbgMcp.Shim.Session
         /// Moves the cursor past everything currently buffered. Called when a tool
         /// resumes execution, so the next wait() reports the coming stop rather than
         /// the one that is already history.
+        ///
+        /// It also forgets where the named instance was sitting, because the caller has
+        /// just asked it to run and where it used to be is no longer where it is. The
+        /// cursor is the whole bus's; the instance only says whose stop to forget.
         /// </summary>
-        public void MarkSeen()
+        public void MarkSeen(string instanceId)
         {
-            lock (_gate) _cursor = _seq;
+            lock (_gate)
+            {
+                _cursor = _seq;
+                if (string.IsNullOrEmpty(instanceId)) _stoppedAt.Clear();
+                else _stoppedAt.Remove(instanceId);
+            }
         }
 
         /// <summary>
@@ -244,6 +264,9 @@ namespace VsDbgMcp.Shim.Session
         /// Module loads are left alone: they arrive while a program is starting, and
         /// dropping one that came in ahead of the mode change would leave a wait for a
         /// module that is already there sitting out its timeout.
+        ///
+        /// Sitting in design mode is also what arms the generation counter, so leaving it
+        /// counts a run.
         /// </summary>
         public void ModeChanged(string instanceId, string mode)
         {
@@ -255,6 +278,118 @@ namespace VsDbgMcp.Shim.Session
                 _modes[instanceId] = mode;
 
                 if (wasIdle && !IsDesign(mode)) _sessionStart[instanceId] = _seq;
+
+                // Leaving design mode is the debugger's own account of a run beginning.
+                // When a tool already said one was starting, this is that same run
+                // arriving late and it must not be counted twice.
+                if (!IsDesign(mode) && !_startingRun.Remove(instanceId) && wasIdle)
+                    _generations[instanceId] = GenerationOf(instanceId) + 1;
+
+                // Running or no session at all takes the belief away; break never
+                // establishes it, because this notification is late enough that the
+                // break it reports can be one the caller has already resumed from.
+                if (!IsBreak(mode)) _stoppedAt.Remove(instanceId);
+            }
+        }
+
+        /// <summary>
+        /// A tool is starting a run in this instance. Counted here and now, before the
+        /// call goes out, so the first stop of the new run already carries the new
+        /// number.
+        ///
+        /// Waiting for the mode notification instead would have got that wrong in the
+        /// dangerous direction: it arrives seconds after the change it announces, so a
+        /// restart's first stops would have worn the previous run's number while a reply
+        /// told the caller to compare numbers before comparing addresses. The
+        /// notification for the same run arrives afterwards and is not counted again.
+        ///
+        /// It also cannot be left to the notification alone in the other direction: a
+        /// window that has sat in design mode since before the shim connected never
+        /// announces it, so its first run would go unnumbered.
+        ///
+        /// Attaching may join a session rather than start one, and nothing here knows
+        /// which it did. It costs a number that labels no restart, and its reply says so.
+        /// </summary>
+        public void StartingRun(string instanceId)
+        {
+            if (string.IsNullOrEmpty(instanceId)) return;
+
+            lock (_gate)
+            {
+                _generations[instanceId] = GenerationOf(instanceId) + 1;
+                _startingRun.Add(instanceId);
+                _stoppedAt.Remove(instanceId);
+            }
+        }
+
+        /// <summary>
+        /// The call that was starting a run failed, so no mode change is coming to
+        /// confirm it. Without this the next run somebody starts from the IDE would be
+        /// taken for the confirmation and go uncounted.
+        ///
+        /// The number stays where it went. It only ever moves forward, and one that
+        /// labels no run costs a re-read, while moving it back would make two different
+        /// runs share a number.
+        /// </summary>
+        public void RunNotStarted(string instanceId)
+        {
+            if (string.IsNullOrEmpty(instanceId)) return;
+            lock (_gate) _startingRun.Remove(instanceId);
+        }
+
+        /// <summary>
+        /// Which run of this instance's debuggee is current. Zero when nothing here saw
+        /// one begin.
+        ///
+        /// The same number means the same run. A different one does not always mean a
+        /// different run - joining a session, or a mode change arriving out of order, can
+        /// move it without a restart - so it is read as "everything has to be read
+        /// again", never as proof that something restarted. A pid, a thread id, an
+        /// address and a container reference mean something only under the number they
+        /// were read under. Nothing here checks that; the number is published so a caller
+        /// can.
+        /// </summary>
+        public int Generation(string instanceId)
+        {
+            lock (_gate) return GenerationOf(instanceId);
+        }
+
+        int GenerationOf(string instanceId) =>
+            _generations.TryGetValue(instanceId ?? "", out var generation) ? generation : 0;
+
+        /// <summary>
+        /// Where each of these instances is sitting, when every one of them stopped and
+        /// nothing has asked it to run since, and there is nothing buffered to hand out.
+        /// A wait on them could then only sit out its timeout. Empty when any of them
+        /// may still be running.
+        ///
+        /// Only a stop event establishes this. The mode notification arrives seconds
+        /// after the change it announces, so a break it reports can belong to a stop the
+        /// caller has already resumed from; run and design are believed, because
+        /// believing them costs a wait that blocks the way it always did.
+        ///
+        /// Break mode is a property of the whole Visual Studio window rather than of one
+        /// process. With a launcher and the editor it starts in one session, either one
+        /// stopping puts the window in break while the other keeps running. This is the
+        /// floor, not a proof, and the reply says so.
+        /// </summary>
+        public IReadOnlyList<StopEvent> AlreadyStopped(string instanceId, IReadOnlyList<string> instances)
+        {
+            if (instances == null || instances.Count == 0) return Array.Empty<StopEvent>();
+
+            lock (_gate)
+            {
+                // A stop nobody has been given yet is the answer to the wait, not this.
+                if (_buffer.Any(e => e.Seq > _cursor && InCurrentSession(e) && Matches(instanceId, e.InstanceId)))
+                    return Array.Empty<StopEvent>();
+
+                var sitting = new List<StopEvent>();
+                foreach (var id in instances)
+                {
+                    if (!_stoppedAt.TryGetValue(id ?? "", out var stop)) return Array.Empty<StopEvent>();
+                    sitting.Add(stop);
+                }
+                return sitting;
             }
         }
 
@@ -273,6 +408,9 @@ namespace VsDbgMcp.Shim.Session
 
         static bool IsDesign(string mode) =>
             string.Equals(mode, DebugModes.Design, StringComparison.OrdinalIgnoreCase);
+
+        static bool IsBreak(string mode) =>
+            string.Equals(mode, DebugModes.Break, StringComparison.OrdinalIgnoreCase);
 
         static bool Matches(string instanceId, string eventInstanceId) =>
             string.IsNullOrEmpty(instanceId) ||
