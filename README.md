@@ -243,7 +243,7 @@ Studio, since the VSIX packaging tasks are .NET Framework assemblies.
 
 ## Status
 
-491 automated tests cover routing, discovery, the event bus, and the whole shim path —
+495 automated tests cover routing, discovery, the event bus, and the whole shim path —
 discovery file, named pipe, JSON-RPC, rendering — against a stand-in for the extension,
 plus the pure decisions: which expression forms to try against a module, which values are
 allocator fill, whether a source file outran its binary, whether a module was deployed
@@ -288,11 +288,12 @@ Visual Studio is already debugging before any of it was written, and every readi
 driven against a program whose call shape was known.
 
 [docs/iteration_3.md](docs/iteration_3.md) is the third round, from a session debugging a
-media engine and an Unreal application through two windows at once. All seven of its items
-are the same fault — a tool answering a question it could not answer, where the answer
-read as evidence. **It has not been driven by hand yet**, and three things in it are
-reasoned rather than measured: which automation page carries the Immediate-window setting,
-the generation number's timing at a session boundary, and `wait` answering from break.
+media engine and an Unreal application through two windows at once. Every one of its items
+is the same fault — a tool answering a question it could not answer, where the answer read
+as evidence. Driving it by hand caught two things the whole suite had passed: the
+Immediate-window setting was being read by a name automation does not use, so the check
+never fired; and a restart from a shim that had joined a live session labelled the old
+process's exit with the new run's number, reporting two runs as one.
 
 Known gaps:
 

@@ -233,7 +233,7 @@ moment it is worth knowing, before any wrong conclusion is drawn.
 
 ## Verification
 
-491 automated tests, up from 347. The shim, the extension and the VSIX all build.
+495 automated tests, up from 347. The shim, the extension and the VSIX all build.
 
 Four things were built in parallel, in separate worktrees, each reviewed by an agent that
 had not written it. The reviews earned their place: one caught a stale-deployment false
@@ -244,8 +244,30 @@ that misleads; and one compiled the container decisions into a throwaway harness
 real layouts, and found the "the two views disagree" verdict firing on an empty
 `std::deque` — a false alarm on exactly the family of types the item exists for.
 
-**None of it has been driven against a live Visual Studio.** Every previous iteration found
-something there that the whole test suite had passed, and three things in this round are
-reasoned rather than measured: which automation page carries the Immediate-window setting,
-the generation number's timing at a session boundary, and the wait-while-stopped path
-itself. Those are the three to drive by hand first.
+Then all of it was driven by hand against Visual Studio 2026 debugging
+`tests/fixtures/cpp` in the experimental hive, and the three things that were reasoned
+rather than measured were the three worth driving. Two of them were wrong.
+
+**`wait` answering from break was right.** A second `wait` with nothing resumed came back
+in 2 ms naming the stop it was already sitting on, where before it blocked for the whole
+timeout and then said the program was still running.
+
+**The Immediate-window setting was being read by the wrong name.** Visual Studio's own
+exported settings call it `OutputToImmediate`, which is where the name came from;
+automation calls it `RedirectOutputToImmediate` and keeps it on the debugger's General
+page. So the lookup found nothing and every empty tracepoint reported that the setting
+could not be read — honest, and useless. With the name corrected and the checkbox turned
+on, a tracepoint on a loop running at twenty hertz across four threads collects nothing
+at all and the reply names the setting as the reason. That is the report's own §1.2,
+reproduced and then diagnosed in one call.
+
+**The generation number labelled two runs the same.** A shim that connects to a Visual
+Studio already debugging reports `gen ?`, correctly. Restarting from there took the number
+1 for the new run — and the old process's exit, which arrives afterwards, was stamped 1 as
+well, so the process that had just died and the one now running were reported as the same
+run. That is the single comparison the number exists to prevent, wrong in the direction
+that misleads. An exit that lands while a run is starting now belongs to the run that
+ended.
+
+Both were found in the first twenty minutes of driving a real debugger, which is the same
+lesson iterations 1 and 2 recorded and did not stop this round from needing again.
