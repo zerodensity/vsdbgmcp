@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.6.0
+
+- `wait` answers at once when the debuggee has not run since it last stopped, instead of
+  sitting out the timeout and then reporting that execution "did not stop within the
+  timeout. Still running." Both halves of that were claims, and both were false in the
+  case that printed it most often: a breakpoint removed, another set, and nothing
+  resumed. A timeout now says only that no stop arrived.
+- Every debug session carries a number, shown by `status` and on every stop. `launch`,
+  `attach`, `restart` and `dump_open` say that the pids, thread ids and addresses read
+  before them name nothing now. The same number means the same run; a different one means
+  everything has to be read again rather than that something restarted.
+- `trace_read` no longer answers an empty stream by saying the tracepoint has not been
+  hit. It cannot tell a record that was never written from one that never arrived, so it
+  says what an empty stream establishes and reports the evidence it has: whether the
+  Debug pane is watched or recovered, whether any other tracepoint is receiving records,
+  and whether the breakpoint is disabled, unbound or filtered.
+- A collected record is written between markers at both ends, so one arriving proves the
+  line was reached even when nothing in the message evaluated, and one arriving without
+  its end is counted as cut short rather than passed off as a reading.
+- A collecting tracepoint with nothing reports the "Redirect all Output Window text to
+  the Immediate Window" setting, which sends every record somewhere the pane watch cannot
+  see and leaves the stream empty forever with nothing saying why.
+- `modules`, `bp_set` and a breakpoint that did not bind report a module the debuggee
+  loaded an older build of than the one sitting beside its matched PDB. That is the
+  failure a rebuild does not fix, and it showed as symbols loading, a PDB resolving, and
+  breakpoints binding nowhere. The check reads one file time per module and never goes
+  near a source.
+- A container the visualizer renders as empty is read again with the visualizer off and
+  both views are reported. No verdict is drawn from the raw fields, because a capacity is
+  spelled the same way as a size and an empty `std::deque` would otherwise be reported as
+  a disagreement.
+- `eval` and `expand` refuse a `typeModule` naming a module that is not loaded, and list
+  the closest loaded names. Passing one the debugger cannot find drops the qualifier, and
+  the type then resolves in the frame's own module, where a same-named symbol answers
+  with something that reads as data rather than as an error.
+- `eval` takes `count` and `member` and returns one row per index of a raw array, with
+  how many of the values were distinct. A repeated block is what a container's own view
+  hides, and reading it a row at a time used to cost one call per element.
+- `bp_set`'s per-second cap is no longer applied where records arrive without times, and
+  `trace_read` says it was not. A record with no time belongs to no second, so the window
+  never rolled: the first few records were kept and everything after them thrown away for
+  as long as the program ran, while the reply called it a rate.
+- `modules` follows `select` the way the other reads do, and names the process its list
+  came from. In a session holding a launcher and what it started, it used to read the
+  process that stopped while `eval` read the selected one, with nothing saying so.
+
 ## 0.5.0
 
 - A call that failed comes back marked as failed, rather than as ordinary text a reader

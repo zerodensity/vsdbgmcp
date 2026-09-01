@@ -17,7 +17,9 @@ namespace VsDbgMcp.Shim
             "Drives the Visual Studio debugger. Call 'status' first to see where things stand.\n" +
             "\n" +
             "Waiting: after launch, go, or step, call 'wait' to find out where the program stopped and why. " +
-            "Never poll 'status' in a loop; 'wait' blocks on the debugger's own events and cannot miss a stop.\n" +
+            "Never poll 'status' in a loop; 'wait' blocks on the debugger's own events and cannot miss a stop. " +
+            "Call it after resuming, not instead of resuming: where the program has not run since it last " +
+            "stopped, 'wait' says so rather than waiting for a stop that cannot come.\n" +
             "\n" +
             "Instances: several Visual Studio windows can be open at once. Calls go to the one whose solution " +
             "matches the working directory. If that is ambiguous the reply lists the candidates and the exact " +

@@ -148,7 +148,10 @@ Notes on a few:
 - **`wait`** — `instance: "any"` returns as soon as any connected window stops, which is
   how to debug a client and a server at once. `for: "module:NAME"` waits for a module to
   load instead of for a stop, which is how to arm breakpoints in a plugin before its host
-  loads it without polling.
+  loads it without polling. Where the debuggee has not run since it last stopped it says
+  so at once instead of sitting out the timeout, because a stop cannot arrive from a
+  program that is not running and reading that timeout as "this line is never reached" is
+  a wrong answer the tool used to hand over.
 - **`eval`** — refuses to call functions unless `allowSideEffects` is passed, because the
   native evaluator really runs them and an agent inspecting `v.size()` should not change
   the program by accident. Format specifiers go in `format`, not spliced into the
@@ -171,11 +174,14 @@ Notes on a few:
   are recovered from it afterwards and carry no individual times; the reply says so.
 - **`modules`** — says which binary each module actually is: the time stamped into the
   loaded image, its load path, size and load address, and the symbol file it found. It
-  also marks a module whose source has been edited since it was built, which is the
-  breakpoint that binds nowhere for a reason neither the module list nor the PDB
-  messages will show you. The image's own time is the one that answers whether a binary
-  deployed to another machine is the one you just built; the file time beside the path
-  belongs to whatever sits at that path here.
+  also marks a module whose source has been edited since it was built, and one the
+  debuggee loaded an older build of than the one sitting beside its matched PDB. Those
+  are the two breakpoints that bind nowhere for a reason neither the module list nor the
+  PDB messages will show you, and the second is the one a rebuild does not fix: an engine
+  that loads its plugins from a deployment directory keeps running what is there while
+  the debugger matches the PDB you just built. The image's own time is the one that
+  answers whether a binary deployed to another machine is the one you just built; the
+  file time beside the path belongs to whatever sits at that path here.
 - **`symbols`** — why one module's symbols are missing, and, with `load`, an attempt to
   fetch them. The report is Symbol Load Information: every path the engine tried and
   what each one turned out to be, which is where a PDB that is present and does not
@@ -237,11 +243,12 @@ Studio, since the VSIX packaging tasks are .NET Framework assemblies.
 
 ## Status
 
-347 automated tests cover routing, discovery, the event bus, and the whole shim path —
+491 automated tests cover routing, discovery, the event bus, and the whole shim path —
 discovery file, named pipe, JSON-RPC, rendering — against a stand-in for the extension,
 plus the pure decisions: which expression forms to try against a module, which values are
-allocator fill, whether a source file outran its binary, and what a tracepoint buffer
-keeps.
+allocator fill, whether a source file outran its binary, whether a module was deployed
+older than the build beside its PDB, which loaded name a mistyped module meant, and what
+a tracepoint buffer keeps.
 
 The following were driven by hand against Visual Studio 2026 debugging a native C++
 program (`tests/fixtures/cpp`):
@@ -279,6 +286,13 @@ program had last stopped.
 Profiling was built the same way: the collector was proven to attach to a process
 Visual Studio is already debugging before any of it was written, and every reading was
 driven against a program whose call shape was known.
+
+[docs/iteration_3.md](docs/iteration_3.md) is the third round, from a session debugging a
+media engine and an Unreal application through two windows at once. All seven of its items
+are the same fault — a tool answering a question it could not answer, where the answer
+read as evidence. **It has not been driven by hand yet**, and three things in it are
+reasoned rather than measured: which automation page carries the Immediate-window setting,
+the generation number's timing at a session boundary, and `wait` answering from break.
 
 Known gaps:
 
