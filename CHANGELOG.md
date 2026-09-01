@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
 
 - A call that failed comes back marked as failed, rather than as ordinary text a reader
   has to recognise a failure in. The reply is the reason and nothing else: the words the
