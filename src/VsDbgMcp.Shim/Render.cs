@@ -738,6 +738,13 @@ namespace VsDbgMcp.Shim
                     sb.Append("  -- same address as ").Append(string.Join(", ", n.SameAddressAs));
                 if (n.HasChildren && (n.Children == null || n.Children.Count == 0))
                     sb.Append("  ... expand ").Append(n.Ref);
+
+                // A container whose whole summary is "empty" is the one wrong answer a
+                // reader cannot see, because it reads as an answer. Said here rather
+                // than in one tool, so it is said wherever a value is printed.
+                if (n.HasChildren && ContainerElement.SaysOnlyEmpty(n.Value))
+                    sb.Append("  -- says it is empty; expand reads the raw layout behind it");
+
                 if (!string.IsNullOrEmpty(n.Note)) sb.Append("  -- ").Append(n.Note);
 
                 // A fill the line above already reported is not reported again on the way
@@ -821,68 +828,32 @@ namespace VsDbgMcp.Shim
             }
 
             var all = new List<VarNode>();
-            Section(sb, "arguments", r.Arguments, all);
-            Section(sb, "locals", r.Locals, all);
-
-            if (r.This != null)
+            foreach (var section in r.Sections ?? new List<VarSection>())
             {
-                Section(sb, "this", new List<VarNode> { r.This }, all);
+                sb.AppendLine();
+                sb.Append("== ").Append(section.Name).AppendLine(" ==");
 
-                if (r.This.Children != null && r.This.Children.Count > 0)
+                var nodes = section.Nodes;
+                if (nodes != null && nodes.Count > 0)
                 {
-                    sb.Append(Vars(new VarsResult { Nodes = r.This.Children }).Text);
-                    sb.AppendLine();
+                    // The same renderer vars uses, so a row looks the same wherever it
+                    // is met and every fact on it is worded once.
+                    sb.AppendLine(Vars(nodes));
+                    all.AddRange(nodes);
                 }
+                else if (string.IsNullOrEmpty(section.Note))
+                {
+                    sb.AppendLine("  none in scope here");
+                }
+
+                if (!string.IsNullOrEmpty(section.Note)) sb.Append("  ").AppendLine(section.Note);
             }
 
-            if (!string.IsNullOrEmpty(r.Capped))
-            {
-                sb.AppendLine();
-                sb.AppendLine(r.Capped);
-            }
-
-            var verdict = FrameTrust.NotEvidence(all);
-            if (!string.IsNullOrEmpty(verdict))
-            {
-                sb.AppendLine();
-                sb.AppendLine("== what is not evidence ==");
-                sb.AppendLine(verdict);
-            }
+            sb.AppendLine();
+            sb.AppendLine("== what is not evidence ==");
+            sb.AppendLine(FrameTrust.NotEvidence(all) ?? "  nothing was read, so nothing was judged.");
 
             return sb.ToString().TrimEnd();
-        }
-
-        /// <summary>
-        /// One scope's values, with what is wrong with each beside it. A scope with
-        /// nothing in it says so: an absent heading reads as a section that was left
-        /// out rather than one that was empty.
-        /// </summary>
-        static void Section(StringBuilder sb, string named, IReadOnlyList<VarNode> nodes, List<VarNode> all)
-        {
-            sb.AppendLine();
-            sb.Append("== ").Append(named).AppendLine(" ==");
-
-            if (nodes == null || nodes.Count == 0)
-            {
-                sb.AppendLine("  none in scope here");
-                return;
-            }
-
-            foreach (var n in nodes)
-            {
-                all.Add(n);
-
-                sb.Append("  ").Append(n.Name).Append(" = ").Append(n.Value ?? "(null)");
-                if (!string.IsNullOrEmpty(n.Type)) sb.Append("  (").Append(n.Type).Append(')');
-                if (n.HasChildren && (n.Children == null || n.Children.Count == 0))
-                    sb.Append("  ... expand ").Append(n.Ref);
-                sb.AppendLine();
-
-                foreach (var mark in FrameTrust.Marks(n))
-                {
-                    sb.Append("      -- ").AppendLine(mark);
-                }
-            }
         }
 
         public static Reply Evals(IReadOnlyList<EvalResult> results, string note = null)

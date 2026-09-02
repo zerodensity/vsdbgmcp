@@ -115,14 +115,21 @@ namespace VsDbgMcp.Tests
                 {
                     new SourceLine { Number = 38, Text = "mesh.refCount += 1;", IsCurrent = true }
                 },
-                Locals = new List<VarNode>
+                Sections = new List<VarSection>
                 {
-                    new VarNode { Name = "total", Value = "120", Type = "int" },
-                    new VarNode { Name = "shifted", Value = "no value", Readable = false }
+                    new VarSection
+                    {
+                        Name = "locals",
+                        Nodes = new List<VarNode>
+                        {
+                            new VarNode { Name = "total", Value = "120", Type = "int" },
+                            new VarNode { Name = "shifted", Value = "no value", Readable = false }
+                        }
+                    }
                 }
             };
 
-            var text = await new InspectionTools(_sessions).Frame(null, 40, null, CancellationToken.None);
+            var text = await new InspectionTools(_sessions).Frame(null, null, 40, null, CancellationToken.None);
 
             Assert.Contains("thread 4242 in DebugTarget.exe (70632)", text);
             Assert.Contains(">     38  mesh.refCount += 1;", text);

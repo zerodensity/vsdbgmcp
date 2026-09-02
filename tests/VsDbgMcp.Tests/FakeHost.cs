@@ -359,7 +359,7 @@ namespace VsDbgMcp.Tests
         public Task<VarsResult> VarsAsync(string scope, int depth, string filter, bool sharedAddresses, CancellationToken ct = default) => Task.FromResult(new VarsResult());
         public Task<VarsResult> ExpandAsync(string reference, int depth, string typeModule, int? index, string key, CancellationToken ct = default) => Task.FromResult(new VarsResult());
         public FrameReport NextFrameReport { get; set; } = new FrameReport();
-        public Task<FrameReport> FrameAsync(int? frame, int maxVariables, CancellationToken ct = default) => Task.FromResult(NextFrameReport);
+        public Task<FrameReport> FrameAsync(int? thread, int? frame, int maxVariables, CancellationToken ct = default) => Task.FromResult(NextFrameReport);
         public Task<OpResult> WatchSetAsync(string[] expressions, CancellationToken ct = default) => Ok();
         public Task<MemoryResult> MemoryAsync(string addressOrExpression, int size, string format, CancellationToken ct = default) => Task.FromResult(new MemoryResult());
         public Task<OpResult> ProfileStartAsync(CancellationToken ct = default) => Task.FromResult(OpResult.Good());

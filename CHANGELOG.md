@@ -14,6 +14,13 @@
   without answering whether it is what the process is running. A file written since the
   module was built says so with both times; a file this machine does not have says that
   instead of nothing.
+- `vars` and `expand` mark a container whose whole summary claims it is empty, the way
+  `frame` does. An empty list is the one wrong answer a reader cannot see, because it
+  reads as an answer, and the check belongs wherever a value is printed rather than in
+  one tool. A summary that merely mentions a member which happens to be zero is left
+  alone: a struct with a name, a reference count and one empty vector inside it is not a
+  container claiming to be empty.
+- `frame` takes a thread, so reporting on a worker does not need a separate `select`.
 - `symbols` follows `select` the way `modules` and `eval` do. A module belongs to a
   process, and in a session holding a launcher and what it started it used to report on
   whichever process had stopped.

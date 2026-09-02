@@ -757,7 +757,15 @@ namespace VsDbgMcp.Host
             return FrameReader.Frames(thread, count);
         });
 
-        public Task<OpResult> SelectAsync(int? threadId, int? frameIndex, string process, CancellationToken ct = default) => UIOpAsync(() =>
+        public Task<OpResult> SelectAsync(int? threadId, int? frameIndex, string process, CancellationToken ct = default) =>
+            UIOpAsync(() => SelectCore(threadId, frameIndex, process));
+
+        /// <summary>
+        /// Moving the session's attention, already on the UI thread, so anything running
+        /// there can do it without going back through the dispatcher. 'frame' names a
+        /// thread this way rather than making a caller select first and then read.
+        /// </summary>
+        OpResult SelectCore(int? threadId, int? frameIndex, string process)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -820,7 +828,7 @@ namespace VsDbgMcp.Host
 
             return OpResult.Good("thread " + (_selectedThreadId == 0 ? "(current)" : _selectedThreadId.ToString()) +
                                  " in " + where + ", frame " + _selectedFrame);
-        });
+        }
 
         public Task<OpResult> FreezeAsync(int threadId, bool frozen, CancellationToken ct = default) => UIOpAsync(() =>
         {
@@ -1039,9 +1047,18 @@ namespace VsDbgMcp.Host
         /// the source are read at all, which nobody does until a value has already
         /// misled them.
         /// </summary>
-        public Task<FrameReport> FrameAsync(int? frame, int maxVariables, CancellationToken ct = default) => UIAsync(() =>
+        public Task<FrameReport> FrameAsync(int? thread, int? frame, int maxVariables, CancellationToken ct = default) => UIAsync(() =>
         {
             ThreadHelper.ThrowIfNotOnUIThread();
+
+            // Naming a thread here does what select would have done, and leaves it
+            // chosen afterwards, because reading one frame of a worker is nearly always
+            // followed by reading something else in it.
+            if (thread.HasValue)
+            {
+                var moved = SelectCore(thread, null, null);
+                if (!moved.Ok) return new FrameReport { Refusal = moved.Message };
+            }
 
             var chosen = CurrentFrame(frame);
             if (chosen.Refusal != null) return new FrameReport { Refusal = chosen.Refusal };
@@ -1053,22 +1070,30 @@ namespace VsDbgMcp.Host
                 ThreadWasSelected = _selectedThreadId != 0
             };
 
-            var thread = CurrentThreadObject();
-            report.ThreadId = ThreadIdOf(thread);
+            var on = CurrentThreadObject();
+            report.ThreadId = ThreadIdOf(on);
 
-            var who = ProcessIdentity.Of(thread);
+            var who = ProcessIdentity.Of(on);
             report.ProcessName = who.Name;
             report.Pid = who.Pid;
 
-            var notes = new List<string>();
-            report.Arguments = Section(chosen, "args", maxVariables, notes, "arguments", null);
+            var arguments = Section(chosen, "args", maxVariables, "arguments", null);
+            report.Sections.Add(arguments);
 
             // The engine's locals filter hands back the arguments too, so without this
             // every argument is printed twice and counted twice in what is not evidence.
             // Taken out before the cap, or the cap counts rows nobody is shown.
-            report.Locals = Section(chosen, "locals", maxVariables, notes, "locals", report.Arguments);
-            report.This = ThisObject(chosen);
-            if (notes.Count > 0) report.Capped = string.Join(" ", notes.ToArray());
+            report.Sections.Add(Section(chosen, "locals", maxVariables, "locals", arguments.Nodes));
+
+            var self = ThisObject(chosen);
+            if (self != null)
+            {
+                report.Sections.Add(new VarSection
+                {
+                    Name = "this",
+                    Nodes = new List<VarNode> { self }
+                });
+            }
 
             DescribeWhereTheCodeCameFrom(report);
             return report;
@@ -1083,24 +1108,32 @@ namespace VsDbgMcp.Host
         /// list looking like a complete one - which is the failure the scope reader was
         /// written to stop giving in the first place.
         /// </summary>
-        List<VarNode> Section(ChosenFrame chosen, string scope, int max, List<string> notes, string named,
+        VarSection Section(ChosenFrame chosen, string scope, int max, string named,
             List<VarNode> alreadyShown)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
             var read = ExpressionEval.Scope(chosen.Frame, scope, 1, null, true);
             var nodes = Excluding(read.Nodes, alreadyShown);
+            var section = new VarSection { Name = named, Nodes = nodes };
 
             // "No locals here" and "the engine would not list them" are different
             // answers, and only the reader knows which it gave.
-            if (!string.IsNullOrEmpty(read.Message)) notes.Add("The " + named + ": " + read.Message);
+            section.Note = read.Message;
 
-            if (nodes.Count <= max) return nodes;
+            if (nodes.Count > max)
+            {
+                section.Nodes = nodes.GetRange(0, max);
+                section.Note = Join(section.Note,
+                    nodes.Count + " were in scope and the first " + max + " are shown; " +
+                    "vars(scope: \"" + scope + "\") reads the rest.");
+            }
 
-            notes.Add(nodes.Count + " " + named + " were in scope and the first " + max +
-                      " are shown; vars(scope: \"" + scope + "\") reads the rest.");
-            return nodes.GetRange(0, max);
+            return section;
         }
+
+        static string Join(string first, string second) =>
+            string.IsNullOrEmpty(first) ? second : first + " " + second;
 
         /// <summary>
         /// Whether the engine's refusal means this frame has no 'this' at all, rather

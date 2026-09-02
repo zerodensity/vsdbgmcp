@@ -142,6 +142,57 @@ namespace VsDbgMcp
         }
 
         /// <summary>
+        /// True when the whole summary is the claim that there is nothing inside, rather
+        /// than a summary that happens to mention something which is zero.
+        ///
+        /// LooksEmpty answers the second question, which is right where the rows of an
+        /// expansion are in hand to check it against. Where there are no rows - a
+        /// variable printed in a list - it is too loose on its own:
+        /// {name="terrain" vertices={ size=0 } refCount=1 } is a mesh with a name and a
+        /// reference count, and calling it empty puts a plainly good value in front of a
+        /// reader as a suspect one.
+        ///
+        /// So the object's own fields are counted, which are the ones between its
+        /// outermost braces. A pointer renders as an address and then the braces, so
+        /// reading the text as it comes would find every field nested one level down and
+        /// count none of them.
+        /// </summary>
+        public static bool SaysOnlyEmpty(string value)
+        {
+            if (!LooksEmpty(value)) return false;
+
+            var text = Inside((value ?? "").Trim());
+            var fields = 0;
+            var depth = 0;
+
+            foreach (var c in text)
+            {
+                if (c == '{' || c == '[' || c == '(') depth++;
+                else if (c == '}' || c == ']' || c == ')') depth--;
+                else if (c == '=' && depth == 0) fields++;
+            }
+            return fields <= 1;
+        }
+
+        /// <summary>
+        /// What is between the outermost braces, or the whole text when there are none.
+        /// "Empty" carries no braces and is the claim itself.
+        /// </summary>
+        static string Inside(string text)
+        {
+            var open = text.IndexOf('{');
+            if (open < 0) return text;
+
+            var depth = 0;
+            for (var i = open; i < text.Length; i++)
+            {
+                if (text[i] == '{') depth++;
+                else if (text[i] == '}' && --depth == 0) return text.Substring(open + 1, i - open - 1);
+            }
+            return text.Substring(open + 1);
+        }
+
+        /// <summary>
         /// What to say when a container rendered as empty and was read again with the ",!"
         /// specifier, which turns the visualizer off.
         ///

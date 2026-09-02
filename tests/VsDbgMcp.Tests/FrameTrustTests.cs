@@ -8,63 +8,62 @@ namespace VsDbgMcp.Tests
     /// <summary>
     /// Which of a frame's values are evidence and which are not.
     ///
-    /// The report this feeds prints every variable in one go, and a reader scanning
-    /// forty rows will not notice that one of them came from a slot the compiler handed
-    /// to two locals. The marks are gathered here so they can be said twice: against the
-    /// value, and again as a list at the end of everything that is not to be believed.
+    /// The row above already carries each fact in a few words. This decides which values
+    /// are worth naming again at the end, and what to do about each, because nobody
+    /// scanning forty rows sees the marks where they happened.
     /// </summary>
     public class FrameTrustTests
     {
         [Fact]
-        public void A_plain_value_carries_no_marks()
+        public void A_plain_value_has_nothing_against_it()
         {
-            var marks = FrameTrust.Marks(new VarNode { Name = "total", Value = "220", Type = "int" });
-
-            Assert.Empty(marks);
+            Assert.Null(FrameTrust.Reason(new VarNode { Name = "total", Value = "220", Type = "int" }));
         }
 
         /// <summary>
         /// The engine says it could not read this, which in an optimized frame means the
-        /// compiler kept nothing. Printing the reason as though it were a value is what
-        /// iteration 1 stopped doing; this carries the fact forward into the summary.
+        /// compiler kept nothing. The text beside it is the engine's reason, and reading
+        /// it as a value is the mistake worth naming.
         /// </summary>
         [Fact]
-        public void A_value_the_compiler_kept_nothing_for_is_marked()
+        public void A_value_the_compiler_kept_nothing_for_says_the_text_is_not_a_value()
         {
-            var marks = FrameTrust.Marks(new VarNode
+            var reason = FrameTrust.Reason(new VarNode
             {
                 Name = "shifted",
                 Value = "the debugger cannot read this",
                 Readable = false
             });
 
-            Assert.Contains(marks, m => m.Contains("not readable"));
+            Assert.Contains("not a value", reason);
         }
 
         [Fact]
         public void A_slot_shared_with_other_locals_names_them()
         {
-            var marks = FrameTrust.Marks(new VarNode
+            var reason = FrameTrust.Reason(new VarNode
             {
                 Name = "masked",
                 Value = "60",
                 SameAddressAs = new List<string> { "folded", "carried" }
             });
 
-            Assert.Contains(marks, m => m.Contains("folded") && m.Contains("carried"));
+            Assert.Contains("folded", reason);
+            Assert.Contains("carried", reason);
         }
 
         [Fact]
-        public void An_allocator_fill_pattern_is_named_where_it_appears()
+        public void An_allocator_fill_pattern_says_the_value_is_not_live_data()
         {
-            var marks = FrameTrust.Marks(new VarNode
+            var reason = FrameTrust.Reason(new VarNode
             {
                 Name = "state",
                 Value = "0xdddddddddddddddd",
                 Type = "void *"
             });
 
-            Assert.Contains(marks, m => m.Contains("0xdd") && m.Contains("freed"));
+            Assert.Contains("0xdd", reason);
+            Assert.Contains("not live data", reason);
         }
 
         /// <summary>
@@ -72,9 +71,9 @@ namespace VsDbgMcp.Tests
         /// wrong answer a reader cannot see, because it reads as an answer.
         /// </summary>
         [Fact]
-        public void A_container_claiming_to_be_empty_is_marked_for_a_second_reading()
+        public void A_container_claiming_to_be_empty_is_sent_for_a_second_reading()
         {
-            var marks = FrameTrust.Marks(new VarNode
+            var reason = FrameTrust.Reason(new VarNode
             {
                 Name = "ResourceProperties",
                 Value = "Empty",
@@ -82,63 +81,49 @@ namespace VsDbgMcp.Tests
                 HasChildren = true
             });
 
-            Assert.Contains(marks, m => m.Contains("empty"));
+            Assert.Contains("expand", reason);
         }
 
-        /// <summary>
-        /// A plain int of zero is not a container lying about its size, and marking it
-        /// would bury the marks that matter under every zero in the frame.
-        /// </summary>
         [Fact]
-        public void A_scalar_that_happens_to_be_zero_is_not_marked_as_an_empty_container()
+        public void A_scalar_that_happens_to_be_zero_is_not_an_empty_container()
         {
-            var marks = FrameTrust.Marks(new VarNode { Name = "total", Value = "0", Type = "int" });
-
-            Assert.Empty(marks);
+            Assert.Null(FrameTrust.Reason(new VarNode { Name = "total", Value = "0", Type = "int" }));
         }
 
         /// <summary>
-        /// This is the fixture's own mesh, and a review caught it being marked. A struct
+        /// This is the fixture's own mesh, and a review caught it being flagged. A struct
         /// summary that mentions a member which happens to be zero is not a container
-        /// claiming to be empty: this one has a name and a reference count. Marking it
+        /// claiming to be empty: this one has a name and a reference count. Flagging it
         /// puts a plainly good value in the one list that has to be believed.
         /// </summary>
         [Fact]
         public void A_struct_with_an_empty_member_is_not_a_container_claiming_to_be_empty()
         {
-            var marks = FrameTrust.Marks(new VarNode
+            Assert.Null(FrameTrust.Reason(new VarNode
             {
                 Name = "mesh",
                 Value = "{name=\"terrain\" vertices={ size=0 } refCount=1 }",
                 Type = "Mesh &",
                 HasChildren = true
-            });
-
-            Assert.Empty(marks);
+            }));
         }
 
         [Fact]
-        public void A_pointer_to_a_struct_with_an_empty_member_is_not_marked_either()
+        public void A_pointer_to_such_a_struct_is_not_flagged_either()
         {
-            var marks = FrameTrust.Marks(new VarNode
+            Assert.Null(FrameTrust.Reason(new VarNode
             {
                 Name = "this",
                 Value = "0x000001f2c4a0 {name=\"terrain\" vertices={ size=0 } refCount=1 }",
                 Type = "Mesh *",
                 HasChildren = true
-            });
-
-            Assert.Empty(marks);
+            }));
         }
 
-        /// <summary>
-        /// The container's own count, with nothing else in the summary, is the case the
-        /// mark exists for and has to survive the guard above.
-        /// </summary>
         [Fact]
-        public void A_container_whose_whole_summary_is_its_own_zero_count_is_still_marked()
+        public void A_container_whose_whole_summary_is_its_own_zero_count_is_still_flagged()
         {
-            var marks = FrameTrust.Marks(new VarNode
+            var reason = FrameTrust.Reason(new VarNode
             {
                 Name = "vertices",
                 Value = "{ size=0 }",
@@ -146,11 +131,11 @@ namespace VsDbgMcp.Tests
                 HasChildren = true
             });
 
-            Assert.Contains(marks, m => m.Contains("empty"));
+            Assert.NotNull(reason);
         }
 
         [Fact]
-        public void The_summary_lists_only_the_values_that_carry_a_mark()
+        public void The_closing_list_names_only_the_values_with_something_against_them()
         {
             var text = FrameTrust.NotEvidence(new List<VarNode>
             {
@@ -165,23 +150,40 @@ namespace VsDbgMcp.Tests
         }
 
         /// <summary>
-        /// Saying nothing here would read as a section that was left out. A frame whose
-        /// values all read cleanly is a result, and the one worth stating plainly.
+        /// The list carries what to do about each, not just the names. Reading the names
+        /// alone sends somebody back up the reply to find out why.
         /// </summary>
         [Fact]
-        public void A_frame_where_everything_read_cleanly_says_so_rather_than_nothing()
+        public void The_closing_list_carries_the_reason_beside_each_name()
+        {
+            var text = FrameTrust.NotEvidence(new List<VarNode>
+            {
+                new VarNode { Name = "shifted", Value = "no", Readable = false }
+            });
+
+            Assert.Contains("shifted", text);
+            Assert.Contains("not a value", text);
+        }
+
+        /// <summary>
+        /// Said in one line. It is the answer on most frames, and a paragraph saying
+        /// nothing is wrong is a paragraph nobody finishes - but saying nothing at all
+        /// would leave a clean frame looking like a check that never ran.
+        /// </summary>
+        [Fact]
+        public void A_frame_where_everything_read_cleanly_says_so_in_one_line()
         {
             var text = FrameTrust.NotEvidence(new List<VarNode>
             {
                 new VarNode { Name = "total", Value = "220", Type = "int" }
             });
 
-            Assert.NotNull(text);
             Assert.Contains("read cleanly", text);
+            Assert.DoesNotContain("\n", text);
         }
 
         [Fact]
-        public void No_variables_at_all_makes_no_claim_about_them()
+        public void No_values_at_all_makes_no_claim_about_them()
         {
             Assert.Null(FrameTrust.NotEvidence(new List<VarNode>()));
             Assert.Null(FrameTrust.NotEvidence(null));

@@ -126,6 +126,7 @@ namespace VsDbgMcp.Shim.Tools
         [McpServerTool(Name = "frame", ReadOnly = true)]
         [Description("Everything one stop can be told about the frame it is in, in a single call: where it is, the source around the line it stopped on, which binary that code came from and whether the file on disk still matches it, the arguments and locals with their types, 'this' expanded one level, and last a list of the values that are not evidence - a local the optimizer kept nothing for, two names sharing one slot, allocator fill, a container claiming to be empty. On landing somewhere unfamiliar this replaces vars, eval(\"this\") and modules in one call; it shows one frame and no callers, so it pairs with stack rather than replacing it. It reads more than vars does and is meant to be called once at a stop rather than in a loop. Only works in break mode.")]
         public Task<string> Frame(
+            [Description("Thread to report on, from 'threads'. Any thread in the session, including one in another process. Naming one selects it, the way select would, so later reads stay there. Omit for the current thread.")] int? thread = null,
             [Description("Frame index to report on, 0 being the innermost. Omit to use the selected frame, which steps past the pseudo-frame a pause leaves on top of the stack.")] int? frame = null,
             [Description("How many variables per scope to show. Past this the reply says how many there were and which call reads the rest.")] int maxVariables = 40,
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
@@ -133,9 +134,9 @@ namespace VsDbgMcp.Shim.Tools
             => On(instance, ct, async link =>
             {
                 var report = await link.Debug
-                    .FrameAsync(frame, Math.Max(1, Math.Min(maxVariables, 200)), ct).ConfigureAwait(false);
+                    .FrameAsync(thread, frame, Math.Max(1, Math.Min(maxVariables, 200)), ct).ConfigureAwait(false);
                 return Render.Frame(report);
-            }, frame?.ToString());
+            }, thread?.ToString() ?? frame?.ToString());
 
         [McpServerTool(Name = "expand", ReadOnly = true)]
         [Description("Expand one variable or expression by the reference that vars or eval returned, so you pay for only the part of a large structure you actually need. Pass index or key to pick a single element out of a container: the reply carries that element's own reference, so a deeper call never has to repeat the visualizer's expression for it. A container whose visualizer shows no elements is read a second time with the visualizer off, and the reply reports what the raw layout holds - a map that renders as empty while its own count field is not zero is otherwise indistinguishable from an empty one.")]

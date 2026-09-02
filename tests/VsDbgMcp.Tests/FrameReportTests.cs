@@ -29,7 +29,10 @@ namespace VsDbgMcp.Tests
             ThreadId = 57700,
             ProcessName = "DebugTarget.exe",
             Pid = 70632,
-            Locals = new List<VarNode>(locals)
+            Sections = new List<VarSection>
+            {
+                new VarSection { Name = "locals", Nodes = new List<VarNode>(locals) }
+            }
         };
 
         [Fact]
@@ -113,6 +116,22 @@ namespace VsDbgMcp.Tests
             Assert.Contains("none in scope here", text);
         }
 
+        /// <summary>
+        /// An empty list and a list the engine would not produce are different answers,
+        /// and only the reader knows which it gave.
+        /// </summary>
+        [Fact]
+        public void A_scope_the_engine_would_not_list_says_that_instead_of_none_in_scope()
+        {
+            var report = At();
+            report.Sections[0].Note = "the engine would not list variables in this frame";
+
+            var text = Render.Frame(report).Text;
+
+            Assert.Contains("would not list", text);
+            Assert.DoesNotContain("none in scope here", text);
+        }
+
         [Fact]
         public void Every_value_carries_what_is_wrong_with_it()
         {
@@ -149,26 +168,34 @@ namespace VsDbgMcp.Tests
         }
 
         /// <summary>
-        /// A short list is otherwise a complete one - the rule this whole server is
-        /// written around.
+        /// A short list is otherwise a complete one, and the note belongs with the
+        /// section it is about rather than collected at the bottom where it reads as
+        /// belonging to whatever came last.
         /// </summary>
         [Fact]
-        public void A_capped_scope_says_how_many_there_were_and_what_reads_the_rest()
+        public void A_capped_scope_says_how_many_there_were_beside_that_scope()
         {
             var report = At(new VarNode { Name = "a", Value = "1" });
-            report.Capped = "312 locals were in scope and the first 40 are shown; vars(scope: \"locals\") reads the rest.";
+            report.Sections[0].Note = "312 were in scope and the first 40 are shown; " +
+                                     "vars(scope: \"locals\") reads the rest.";
 
             var text = Render.Frame(report).Text;
+            var locals = text.IndexOf("== locals ==");
 
-            Assert.Contains("312 locals were in scope", text);
-            Assert.Contains("vars(scope:", text);
+            Assert.Contains("312 were in scope", text);
+            Assert.True(text.IndexOf("312 were in scope") > locals);
+            Assert.True(text.IndexOf("312 were in scope") < text.IndexOf("== what is not evidence =="));
         }
 
         [Fact]
         public void This_is_shown_when_the_frame_has_one()
         {
             var report = At();
-            report.This = new VarNode { Name = "this", Value = "0x1", Type = "AActor *" };
+            report.Sections.Add(new VarSection
+            {
+                Name = "this",
+                Nodes = new List<VarNode> { new VarNode { Name = "this", Value = "0x1", Type = "AActor *" } }
+            });
 
             var text = Render.Frame(report).Text;
 

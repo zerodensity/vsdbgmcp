@@ -484,6 +484,20 @@ namespace VsDbgMcp.Contracts
         public bool Failed { get; set; }
     }
 
+    /// <summary>One group of a frame's values, and whatever is true of the group.</summary>
+    public sealed class VarSection
+    {
+        public string Name { get; set; }
+        public List<VarNode> Nodes { get; set; } = new List<VarNode>();
+
+        /// <summary>
+        /// What the engine said about reading this group, or what was left out of it.
+        /// An empty group and a group the engine would not enumerate look the same
+        /// without it.
+        /// </summary>
+        public string Note { get; set; }
+    }
+
     /// <summary>One source line, and whether it is the one about to run.</summary>
     public sealed class SourceLine
     {
@@ -534,19 +548,15 @@ namespace VsDbgMcp.Contracts
         /// </summary>
         public string SourceWarning { get; set; }
 
-        /// <summary>Arguments, then locals, then anything else in scope not already named.</summary>
-        public List<VarNode> Arguments { get; set; } = new List<VarNode>();
-        public List<VarNode> Locals { get; set; } = new List<VarNode>();
-
         /// <summary>
-        /// The object the frame is a method on, expanded one level, or null where there
-        /// is none. It is the value most reads are after and the one that reads as an
-        /// ordinary object while holding 0x1.
+        /// The values in scope, in the order they are worth reading: arguments, then the
+        /// locals that are not also arguments, then the object the frame is a method on.
+        ///
+        /// One list rather than a field each, so what was cut or refused travels with
+        /// the section it happened in instead of being collected at the bottom where it
+        /// reads as belonging to whatever came last.
         /// </summary>
-        public VarNode This { get; set; }
-
-        /// <summary>Set when a section stopped short, naming which and why.</summary>
-        public string Capped { get; set; }
+        public List<VarSection> Sections { get; set; } = new List<VarSection>();
 
         /// <summary>Set when nothing could be read at all, saying why and where it can be.</summary>
         public string Refusal { get; set; }
