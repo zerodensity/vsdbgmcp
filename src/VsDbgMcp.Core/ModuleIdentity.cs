@@ -110,7 +110,7 @@ namespace VsDbgMcp
         /// was never deployed passes unmentioned. Saying nothing there costs a reader
         /// less than a claim that turns out to be one slow link.
         /// </summary>
-        static readonly TimeSpan LinkGap = TimeSpan.FromHours(1);
+        public static readonly TimeSpan LinkGap = TimeSpan.FromHours(1);
 
         /// <summary>
         /// What to say when the debuggee loaded an older copy of a module than the build

@@ -1060,60 +1060,88 @@ namespace VsDbgMcp.Host
             report.ProcessName = who.Name;
             report.Pid = who.Pid;
 
-            var capped = new List<string>();
-            report.Arguments = Section(chosen, "args", maxVariables, capped, "arguments");
+            var notes = new List<string>();
+            report.Arguments = Section(chosen, "args", maxVariables, notes, "arguments", null);
 
             // The engine's locals filter hands back the arguments too, so without this
             // every argument is printed twice and counted twice in what is not evidence.
-            report.Locals = Excluding(
-                Section(chosen, "locals", maxVariables, capped, "locals"), report.Arguments);
+            // Taken out before the cap, or the cap counts rows nobody is shown.
+            report.Locals = Section(chosen, "locals", maxVariables, notes, "locals", report.Arguments);
             report.This = ThisObject(chosen);
-            if (capped.Count > 0) report.Capped = string.Join(" ", capped.ToArray());
+            if (notes.Count > 0) report.Capped = string.Join(" ", notes.ToArray());
 
             DescribeWhereTheCodeCameFrom(report);
             return report;
         });
 
         /// <summary>
-        /// One scope's variables, cut to a length a reader will actually read. A cut is
-        /// recorded rather than shown by absence, because a short list is otherwise a
-        /// complete one.
+        /// One scope's variables, cut to a length a reader will actually read.
+        ///
+        /// Whatever the engine said about the reading is carried out with them. It has
+        /// its own account of refusing to enumerate, of stopping partway, and of there
+        /// being more than one read returns, and dropping any of those leaves a short
+        /// list looking like a complete one - which is the failure the scope reader was
+        /// written to stop giving in the first place.
         /// </summary>
-        List<VarNode> Section(ChosenFrame chosen, string scope, int max, List<string> capped, string named)
+        List<VarNode> Section(ChosenFrame chosen, string scope, int max, List<string> notes, string named,
+            List<VarNode> alreadyShown)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
             var read = ExpressionEval.Scope(chosen.Frame, scope, 1, null, true);
-            var nodes = read.Nodes ?? new List<VarNode>();
+            var nodes = Excluding(read.Nodes, alreadyShown);
+
+            // "No locals here" and "the engine would not list them" are different
+            // answers, and only the reader knows which it gave.
+            if (!string.IsNullOrEmpty(read.Message)) notes.Add("The " + named + ": " + read.Message);
 
             if (nodes.Count <= max) return nodes;
 
-            capped.Add(nodes.Count + " " + named + " were in scope and the first " + max +
-                       " are shown; vars(scope: \"" + scope + "\") reads the rest.");
+            notes.Add(nodes.Count + " " + named + " were in scope and the first " + max +
+                      " are shown; vars(scope: \"" + scope + "\") reads the rest.");
             return nodes.GetRange(0, max);
         }
 
         /// <summary>
-        /// The same variables with the ones already shown taken out, matched on name
-        /// because that is what a reader is matching them on.
+        /// Whether the engine's refusal means this frame has no 'this' at all, rather
+        /// than one it could not read.
+        ///
+        /// The compiler's own words are the only thing that separates them, so they are
+        /// matched rather than guessed at. Anything else counts as a 'this' that would
+        /// not read, because showing an unreadable row costs a line and hiding one makes
+        /// a member function look like a free one.
+        /// </summary>
+        static bool HasNoThisAtAll(string error) =>
+            !string.IsNullOrEmpty(error) &&
+            error.IndexOf("nonstatic member function", StringComparison.OrdinalIgnoreCase) >= 0;
+
+        /// <summary>
+        /// The same variables with the ones already shown taken out.
+        ///
+        /// Matched on the name, the type and the value together rather than the name
+        /// alone. A local can shadow a parameter of the same name, and both are in scope
+        /// at once; dropping it on the name would show the parameter's value for the
+        /// variable the running line actually reads. Where all three agree there is
+        /// nothing to tell the two rows apart and nothing is lost by showing one.
         /// </summary>
         static List<VarNode> Excluding(List<VarNode> nodes, List<VarNode> shown)
         {
-            if (nodes == null || shown == null || shown.Count == 0) return nodes ?? new List<VarNode>();
+            if (nodes == null) return new List<VarNode>();
+            if (shown == null || shown.Count == 0) return nodes;
 
             var already = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var node in shown)
-            {
-                if (!string.IsNullOrEmpty(node.Name)) already.Add(node.Name);
-            }
+            foreach (var node in shown) already.Add(Identity(node));
 
             var kept = new List<VarNode>();
             foreach (var node in nodes)
             {
-                if (string.IsNullOrEmpty(node.Name) || !already.Contains(node.Name)) kept.Add(node);
+                if (!already.Contains(Identity(node))) kept.Add(node);
             }
             return kept;
         }
+
+        static string Identity(VarNode node) =>
+            (node.Name ?? "") + " " + (node.Type ?? "") + " " + (node.Value ?? "");
 
         /// <summary>
         /// The object this frame is a method on, one level deep, or null in a free
@@ -1126,7 +1154,23 @@ namespace VsDbgMcp.Host
             ThreadHelper.ThrowIfNotOnUIThread();
 
             var read = Evaluate(chosen, new EvalOptions { Expression = "this" });
-            if (read == null || !read.IsValid) return null;
+            if (read == null) return null;
+
+            // A free function has no 'this' and the engine says exactly that, which is a
+            // different answer from a member function whose 'this' the optimizer kept
+            // nothing for. Left as one case they were the same reply, and the one the
+            // caller most wants to see went out looking like a function with no object.
+            if (!read.IsValid)
+            {
+                if (HasNoThisAtAll(read.Error)) return null;
+
+                return new VarNode
+                {
+                    Name = "this",
+                    Value = read.Error,
+                    Readable = false
+                };
+            }
 
             var node = new VarNode
             {
@@ -1157,17 +1201,40 @@ namespace VsDbgMcp.Host
             ThreadHelper.ThrowIfNotOnUIThread();
 
             var file = report.Frame?.File;
-            var modules = NativeReader.ReadModules(ReadingProgram());
-            report.Module = ModuleNamed(report.Frame?.Module, modules) ?? OwningModule(file, modules);
 
-            if (string.IsNullOrEmpty(file) || report.Frame.Line <= 0) return;
+            // Describing every module means a file time each, and on a process with
+            // several hundred that is the whole cost of this call for one lookup. The
+            // frame already names its module, so only that one is described.
+            report.Module = ModuleTheFrameNamed(report.Frame?.Module);
 
-            var lines = SourceWindow.Read(file);
+            if (report.Module == null)
+            {
+                report.ModuleNote = string.IsNullOrEmpty(report.Frame?.Module)
+                    ? "This frame names no module, so which binary the code came from is not known here. " +
+                      "'modules' lists what the process has loaded."
+                    : "The frame names " + report.Frame.Module + ", which is not among the modules loaded " +
+                      "in the process being read. 'modules' lists those, and 'select' says which process " +
+                      "this is.";
+            }
+
+            if (string.IsNullOrEmpty(file) || report.Frame.Line <= 0)
+            {
+                report.SourceWarning = "This frame reports no source file and line, so there is no code to " +
+                                       "show. That is what a frame without symbols looks like, and what a " +
+                                       "compiler-generated one looks like.";
+                return;
+            }
+
+            var lines = SourceWindow.Read(file, report.Frame.Line + SourceWindow.Radius);
             if (lines == null)
             {
-                report.SourceWarning = "There is no readable file at " + file + " on this machine, so the " +
-                                       "code around this line is not shown. A module built elsewhere names " +
-                                       "paths that do not exist here.";
+                // Missing, locked and refused all arrive here the same way, and naming
+                // one of them would be picking. A module built on another machine is
+                // only the likeliest of the three.
+                report.SourceWarning = file + " could not be read here, so the code around this line is " +
+                                       "not shown. It may not exist on this machine, which is what a " +
+                                       "module built elsewhere looks like, or it may be locked or " +
+                                       "unreadable.";
                 return;
             }
 
@@ -1180,30 +1247,60 @@ namespace VsDbgMcp.Host
                 return;
             }
 
+            // A link stamp and a write time are not the same clock, so which one the
+            // module gave decides the margin as well as the wording. Two seconds is for
+            // two file times; a stamp written when the binary was linked can sit an
+            // hour from the file it produced without anything being wrong.
             var written = SourceFreshness.LastWritten(file);
-            var built = ModuleIdentity.BinaryBuilt(report.Module);
+            var stamp = ModuleIdentity.BuildTime(report.Module?.ImageStamp);
+            var built = stamp ?? SourceFreshness.LastWritten(report.Module?.Path);
+
+            var newer = stamp == null
+                ? SourceFreshness.WrittenAfter(written, built)
+                : SourceFreshness.Later(written, built, ModuleIdentity.LinkGap);
+
             report.SourceWarning = SourceWindow.Warning(
-                SourceFreshness.WrittenAfter(written, built),
-                SourceFreshness.Show(written),
-                SourceFreshness.Show(built));
+                newer, SourceFreshness.Show(written), SourceFreshness.Show(built), stamp != null);
         }
 
-        /// <summary>The loaded module a frame named, matched on the name the engine gave.</summary>
-        static ModuleInfo ModuleNamed(string name, List<ModuleInfo> modules)
+        /// <summary>
+        /// The module the frame said its code is in, described.
+        ///
+        /// Only the one is described. Reading the rest means a file time per module and
+        /// then some, which at several hundred is most of what this call would cost, for
+        /// a lookup the frame has already answered. Guessing from the source file
+        /// instead - which project holds it, which module is named after that project -
+        /// is not done here: naming the wrong binary beside the source and then dating
+        /// the source against it would be wrong twice.
+        /// </summary>
+        ModuleInfo ModuleTheFrameNamed(string name)
         {
+            ThreadHelper.ThrowIfNotOnUIThread();
             if (string.IsNullOrEmpty(name)) return null;
 
-            foreach (var module in modules)
-            {
-                if (string.Equals(module.Name, name, StringComparison.OrdinalIgnoreCase)) return module;
-            }
+            // A frame names its module by full path and the module list names it by file
+            // name, so the two are joined on the file name. Compared as text rather than
+            // through the path helpers, because neither side is promised to be a path
+            // this machine can parse.
+            var wanted = FileNameOf(name);
 
-            // A frame reports the module by path in some engines and by name in others.
-            foreach (var module in modules)
+            foreach (var module in NativeReader.Enumerate(ReadingProgram()))
             {
-                if (PathUtil.SamePath(module.Path, name)) return module;
+                var loaded = NativeReader.NameOf(module);
+                if (string.IsNullOrEmpty(loaded)) continue;
+
+                if (string.Equals(FileNameOf(loaded), wanted, StringComparison.OrdinalIgnoreCase))
+                    return NativeReader.Describe(module);
             }
             return null;
+        }
+
+        /// <summary>Whatever follows the last separator, or the whole text when there is none.</summary>
+        static string FileNameOf(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return "";
+            var cut = path.LastIndexOfAny(new[] { '\\', '/' });
+            return cut < 0 ? path : path.Substring(cut + 1);
         }
 
         public Task<VarsResult> ExpandAsync(string reference, int depth, string typeModule, int? index, string key, CancellationToken ct = default) => UIAsync(() =>
@@ -1296,8 +1393,12 @@ namespace VsDbgMcp.Host
 
             // Symbols belong to a module and a module belongs to a process, so this
             // follows the caller's pick the way modules does. Reading the process that
-            // stopped answered about a different program's copy of the same name.
-            return SymbolLoad.For(ReadingProgram(), module, load);
+            // stopped answered about a different program's copy of the same name, and
+            // the answer says whose it is for the same reason modules does.
+            var program = ReadingProgram();
+            var result = SymbolLoad.For(program, module, load);
+            if (result != null) result.Process = ProcessIdentity.Of(program).Describe();
+            return result;
         });
 
         // ---------------------------------------------------------------- profiling

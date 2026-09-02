@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using VsDbgMcp;
+using VsDbgMcp.Contracts;
 using Xunit;
 
 namespace VsDbgMcp.Tests
@@ -88,24 +89,53 @@ namespace VsDbgMcp.Tests
         }
 
         /// <summary>
-        /// The whole reason this is allowed to print source at all. Two file times are
-        /// what iteration 1 settled on, and the warning has to name what it compared so
-        /// nobody reads it as a checksum.
+        /// The whole reason this is allowed to print source at all. It names both times
+        /// so nobody reads it as a checksum comparison.
         /// </summary>
         [Fact]
-        public void Source_newer_than_the_binary_says_the_lines_may_not_be_what_is_running()
+        public void Source_newer_than_the_binary_names_both_times()
         {
-            var note = SourceWindow.Warning(true, "2026-09-02 10:14", "2026-09-01 18:00");
+            var note = SourceWindow.Warning(true, "2026-09-02 10:14", "2026-09-01 18:00", false);
 
             Assert.Contains("2026-09-02 10:14", note);
             Assert.Contains("2026-09-01 18:00", note);
-            Assert.Contains("not the lines", note);
+        }
+
+        /// <summary>
+        /// A review caught the first wording asserting "these are not the lines the
+        /// process is running" from two file times. A checkout, a stash pop or a save
+        /// over identical text moves an mtime with the bytes unchanged, and every other
+        /// reply in this server hedges the same comparison. Overclaiming here teaches a
+        /// reader to distrust source that is fine.
+        /// </summary>
+        [Fact]
+        public void The_warning_says_it_is_evidence_rather_than_proof()
+        {
+            var note = SourceWindow.Warning(true, "2026-09-02 10:14", "2026-09-01 18:00", false);
+
+            Assert.Contains("may not be", note);
+            Assert.Contains("not proof", note);
+            Assert.DoesNotContain("these are not the lines the process is running", note);
+        }
+
+        /// <summary>
+        /// A link stamp and a write time are not the same clock, and a build made
+        /// reproducible puts a content hash in that field. Saying which one was compared
+        /// is what stops the reply reading like two file times.
+        /// </summary>
+        [Fact]
+        public void A_comparison_against_an_image_stamp_says_that_is_what_it_was()
+        {
+            var note = SourceWindow.Warning(true, "2026-09-02 10:14", "2026-09-01 18:00", true);
+
+            Assert.Contains("stamp", note);
+            Assert.Contains("reproducible", note);
         }
 
         [Fact]
         public void Source_older_than_the_binary_says_nothing()
         {
-            Assert.Null(SourceWindow.Warning(false, "2026-09-01 10:14", "2026-09-01 18:00"));
+            Assert.Null(SourceWindow.Warning(false, "2026-09-01 10:14", "2026-09-01 18:00", false));
         }
 
         /// <summary>
@@ -115,7 +145,7 @@ namespace VsDbgMcp.Tests
         [Fact]
         public void An_unknown_comparison_says_it_could_not_be_checked()
         {
-            var note = SourceWindow.Warning(null, "", "");
+            var note = SourceWindow.Warning(null, "", "", false);
 
             Assert.NotNull(note);
             Assert.Contains("could not", note);

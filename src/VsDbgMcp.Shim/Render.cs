@@ -646,6 +646,7 @@ namespace VsDbgMcp.Shim
             }
 
             Module(sb, r.Module, true);
+            if (!string.IsNullOrEmpty(r.Process)) sb.Append("  in ").AppendLine(r.Process);
 
             if (!string.IsNullOrEmpty(r.Message)) sb.AppendLine(r.Message);
 
@@ -779,10 +780,10 @@ namespace VsDbgMcp.Shim
             sb.AppendLine();
             if (r.Frame != null) sb.AppendLine(Frames(new[] { r.Frame }, r.Frame.Index));
 
+            sb.AppendLine();
+            sb.AppendLine("== module ==");
             if (r.Module != null)
             {
-                sb.AppendLine();
-                sb.AppendLine("== module ==");
                 Module(sb, r.Module, true);
 
                 // Without symbols the engine is naming addresses, not variables, and
@@ -793,11 +794,24 @@ namespace VsDbgMcp.Shim
                                   "whatever the engine could make of it without them. 'symbols' says why.");
                 }
             }
+            else
+            {
+                sb.Append("  ").AppendLine(r.ModuleNote ?? "Not known here.");
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("== source ==");
+
+            // Said before the lines rather than after them. It is the sentence that
+            // decides whether the lines mean anything, and underneath eleven rows of
+            // code it reads as a footnote to the last one.
+            if (!string.IsNullOrEmpty(r.SourceWarning)) sb.Append("  ").AppendLine(r.SourceWarning);
 
             if (r.Source != null && r.Source.Count > 0)
             {
-                sb.AppendLine();
-                sb.AppendLine("== source ==");
+                if (r.Frame != null && !string.IsNullOrEmpty(r.Frame.File))
+                    sb.Append("  ").AppendLine(r.Frame.File);
+
                 foreach (var line in r.Source)
                 {
                     sb.Append(line.IsCurrent ? "> " : "  ");
@@ -806,22 +820,26 @@ namespace VsDbgMcp.Shim
                 }
             }
 
-            if (!string.IsNullOrEmpty(r.SourceWarning)) sb.AppendLine(r.SourceWarning);
-
             var all = new List<VarNode>();
             Section(sb, "arguments", r.Arguments, all);
             Section(sb, "locals", r.Locals, all);
 
             if (r.This != null)
             {
-                sb.AppendLine();
-                sb.AppendLine("== this ==");
-                sb.Append(Vars(new VarsResult { Nodes = new List<VarNode> { r.This } }).Text);
-                sb.AppendLine();
-                all.Add(r.This);
+                Section(sb, "this", new List<VarNode> { r.This }, all);
+
+                if (r.This.Children != null && r.This.Children.Count > 0)
+                {
+                    sb.Append(Vars(new VarsResult { Nodes = r.This.Children }).Text);
+                    sb.AppendLine();
+                }
             }
 
-            if (!string.IsNullOrEmpty(r.Capped)) sb.AppendLine(r.Capped);
+            if (!string.IsNullOrEmpty(r.Capped))
+            {
+                sb.AppendLine();
+                sb.AppendLine(r.Capped);
+            }
 
             var verdict = FrameTrust.NotEvidence(all);
             if (!string.IsNullOrEmpty(verdict))

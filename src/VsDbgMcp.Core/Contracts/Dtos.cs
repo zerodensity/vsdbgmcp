@@ -484,6 +484,14 @@ namespace VsDbgMcp.Contracts
         public bool Failed { get; set; }
     }
 
+    /// <summary>One source line, and whether it is the one about to run.</summary>
+    public sealed class SourceLine
+    {
+        public int Number { get; set; }
+        public string Text { get; set; }
+        public bool IsCurrent { get; set; }
+    }
+
     /// <summary>
     /// Everything one stop can be told about the frame it is in: where it is, the code
     /// there, which binary that code came from, and every value in scope with what is
@@ -509,6 +517,12 @@ namespace VsDbgMcp.Contracts
 
         /// <summary>The module the frame's code is in, or null when it is not known.</summary>
         public ModuleInfo Module { get; set; }
+
+        /// <summary>
+        /// Why there is no module above. An absent section otherwise reads as a frame
+        /// whose binary nobody was curious about, when the tool promised to say.
+        /// </summary>
+        public string ModuleNote { get; set; }
 
         /// <summary>The source around the current line. Empty when there is none to show.</summary>
         public List<SourceLine> Source { get; set; } = new List<SourceLine>();
@@ -658,6 +672,13 @@ namespace VsDbgMcp.Contracts
 
         /// <summary>The module that matched, read after any load attempt. Null when nothing matched.</summary>
         public ModuleInfo Module { get; set; }
+
+        /// <summary>
+        /// The process this answer is about. A module belongs to a process, and a
+        /// session holding a launcher and what it started has two copies of the same
+        /// name, so an answer that does not say whose it is can be read as the other's.
+        /// </summary>
+        public string Process { get; set; }
 
         /// <summary>Every module the query matched, when it matched more than one.</summary>
         public List<string> Candidates { get; set; }

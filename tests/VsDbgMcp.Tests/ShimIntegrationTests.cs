@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
@@ -94,6 +95,40 @@ namespace VsDbgMcp.Tests
             var status = await new LifecycleTools(_sessions).Status(null, CancellationToken.None);
 
             Assert.Contains("m_state = Uploading", status);
+        }
+
+        /// <summary>
+        /// frame gathers more of the reply than any other tool, so the whole path is
+        /// worth one test: the report crosses the pipe as JSON and comes back as the
+        /// text an agent reads, marks and all.
+        /// </summary>
+        [Fact]
+        public async Task A_frame_report_crosses_the_pipe_and_renders_with_its_marks()
+        {
+            _host.NextFrameReport = new FrameReport
+            {
+                Frame = new Frame { Index = 0, Function = "Upload", File = @"D:\repo\main.cpp", Line = 38 },
+                ThreadId = 4242,
+                ProcessName = "DebugTarget.exe",
+                Pid = 70632,
+                Source = new List<SourceLine>
+                {
+                    new SourceLine { Number = 38, Text = "mesh.refCount += 1;", IsCurrent = true }
+                },
+                Locals = new List<VarNode>
+                {
+                    new VarNode { Name = "total", Value = "120", Type = "int" },
+                    new VarNode { Name = "shifted", Value = "no value", Readable = false }
+                }
+            };
+
+            var text = await new InspectionTools(_sessions).Frame(null, 40, null, CancellationToken.None);
+
+            Assert.Contains("thread 4242 in DebugTarget.exe (70632)", text);
+            Assert.Contains(">     38  mesh.refCount += 1;", text);
+            Assert.Contains("total = 120", text);
+            Assert.Contains("not readable here", text);
+            Assert.Contains("== what is not evidence ==", text);
         }
 
         [Fact]

@@ -97,6 +97,58 @@ namespace VsDbgMcp.Tests
             Assert.Empty(marks);
         }
 
+        /// <summary>
+        /// This is the fixture's own mesh, and a review caught it being marked. A struct
+        /// summary that mentions a member which happens to be zero is not a container
+        /// claiming to be empty: this one has a name and a reference count. Marking it
+        /// puts a plainly good value in the one list that has to be believed.
+        /// </summary>
+        [Fact]
+        public void A_struct_with_an_empty_member_is_not_a_container_claiming_to_be_empty()
+        {
+            var marks = FrameTrust.Marks(new VarNode
+            {
+                Name = "mesh",
+                Value = "{name=\"terrain\" vertices={ size=0 } refCount=1 }",
+                Type = "Mesh &",
+                HasChildren = true
+            });
+
+            Assert.Empty(marks);
+        }
+
+        [Fact]
+        public void A_pointer_to_a_struct_with_an_empty_member_is_not_marked_either()
+        {
+            var marks = FrameTrust.Marks(new VarNode
+            {
+                Name = "this",
+                Value = "0x000001f2c4a0 {name=\"terrain\" vertices={ size=0 } refCount=1 }",
+                Type = "Mesh *",
+                HasChildren = true
+            });
+
+            Assert.Empty(marks);
+        }
+
+        /// <summary>
+        /// The container's own count, with nothing else in the summary, is the case the
+        /// mark exists for and has to survive the guard above.
+        /// </summary>
+        [Fact]
+        public void A_container_whose_whole_summary_is_its_own_zero_count_is_still_marked()
+        {
+            var marks = FrameTrust.Marks(new VarNode
+            {
+                Name = "vertices",
+                Value = "{ size=0 }",
+                Type = "std::vector<float>",
+                HasChildren = true
+            });
+
+            Assert.Contains(marks, m => m.Contains("empty"));
+        }
+
         [Fact]
         public void The_summary_lists_only_the_values_that_carry_a_mark()
         {

@@ -1,17 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using VsDbgMcp.Contracts;
 
 namespace VsDbgMcp
 {
-    /// <summary>One source line, and whether it is the one about to run.</summary>
-    public sealed class SourceLine
-    {
-        public int Number { get; set; }
-        public string Text { get; set; }
-        public bool IsCurrent { get; set; }
-    }
-
     /// <summary>
     /// The source around where a frame is stopped.
     ///
@@ -61,12 +54,16 @@ namespace VsDbgMcp
         }
 
         /// <summary>
-        /// The file's lines, or null when there is nothing readable at that path. A path
-        /// from the debug engine can be anything, including something this machine will
-        /// not resolve, and a module built elsewhere routinely names a file that is not
-        /// here at all.
+        /// The file's lines up to <paramref name="upTo"/>, or null when there is nothing
+        /// readable at that path. A path from the debug engine can be anything,
+        /// including something this machine will not resolve, and a module built
+        /// elsewhere routinely names a file that is not here at all.
+        ///
+        /// Reading stops at the last line anyone will be shown. A generated or
+        /// amalgamated source runs to hundreds of thousands of lines, and keeping all of
+        /// them to print eleven is a cost paid on the debugger's UI thread.
         /// </summary>
-        public static List<string> Read(string path)
+        public static List<string> Read(string path, int upTo)
         {
             if (string.IsNullOrWhiteSpace(path)) return null;
 
@@ -76,7 +73,7 @@ namespace VsDbgMcp
                 using (var reader = new StreamReader(path))
                 {
                     string line;
-                    while ((line = reader.ReadLine()) != null) lines.Add(line);
+                    while (lines.Count < upTo && (line = reader.ReadLine()) != null) lines.Add(line);
                 }
                 return lines;
             }
@@ -90,30 +87,47 @@ namespace VsDbgMcp
         /// What to say about whether these lines are the ones running, or null when
         /// there is nothing to say.
         ///
-        /// Two file times, the same pair iteration 1 settled on, and the wording says so
-        /// rather than implying the PDB's checksums were compared.
+        /// Two times, said as two times. A write time moves when nothing in the file
+        /// changed - a checkout, a stash pop, a formatter, a save over identical text -
+        /// so the pair is evidence and never proof, and the wording stops where the
+        /// evidence does. Everywhere else in this server says the same about the same
+        /// comparison; escalating it here would teach a reader to distrust source that
+        /// is fine.
         /// </summary>
         /// <param name="sourceIsNewer">
         /// Whether the file was written after the binary, or null when either time could
         /// not be read.
         /// </param>
-        public static string Warning(bool? sourceIsNewer, string sourceWritten, string binaryBuilt)
+        /// <param name="binaryIsLinkStamp">
+        /// True when the binary's time is the stamp in its image rather than the time
+        /// its file was written. The two are different clocks, which is why they are
+        /// compared at different margins, and the reader is told which one this was.
+        /// </param>
+        public static string Warning(bool? sourceIsNewer, string sourceWritten, string binaryBuilt,
+            bool binaryIsLinkStamp)
         {
             if (sourceIsNewer == false) return null;
 
             if (sourceIsNewer == null)
             {
                 return "Whether this file has been edited since the binary was built could not be " +
-                       "checked here, so these lines are not established as the ones running.";
+                       "checked here, so nothing establishes that these are the lines being run.";
             }
 
+            var which = binaryIsLinkStamp ? "the module's image is stamped " : "its binary was written ";
             var times = string.IsNullOrEmpty(sourceWritten) || string.IsNullOrEmpty(binaryBuilt)
                 ? ""
-                : " (file " + sourceWritten + ", binary " + binaryBuilt + ")";
+                : ": the file was written " + sourceWritten + " and " + which + binaryBuilt;
 
-            return "This file has been written since the module was built" + times +
-                   ", so these are not the lines the process is running. The line numbers the " +
-                   "debugger reports are the binary's; the text beside them is this file's.";
+            return "This file may not be the source the running binary was built from" + times +
+                   ". Two times are not proof the text differs - a checkout or a save over unchanged " +
+                   "text moves one - but the line numbers beside these lines are the binary's, so " +
+                   "rebuild before reading anything into which line is which." +
+                   (binaryIsLinkStamp
+                       ? " The binary's time here is the stamp in its image rather than a file time, " +
+                         "and a build made reproducible puts a hash of the contents in that field, " +
+                         "which is not a time at all."
+                       : "");
         }
 
         static string Shorten(string text)

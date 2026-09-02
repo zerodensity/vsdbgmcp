@@ -36,9 +36,13 @@ namespace VsDbgMcp.Shim
 
             if (node.SameAddressAs != null && node.SameAddressAs.Count > 0)
             {
+                // Which of them the slot currently belongs to is not knowable from here.
+                // An optimized build reusing one slot for several names is the usual
+                // reason, but so is reading a local before the line that declares it,
+                // and naming a cause would be picking one.
                 marks.Add("reads the same address as " + string.Join(", ", node.SameAddressAs.ToArray()) +
-                          " - one slot the optimizer gave to more than one name, so this value may " +
-                          "belong to any of them");
+                          " - one slot with more than one name on it, so this value may belong to " +
+                          "any of them rather than to this one");
             }
 
             foreach (var fill in FillPatterns.Notes(node.Value))
@@ -83,13 +87,65 @@ namespace VsDbgMcp.Shim
         }
 
         /// <summary>
-        /// A summary that claims there is nothing inside, on something that has an inside.
+        /// A summary whose whole content is the claim that there is nothing inside.
         ///
-        /// The children flag is what keeps an int of zero out of this. A scalar has no
-        /// contents to disagree with its summary, and marking every zero in the frame
-        /// would bury the marks that matter.
+        /// The word "whole" is doing the work. Where expand asks this it has the
+        /// visualizer's rows in hand and can see that it produced none; here there are
+        /// no rows to count, so the only safe reading is a summary that says nothing but
+        /// "empty" - "Empty", "{}", "{ size=0 }".
+        ///
+        /// A struct summary mentioning a member that happens to be zero is not that.
+        /// {name="terrain" vertices={ size=0 } refCount=1 } is a mesh with a name and a
+        /// reference count, and marking it would put a value that is plainly fine in the
+        /// one list that has to be believed.
         /// </summary>
-        static bool LooksLikeAnEmptyContainer(VarNode node) =>
-            node.HasChildren && ContainerElement.LooksEmpty(node.Value);
+        static bool LooksLikeAnEmptyContainer(VarNode node)
+        {
+            if (!node.HasChildren) return false;
+            if (!ContainerElement.LooksEmpty(node.Value)) return false;
+
+            return OneFieldOnly(node.Value);
+        }
+
+        /// <summary>
+        /// True when the summary carries at most one named field, which is what tells a
+        /// container's own count from a member of something larger.
+        ///
+        /// The object's own fields are the ones inside its outermost braces. A pointer
+        /// renders as an address and then the braces, so taking the text as it comes
+        /// would find every field nested one level down and count none of them.
+        /// </summary>
+        static bool OneFieldOnly(string value)
+        {
+            var text = Inside(value == null ? "" : value.Trim());
+
+            var fields = 0;
+            var depth = 0;
+            foreach (var c in text)
+            {
+                if (c == '{' || c == '[' || c == '(') depth++;
+                else if (c == '}' || c == ']' || c == ')') depth--;
+                else if (c == '=' && depth == 0) fields++;
+            }
+            return fields <= 1;
+        }
+
+        /// <summary>
+        /// What is between the outermost braces, or the whole text when there are none.
+        /// "Empty" has no braces and is the claim itself.
+        /// </summary>
+        static string Inside(string text)
+        {
+            var open = text.IndexOf('{');
+            if (open < 0) return text;
+
+            var depth = 0;
+            for (var i = open; i < text.Length; i++)
+            {
+                if (text[i] == '{') depth++;
+                else if (text[i] == '}' && --depth == 0) return text.Substring(open + 1, i - open - 1);
+            }
+            return text.Substring(open + 1);
+        }
     }
 }
