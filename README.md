@@ -155,9 +155,11 @@ Notes on a few:
 - **`frame`** — the whole picture of where you are, in one call: the source around the
   line you stopped on, which binary that code came from and whether the file on disk
   still matches it, the arguments and locals, `this` expanded one level, and last the
-  values that may be wrong with the reason for each — a local the optimizer kept nothing
-  for, two names sharing one memory slot, leftover allocator memory, a container claiming
-  to be empty. Each of
+  values that may be wrong with the reason for each. It takes the second reading itself
+  first: a local the scope listing would not read is asked for again by name, and a
+  container claiming to be empty is read with the visualizer off, which is how a vector
+  that is not constructed yet stops reading as one that is empty. Only what will not
+  settle is reported as doubtful, which on most frames is nothing. Each of
   those is readable one call at a time already; what this adds is that they are read at
   the same stop, and that the module and the source are read at all, which nobody does
   until a value has already misled them. Call it on landing somewhere unfamiliar rather

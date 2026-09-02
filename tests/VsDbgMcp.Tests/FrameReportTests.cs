@@ -152,11 +152,12 @@ namespace VsDbgMcp.Tests
         {
             var text = Render.Frame(At(
                 new VarNode { Name = "total", Value = "220", Type = "int" },
-                new VarNode { Name = "shifted", Value = "no", Readable = false })).Text;
+                new VarNode { Name = "folded", Value = "-1", SameAddressAs = new List<string> { "carried" } })).Text;
 
-            Assert.Contains("== values that may be wrong ==", text);
-            Assert.Contains("shifted", text.Substring(text.IndexOf("== values that may be wrong ==")));
-            Assert.DoesNotContain("total", text.Substring(text.IndexOf("== values that may be wrong ==")));
+            var list = text.Substring(text.IndexOf("== values that may be wrong =="));
+
+            Assert.Contains("folded", list);
+            Assert.DoesNotContain("total", list);
         }
 
         [Fact]

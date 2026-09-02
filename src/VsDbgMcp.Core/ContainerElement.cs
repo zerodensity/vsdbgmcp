@@ -193,6 +193,45 @@ namespace VsDbgMcp
         }
 
         /// <summary>
+        /// Why the raw layout does not settle that a container really is empty, or null
+        /// when it does.
+        ///
+        /// Settled runs one way only. Every count-looking field reading zero, with the
+        /// whole layout read, is a container that is empty: the visualizer said so and
+        /// the memory agrees, and there is nothing left to check. The other direction is
+        /// not available, because a capacity is spelled the same way as a size - an empty
+        /// deque keeps _Mapsize at eight and an empty TSet keeps an allocated hash - so a
+        /// field that is not zero is a reason to look rather than proof of contents.
+        /// </summary>
+        public static string WhyNotSettledEmpty(IReadOnlyList<VarNode> rawRows)
+        {
+            if (rawRows == null || rawRows.Count == 0)
+                return "reading it raw produced no fields either, so nothing here tells an empty " +
+                       "container from a visualizer that is wrong about one";
+
+            var unread = Unread(rawRows);
+            if (unread > 0)
+            {
+                return unread + " of its raw rows hold contents that were not read this deep, so a " +
+                       "count kept below them would not have been seen";
+            }
+
+            var counts = CountFields(rawRows);
+            if (counts.Count == 0)
+                return "nothing in its raw layout reads like a count, so the visualizer's claim stands alone";
+
+            var loud = new List<string>();
+            foreach (var field in counts)
+            {
+                if (!IsZero(field.Value)) loud.Add(field.Key + " = " + field.Value);
+            }
+            if (loud.Count == 0) return null;
+
+            return "its raw layout has " + string.Join(", ", loud.ToArray()) +
+                   ", which may be a size or may be a capacity; expand reads it";
+        }
+
+        /// <summary>
         /// What to say when a container rendered as empty and was read again with the ",!"
         /// specifier, which turns the visualizer off.
         ///

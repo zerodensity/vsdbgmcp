@@ -26,21 +26,18 @@ namespace VsDbgMcp.Shim
         {
             if (node == null) return null;
 
-            if (!node.Readable)
-                return "not readable; the text beside it is the engine's reason, not a value";
-
+            // A value nothing could read, and one holding an allocator's fill, are both
+            // settled facts rather than doubts: there is no truth here to be wrong
+            // about, and the row already says so. Only a value that is shown and might
+            // not be this variable's belongs in a list of what may be wrong.
             if (node.SameAddressAs != null && node.SameAddressAs.Count > 0)
             {
                 return "shares one memory slot with " + string.Join(", ", node.SameAddressAs.ToArray()) +
                        ", so the number shown may belong to one of those instead";
             }
 
-            if (node.HasChildren && ContainerElement.SaysOnlyEmpty(node.Value))
-                return "claims to be empty, which visualizers get wrong; expand to check the raw layout";
-
-            var fills = FillPatterns.Notes(node.Value);
-            if (fills.Count > 0)
-                return string.Join("; ", fills.ToArray()) + ", so this is leftover memory rather than a value";
+            if (!node.Settled && node.HasChildren && ContainerElement.SaysOnlyEmpty(node.Value))
+                return "claims to be empty and a raw read did not settle it; expand to look";
 
             return null;
         }

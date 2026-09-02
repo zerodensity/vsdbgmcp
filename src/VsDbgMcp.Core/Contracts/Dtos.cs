@@ -586,6 +586,13 @@ namespace VsDbgMcp.Contracts
         public List<string> SameAddressAs { get; set; }
 
         /// <summary>
+        /// True once a second reading settled a doubt about this value, so it is no
+        /// longer one to check. Set by the frame report, which is the only thing that
+        /// takes those readings.
+        /// </summary>
+        public bool Settled { get; set; }
+
+        /// <summary>
         /// What went wrong or went unread while this node's children were being listed.
         /// A short list is otherwise a complete one, whether the engine refused, gave up
         /// partway, or there was simply more than one read returns.

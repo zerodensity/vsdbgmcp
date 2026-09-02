@@ -741,8 +741,10 @@ namespace VsDbgMcp.Shim
 
                 // A container whose whole summary is "empty" is the one wrong answer a
                 // reader cannot see, because it reads as an answer. Said here rather
-                // than in one tool, so it is said wherever a value is printed.
-                if (n.HasChildren && ContainerElement.SaysOnlyEmpty(n.Value))
+                // than in one tool, so it is said wherever a value is printed - but not
+                // where something has already gone and looked, which leaves its own note
+                // and would otherwise be followed by advice to go and look again.
+                if (n.HasChildren && !n.Settled && ContainerElement.SaysOnlyEmpty(n.Value))
                     sb.Append("  -- says empty; expand reads the raw layout behind it");
 
                 if (!string.IsNullOrEmpty(n.Note)) sb.Append("  -- ").Append(n.Note);

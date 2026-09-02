@@ -21,21 +21,20 @@ namespace VsDbgMcp.Tests
         }
 
         /// <summary>
-        /// The engine says it could not read this, which in an optimized frame means the
-        /// compiler kept nothing. The text beside it is the engine's reason, and reading
-        /// it as a value is the mistake worth naming.
+        /// A value nothing could read is a settled fact, not a doubt: there is no truth
+        /// here to be wrong about, and the row already says it is not readable. Listing
+        /// it among values that may be wrong states it weaker than it is and repeats a
+        /// line the reader has already had.
         /// </summary>
         [Fact]
-        public void A_value_the_compiler_kept_nothing_for_says_the_text_is_not_a_value()
+        public void A_value_nothing_could_read_is_a_fact_rather_than_a_doubt()
         {
-            var reason = FrameTrust.Reason(new VarNode
+            Assert.Null(FrameTrust.Reason(new VarNode
             {
                 Name = "shifted",
                 Value = "the debugger cannot read this",
                 Readable = false
-            });
-
-            Assert.Contains("not a value", reason);
+            }));
         }
 
         [Fact]
@@ -52,18 +51,20 @@ namespace VsDbgMcp.Tests
             Assert.Contains("carried", reason);
         }
 
+        /// <summary>
+        /// 0xdd is the answer, not a reason to doubt one. The row names the pattern; a
+        /// list of what may be wrong is for values that are shown and might not be this
+        /// variable's.
+        /// </summary>
         [Fact]
-        public void An_allocator_fill_pattern_says_the_memory_is_leftover()
+        public void An_allocator_fill_pattern_is_a_fact_rather_than_a_doubt()
         {
-            var reason = FrameTrust.Reason(new VarNode
+            Assert.Null(FrameTrust.Reason(new VarNode
             {
                 Name = "state",
                 Value = "0xdddddddddddddddd",
                 Type = "void *"
-            });
-
-            Assert.Contains("0xdd", reason);
-            Assert.Contains("leftover memory", reason);
+            }));
         }
 
         /// <summary>
@@ -71,7 +72,7 @@ namespace VsDbgMcp.Tests
         /// wrong answer a reader cannot see, because it reads as an answer.
         /// </summary>
         [Fact]
-        public void A_container_claiming_to_be_empty_is_sent_for_a_second_reading()
+        public void A_container_claiming_to_be_empty_that_no_raw_read_settled_keeps_the_doubt()
         {
             var reason = FrameTrust.Reason(new VarNode
             {
@@ -82,6 +83,24 @@ namespace VsDbgMcp.Tests
             });
 
             Assert.Contains("expand", reason);
+        }
+
+        /// <summary>
+        /// The whole point of taking the second reading. A container the raw layout
+        /// agreed was empty is empty, and saying anything about it afterwards asks the
+        /// reader to check something already checked.
+        /// </summary>
+        [Fact]
+        public void A_container_a_raw_read_confirmed_empty_says_nothing()
+        {
+            Assert.Null(FrameTrust.Reason(new VarNode
+            {
+                Name = "workers",
+                Value = "{ size=0 }",
+                Type = "std::vector<std::thread>",
+                HasChildren = true,
+                Settled = true
+            }));
         }
 
         [Fact]
@@ -140,12 +159,10 @@ namespace VsDbgMcp.Tests
             var text = FrameTrust.MayBeWrong(new List<VarNode>
             {
                 new VarNode { Name = "total", Value = "220", Type = "int" },
-                new VarNode { Name = "shifted", Value = "no", Readable = false },
-                new VarNode { Name = "state", Value = "0xdddddddddddddddd" }
+                new VarNode { Name = "folded", Value = "-1", SameAddressAs = new List<string> { "carried" } }
             });
 
-            Assert.Contains("shifted", text);
-            Assert.Contains("state", text);
+            Assert.Contains("folded", text);
             Assert.DoesNotContain("total", text);
         }
 
@@ -158,11 +175,11 @@ namespace VsDbgMcp.Tests
         {
             var text = FrameTrust.MayBeWrong(new List<VarNode>
             {
-                new VarNode { Name = "shifted", Value = "no", Readable = false }
+                new VarNode { Name = "folded", Value = "-1", SameAddressAs = new List<string> { "carried" } }
             });
 
-            Assert.Contains("shifted", text);
-            Assert.Contains("not a value", text);
+            Assert.Contains("folded", text);
+            Assert.Contains("may belong to one of those", text);
         }
 
         /// <summary>

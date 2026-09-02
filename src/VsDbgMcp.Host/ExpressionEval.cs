@@ -397,6 +397,121 @@ namespace VsDbgMcp.Host
         }
 
         /// <summary>
+        /// Takes the second reading a doubtful value needs, so the caller is handed an
+        /// answer rather than a doubt to chase.
+        ///
+        /// Two doubts can be settled from here. A variable the scope listing would not
+        /// read is asked for again by name, because listing a scope and evaluating an
+        /// expression are different paths through the engine and the second sometimes
+        /// answers where the first gave up. A container claiming to be empty is read
+        /// again with the visualizer off, which settles the common case outright.
+        ///
+        /// Whatever cannot be settled is left as it was, for the caller to report.
+        /// </summary>
+        public static void Settle(IDebugStackFrame2 frame, VarNode node)
+        {
+            if (node == null || frame == null) return;
+            if (frame.GetExpressionContext(out var context) != VSConstants.S_OK || context == null) return;
+
+            if (!node.Readable && !string.IsNullOrEmpty(node.Name)) ReadItDirectly(context, node);
+            if (node.HasChildren && ContainerElement.SaysOnlyEmpty(node.Value)) CheckItIsReallyEmpty(context, node);
+        }
+
+        /// <summary>
+        /// Asks the engine for the variable by name, which is a different path from the
+        /// one that would not list it. Where that answers, the value was there all along
+        /// and the listing was the limit; where it does not, two paths agree there is
+        /// nothing to read and the caller can stop wondering.
+        /// </summary>
+        static void ReadItDirectly(IDebugExpressionContext2 context, VarNode node)
+        {
+            var expression = Parse(context, node.Name, null, null, false, out _);
+            if (expression == null)
+            {
+                node.Note = Also(node.Note, "asking for it by name did not work either");
+                return;
+            }
+
+            if (expression.EvaluateSync(enum_EVALFLAGS.EVAL_NOSIDEEFFECTS | enum_EVALFLAGS.EVAL_NOFUNCEVAL,
+                    5000, null, out var property) != VSConstants.S_OK || property == null ||
+                !ReadInfo(property, out var info))
+            {
+                node.Note = Also(node.Note, "asking for it by name did not work either");
+                return;
+            }
+
+            node.Value = info.bstrValue;
+            node.Type = string.IsNullOrEmpty(info.bstrType) ? node.Type : info.bstrType;
+            node.Readable = true;
+            node.Settled = true;
+            node.Note = Also(node.Note, "read by asking for it by name; the scope listing would not");
+        }
+
+        /// <summary>
+        /// Reads the container again with the visualizer off and settles it where the raw
+        /// layout can. Empty and confirmed empty are the same answer and nothing is said
+        /// about it; anything else keeps the doubt and says what the raw layout held.
+        /// </summary>
+        static void CheckItIsReallyEmpty(IDebugExpressionContext2 context, VarNode node)
+        {
+            var reference = string.IsNullOrEmpty(node.Ref) ? node.Name : node.Ref;
+            if (string.IsNullOrEmpty(reference)) return;
+
+            var rows = RawRows(context, reference, null, out var why, out _);
+            if (rows == null)
+            {
+                node.Note = Also(node.Note, "reading it raw did not work: " + why);
+                return;
+            }
+
+            // An object that has not been constructed yet, or has been freed, still has
+            // a summary and the summary still says "empty" - which is a plausible answer
+            // and the wrong one. The fill the allocator left behind settles it outright,
+            // and is worth far more than the doubt it replaces.
+            var fill = FillIn(rows);
+            if (fill != null)
+            {
+                node.Settled = true;
+                node.Note = Also(node.Note,
+                    "not empty - not constructed: its raw layout is " + fill +
+                    ", so the summary describes memory the program has not written");
+                return;
+            }
+
+            var unsettled = ContainerElement.WhyNotSettledEmpty(rows);
+            if (unsettled == null)
+            {
+                node.Settled = true;
+                return;
+            }
+
+            node.Note = Also(node.Note, unsettled);
+        }
+
+        /// <summary>
+        /// The allocator fill the raw layout is made of, or null when it is made of
+        /// values. Only the fields themselves are read: a summary further up repeats
+        /// what its children hold, so testing those too would find the same fill twice.
+        /// </summary>
+        static string FillIn(IReadOnlyList<VarNode> rows)
+        {
+            if (rows == null) return null;
+
+            foreach (var row in rows)
+            {
+                if (row.Children == null || row.Children.Count == 0)
+                {
+                    var notes = FillPatterns.Notes(row.Value);
+                    if (notes.Count > 0) return notes[0];
+                }
+
+                var deeper = FillIn(row.Children);
+                if (deeper != null) return deeper;
+            }
+            return null;
+        }
+
+        /// <summary>
         /// The same reference read with the visualizer turned off, or null when that read
         /// would not run - which is a third answer and not an empty one.
         /// </summary>

@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 
-namespace VsDbgMcp.Shim
+namespace VsDbgMcp
 {
     /// <summary>
     /// Allocators write recognisable bytes over memory they hand out and memory they take

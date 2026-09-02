@@ -20,6 +20,16 @@
   one tool. A summary that merely mentions a member which happens to be zero is left
   alone: a struct with a name, a reference count and one empty vector inside it is not a
   container claiming to be empty.
+- `frame` takes the second reading itself rather than handing back a doubt to chase. A
+  variable the scope listing would not read is asked for again by name, which is a
+  different path through the engine and sometimes answers. A container claiming to be
+  empty is read again with the visualizer off: where its raw layout is allocator fill the
+  answer is that the object is not constructed at all, which is a plausible summary and
+  the wrong one. Only what will not settle is reported as a value that may be wrong, and
+  on most frames that is nothing.
+- Allocator fill and a value nothing could read are stated as facts on their own rows
+  rather than listed as values that may be wrong. There is no truth there to be wrong
+  about, and saying "may be" is weaker than what is known.
 - `frame` takes a thread, so reporting on a worker does not need a separate `select`.
 - `symbols` follows `select` the way `modules` and `eval` do. A module belongs to a
   process, and in a session holding a launcher and what it started it used to report on

@@ -1095,6 +1095,14 @@ namespace VsDbgMcp.Host
                 });
             }
 
+            // Anything doubtful gets its second reading here, so the reply carries an
+            // answer rather than a list of things for the caller to go and check. What
+            // will not settle keeps its doubt and is reported.
+            foreach (var section in report.Sections)
+            {
+                foreach (var node in section.Nodes) ExpressionEval.Settle(chosen.Frame, node);
+            }
+
             DescribeWhereTheCodeCameFrom(report);
             return report;
         });
