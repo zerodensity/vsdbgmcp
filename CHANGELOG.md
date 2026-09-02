@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0
 
 - **`frame`**, a new tool: everything one stop can be told about the frame it is in, in
   a single call. Where it is, the source around the line it stopped on, which binary that
