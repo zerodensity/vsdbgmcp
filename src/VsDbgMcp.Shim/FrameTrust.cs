@@ -4,7 +4,7 @@ using VsDbgMcp.Contracts;
 namespace VsDbgMcp.Shim
 {
     /// <summary>
-    /// Which of a frame's values are evidence and which are not.
+    /// Which of a frame's values may not be what they look like.
     ///
     /// Every fact here is already against its own value in the list above, in a few
     /// words. Nobody scanning forty rows sees them there, so they are gathered once at
@@ -31,25 +31,26 @@ namespace VsDbgMcp.Shim
 
             if (node.SameAddressAs != null && node.SameAddressAs.Count > 0)
             {
-                return "shares a slot with " + string.Join(", ", node.SameAddressAs.ToArray()) +
-                       "; the value may be any of theirs";
+                return "shares one memory slot with " + string.Join(", ", node.SameAddressAs.ToArray()) +
+                       ", so the number shown may belong to one of those instead";
             }
 
             if (node.HasChildren && ContainerElement.SaysOnlyEmpty(node.Value))
-                return "says empty; expand reads the raw layout, where a full one shows";
+                return "claims to be empty, which visualizers get wrong; expand to check the raw layout";
 
             var fills = FillPatterns.Notes(node.Value);
-            if (fills.Count > 0) return string.Join("; ", fills.ToArray()) + "; not live data";
+            if (fills.Count > 0)
+                return string.Join("; ", fills.ToArray()) + ", so this is leftover memory rather than a value";
 
             return null;
         }
 
         /// <summary>
-        /// The closing list: every value with something against it, and what. Null when
-        /// there were no values to judge, because a frame with none is not a frame whose
-        /// values read cleanly.
+        /// The closing list: every value that may not be what it looks like, and why.
+        /// Null when there were no values to judge, because a frame with none is not a
+        /// frame whose values read cleanly.
         /// </summary>
-        public static string NotEvidence(IReadOnlyList<VarNode> nodes)
+        public static string MayBeWrong(IReadOnlyList<VarNode> nodes)
         {
             if (nodes == null || nodes.Count == 0) return null;
 

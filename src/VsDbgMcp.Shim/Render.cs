@@ -850,8 +850,8 @@ namespace VsDbgMcp.Shim
             }
 
             sb.AppendLine();
-            sb.AppendLine("== suspect values ==");
-            sb.AppendLine(FrameTrust.NotEvidence(all) ?? "  nothing was read, so nothing was judged.");
+            sb.AppendLine("== values that may be wrong ==");
+            sb.AppendLine(FrameTrust.MayBeWrong(all) ?? "  nothing was read, so nothing was judged.");
 
             return sb.ToString().TrimEnd();
         }

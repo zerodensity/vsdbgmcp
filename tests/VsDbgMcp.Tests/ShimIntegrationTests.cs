@@ -135,7 +135,7 @@ namespace VsDbgMcp.Tests
             Assert.Contains(">     38  mesh.refCount += 1;", text);
             Assert.Contains("total = 120", text);
             Assert.Contains("not readable here", text);
-            Assert.Contains("== suspect values ==", text);
+            Assert.Contains("== values that may be wrong ==", text);
         }
 
         [Fact]

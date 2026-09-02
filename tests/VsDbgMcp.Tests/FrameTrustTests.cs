@@ -6,7 +6,7 @@ using Xunit;
 namespace VsDbgMcp.Tests
 {
     /// <summary>
-    /// Which of a frame's values are evidence and which are not.
+    /// Which of a frame's values may not be what they look like.
     ///
     /// The row above already carries each fact in a few words. This decides which values
     /// are worth naming again at the end, and what to do about each, because nobody
@@ -53,7 +53,7 @@ namespace VsDbgMcp.Tests
         }
 
         [Fact]
-        public void An_allocator_fill_pattern_says_the_value_is_not_live_data()
+        public void An_allocator_fill_pattern_says_the_memory_is_leftover()
         {
             var reason = FrameTrust.Reason(new VarNode
             {
@@ -63,7 +63,7 @@ namespace VsDbgMcp.Tests
             });
 
             Assert.Contains("0xdd", reason);
-            Assert.Contains("not live data", reason);
+            Assert.Contains("leftover memory", reason);
         }
 
         /// <summary>
@@ -137,7 +137,7 @@ namespace VsDbgMcp.Tests
         [Fact]
         public void The_closing_list_names_only_the_values_with_something_against_them()
         {
-            var text = FrameTrust.NotEvidence(new List<VarNode>
+            var text = FrameTrust.MayBeWrong(new List<VarNode>
             {
                 new VarNode { Name = "total", Value = "220", Type = "int" },
                 new VarNode { Name = "shifted", Value = "no", Readable = false },
@@ -156,7 +156,7 @@ namespace VsDbgMcp.Tests
         [Fact]
         public void The_closing_list_carries_the_reason_beside_each_name()
         {
-            var text = FrameTrust.NotEvidence(new List<VarNode>
+            var text = FrameTrust.MayBeWrong(new List<VarNode>
             {
                 new VarNode { Name = "shifted", Value = "no", Readable = false }
             });
@@ -173,7 +173,7 @@ namespace VsDbgMcp.Tests
         [Fact]
         public void A_frame_where_everything_read_cleanly_says_so_in_one_line()
         {
-            var text = FrameTrust.NotEvidence(new List<VarNode>
+            var text = FrameTrust.MayBeWrong(new List<VarNode>
             {
                 new VarNode { Name = "total", Value = "220", Type = "int" }
             });
@@ -185,8 +185,8 @@ namespace VsDbgMcp.Tests
         [Fact]
         public void No_values_at_all_makes_no_claim_about_them()
         {
-            Assert.Null(FrameTrust.NotEvidence(new List<VarNode>()));
-            Assert.Null(FrameTrust.NotEvidence(null));
+            Assert.Null(FrameTrust.MayBeWrong(new List<VarNode>()));
+            Assert.Null(FrameTrust.MayBeWrong(null));
         }
     }
 }
