@@ -27,19 +27,19 @@ namespace VsDbgMcp.Shim
             if (node == null) return null;
 
             if (!node.Readable)
-                return "the engine kept nothing to read here; the text beside it is its reason, not a value";
+                return "not readable; the text beside it is the engine's reason, not a value";
 
             if (node.SameAddressAs != null && node.SameAddressAs.Count > 0)
             {
-                return "shares one slot with " + string.Join(", ", node.SameAddressAs.ToArray()) +
-                       ", so the value may belong to any of them";
+                return "shares a slot with " + string.Join(", ", node.SameAddressAs.ToArray()) +
+                       "; the value may be any of theirs";
             }
 
             if (node.HasChildren && ContainerElement.SaysOnlyEmpty(node.Value))
-                return "says it is empty; expand reads the raw layout, which is where a full one shows";
+                return "says empty; expand reads the raw layout, where a full one shows";
 
             var fills = FillPatterns.Notes(node.Value);
-            if (fills.Count > 0) return string.Join("; ", fills.ToArray()) + ", so this is not live data";
+            if (fills.Count > 0) return string.Join("; ", fills.ToArray()) + "; not live data";
 
             return null;
         }
@@ -68,11 +68,9 @@ namespace VsDbgMcp.Shim
                 lines.Add("  " + (node.Name ?? "").PadRight(width) + "  " + reason);
             }
 
-            // Said in one line, because it is the answer on most frames and a paragraph
-            // saying nothing is wrong is a paragraph nobody finishes. Said at all,
-            // because a missing section reads as a check that never ran.
-            if (lines.Count == 0)
-                return "  nothing: every value above read cleanly.";
+            // One line, because it is the answer on most frames. Said at all, because a
+            // missing section reads as a check that never ran.
+            if (lines.Count == 0) return "  none - every value above read cleanly.";
 
             return string.Join("\n", lines.ToArray());
         }

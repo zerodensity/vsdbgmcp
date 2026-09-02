@@ -743,7 +743,7 @@ namespace VsDbgMcp.Shim
                 // reader cannot see, because it reads as an answer. Said here rather
                 // than in one tool, so it is said wherever a value is printed.
                 if (n.HasChildren && ContainerElement.SaysOnlyEmpty(n.Value))
-                    sb.Append("  -- says it is empty; expand reads the raw layout behind it");
+                    sb.Append("  -- says empty; expand reads the raw layout behind it");
 
                 if (!string.IsNullOrEmpty(n.Note)) sb.Append("  -- ").Append(n.Note);
 
@@ -850,7 +850,7 @@ namespace VsDbgMcp.Shim
             }
 
             sb.AppendLine();
-            sb.AppendLine("== what is not evidence ==");
+            sb.AppendLine("== suspect values ==");
             sb.AppendLine(FrameTrust.NotEvidence(all) ?? "  nothing was read, so nothing was judged.");
 
             return sb.ToString().TrimEnd();

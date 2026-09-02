@@ -154,9 +154,9 @@ Notes on a few:
   a wrong answer the tool used to hand over.
 - **`frame`** — the whole picture of where you are, in one call: the source around the
   line you stopped on, which binary that code came from and whether the file on disk
-  still matches it, the arguments and locals, `this` expanded one level, and last a list
-  of the values that are *not* evidence — a local the optimizer kept nothing for, two
-  names sharing one slot, allocator fill, a container claiming to be empty. Each of
+  still matches it, the arguments and locals, `this` expanded one level, and last the
+  suspect values with what is wrong with each — a local the optimizer kept nothing for,
+  two names sharing one slot, allocator fill, a container claiming to be empty. Each of
   those is readable one call at a time already; what this adds is that they are read at
   the same stop, and that the module and the source are read at all, which nobody does
   until a value has already misled them. Call it on landing somewhere unfamiliar rather

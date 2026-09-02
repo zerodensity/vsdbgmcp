@@ -154,9 +154,9 @@ namespace VsDbgMcp.Tests
                 new VarNode { Name = "total", Value = "220", Type = "int" },
                 new VarNode { Name = "shifted", Value = "no", Readable = false })).Text;
 
-            Assert.Contains("== what is not evidence ==", text);
-            Assert.Contains("shifted", text.Substring(text.IndexOf("== what is not evidence ==")));
-            Assert.DoesNotContain("total", text.Substring(text.IndexOf("== what is not evidence ==")));
+            Assert.Contains("== suspect values ==", text);
+            Assert.Contains("shifted", text.Substring(text.IndexOf("== suspect values ==")));
+            Assert.DoesNotContain("total", text.Substring(text.IndexOf("== suspect values ==")));
         }
 
         [Fact]
@@ -184,7 +184,7 @@ namespace VsDbgMcp.Tests
 
             Assert.Contains("312 were in scope", text);
             Assert.True(text.IndexOf("312 were in scope") > locals);
-            Assert.True(text.IndexOf("312 were in scope") < text.IndexOf("== what is not evidence =="));
+            Assert.True(text.IndexOf("312 were in scope") < text.IndexOf("== suspect values =="));
         }
 
         [Fact]
