@@ -129,7 +129,7 @@ connections, and anything that went wrong inside the extension.
 
 ## Tools
 
-50 of them.
+51 of them.
 
 | | |
 |---|---|
@@ -137,7 +137,7 @@ connections, and anything that went wrong inside the extension.
 | **lifecycle** | `status` `launch` `attach` `detach` `stop` `restart` `processes` `dump_open` |
 | **execution** | `wait` `go` `pause` `step` `run_to` `set_next` |
 | **breakpoints** | `bp_set` `bp_list` `bp_remove` `bp_enable` `trace_read` `exceptions_set` |
-| **inspection** | `threads` `stack` `select` `freeze` `eval` `vars` `expand` `watch_set` `memory` `registers` `disasm` `modules` `symbols` `scratch` `scratch_free` |
+| **inspection** | `threads` `stack` `select` `freeze` `frame` `eval` `vars` `expand` `watch_set` `memory` `registers` `disasm` `modules` `symbols` `scratch` `scratch_free` |
 | **profiling** | `profile_start` `profile_stop` `profile_report` |
 | **evidence** | `triage` `capture` |
 | **debuggee I/O** | `console_read` `console_send` `output` |
@@ -152,6 +152,15 @@ Notes on a few:
   so at once instead of sitting out the timeout, because a stop cannot arrive from a
   program that is not running and reading that timeout as "this line is never reached" is
   a wrong answer the tool used to hand over.
+- **`frame`** — the whole picture of where you are, in one call: the source around the
+  line you stopped on, which binary that code came from and whether the file on disk
+  still matches it, the arguments and locals, `this` expanded one level, and last a list
+  of the values that are *not* evidence — a local the optimizer kept nothing for, two
+  names sharing one slot, allocator fill, a container claiming to be empty. Each of
+  those is readable one call at a time already; what this adds is that they are read at
+  the same stop, and that the module and the source are read at all, which nobody does
+  until a value has already misled them. Call it on landing somewhere unfamiliar rather
+  than in a loop.
 - **`eval`** — refuses to call functions unless `allowSideEffects` is passed, because the
   native evaluator really runs them and an agent inspecting `v.size()` should not change
   the program by accident. Format specifiers go in `format`, not spliced into the
@@ -243,7 +252,7 @@ Studio, since the VSIX packaging tasks are .NET Framework assemblies.
 
 ## Status
 
-495 automated tests cover routing, discovery, the event bus, and the whole shim path —
+526 automated tests cover routing, discovery, the event bus, and the whole shim path —
 discovery file, named pipe, JSON-RPC, rendering — against a stand-in for the extension,
 plus the pure decisions: which expression forms to try against a module, which values are
 allocator fill, whether a source file outran its binary, whether a module was deployed

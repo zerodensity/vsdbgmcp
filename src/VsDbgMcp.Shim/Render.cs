@@ -755,6 +755,118 @@ namespace VsDbgMcp.Shim
             }
         }
 
+        /// <summary>
+        /// The whole picture of one frame, in the order somebody forms it: where they
+        /// are, the code there, which binary it came from, then the values - and last,
+        /// the values not to believe.
+        ///
+        /// The closing list is the part that earns the call. Every mark on it is also
+        /// against its own value above, and nobody reading forty rows sees them there.
+        /// </summary>
+        public static Reply Frame(FrameReport r)
+        {
+            if (r == null) return Reply.Bad("No frame.");
+            if (!string.IsNullOrEmpty(r.Refusal)) return Reply.Bad(r.Refusal);
+
+            var sb = new StringBuilder();
+
+            if (!string.IsNullOrEmpty(r.FrameNote)) sb.AppendLine(r.FrameNote);
+
+            sb.Append("thread ").Append(r.ThreadId);
+            var process = Process(r.ProcessName, r.Pid);
+            if (!string.IsNullOrEmpty(process)) sb.Append(" in ").Append(process);
+            if (r.ThreadWasSelected) sb.Append(" (selected)");
+            sb.AppendLine();
+            if (r.Frame != null) sb.AppendLine(Frames(new[] { r.Frame }, r.Frame.Index));
+
+            if (r.Module != null)
+            {
+                sb.AppendLine();
+                sb.AppendLine("== module ==");
+                Module(sb, r.Module, true);
+
+                // Without symbols the engine is naming addresses, not variables, and
+                // everything below is a guess wearing a value's clothes.
+                if (!r.Module.SymbolsLoaded)
+                {
+                    sb.AppendLine("  This module has no symbols loaded, so the names and values below are " +
+                                  "whatever the engine could make of it without them. 'symbols' says why.");
+                }
+            }
+
+            if (r.Source != null && r.Source.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("== source ==");
+                foreach (var line in r.Source)
+                {
+                    sb.Append(line.IsCurrent ? "> " : "  ");
+                    sb.Append(line.Number.ToString(CultureInfo.InvariantCulture).PadLeft(6)).Append("  ");
+                    sb.AppendLine(line.Text);
+                }
+            }
+
+            if (!string.IsNullOrEmpty(r.SourceWarning)) sb.AppendLine(r.SourceWarning);
+
+            var all = new List<VarNode>();
+            Section(sb, "arguments", r.Arguments, all);
+            Section(sb, "locals", r.Locals, all);
+
+            if (r.This != null)
+            {
+                sb.AppendLine();
+                sb.AppendLine("== this ==");
+                sb.Append(Vars(new VarsResult { Nodes = new List<VarNode> { r.This } }).Text);
+                sb.AppendLine();
+                all.Add(r.This);
+            }
+
+            if (!string.IsNullOrEmpty(r.Capped)) sb.AppendLine(r.Capped);
+
+            var verdict = FrameTrust.NotEvidence(all);
+            if (!string.IsNullOrEmpty(verdict))
+            {
+                sb.AppendLine();
+                sb.AppendLine("== what is not evidence ==");
+                sb.AppendLine(verdict);
+            }
+
+            return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>
+        /// One scope's values, with what is wrong with each beside it. A scope with
+        /// nothing in it says so: an absent heading reads as a section that was left
+        /// out rather than one that was empty.
+        /// </summary>
+        static void Section(StringBuilder sb, string named, IReadOnlyList<VarNode> nodes, List<VarNode> all)
+        {
+            sb.AppendLine();
+            sb.Append("== ").Append(named).AppendLine(" ==");
+
+            if (nodes == null || nodes.Count == 0)
+            {
+                sb.AppendLine("  none in scope here");
+                return;
+            }
+
+            foreach (var n in nodes)
+            {
+                all.Add(n);
+
+                sb.Append("  ").Append(n.Name).Append(" = ").Append(n.Value ?? "(null)");
+                if (!string.IsNullOrEmpty(n.Type)) sb.Append("  (").Append(n.Type).Append(')');
+                if (n.HasChildren && (n.Children == null || n.Children.Count == 0))
+                    sb.Append("  ... expand ").Append(n.Ref);
+                sb.AppendLine();
+
+                foreach (var mark in FrameTrust.Marks(n))
+                {
+                    sb.Append("      -- ").AppendLine(mark);
+                }
+            }
+        }
+
         public static Reply Evals(IReadOnlyList<EvalResult> results, string note = null)
         {
             if (results == null || results.Count == 0) return Reply.Bad("No result.");

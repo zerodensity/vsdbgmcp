@@ -123,6 +123,20 @@ namespace VsDbgMcp.Shim.Tools
                 return Render.Vars(result);
             }, scope);
 
+        [McpServerTool(Name = "frame", ReadOnly = true)]
+        [Description("Everything one stop can be told about the frame it is in, in a single call: where it is, the source around the line it stopped on, which binary that code came from and whether the file on disk still matches it, the arguments and locals with their types, 'this' expanded one level, and last a list of the values that are not evidence - a local the optimizer kept nothing for, two names sharing one slot, allocator fill, a container claiming to be empty. Call this on landing somewhere unfamiliar instead of stack, vars, eval this and modules one after another. It reads more than vars does and is meant to be called once at a stop rather than in a loop. Only works in break mode.")]
+        public Task<string> FrameReportTool(
+            [Description("Frame index to report on, 0 being the innermost. Omit to use the selected frame, which steps past the pseudo-frame a pause leaves on top of the stack.")] int? frame = null,
+            [Description("How many variables per scope to show. Past this the reply says how many there were and which call reads the rest.")] int maxVariables = 40,
+            [Description("Instance id. Omit to use the default for this session.")] string instance = null,
+            CancellationToken ct = default)
+            => On(instance, ct, async link =>
+            {
+                var report = await link.Debug
+                    .FrameAsync(frame, Math.Max(1, Math.Min(maxVariables, 200)), ct).ConfigureAwait(false);
+                return Render.Frame(report);
+            }, frame?.ToString());
+
         [McpServerTool(Name = "expand", ReadOnly = true)]
         [Description("Expand one variable or expression by the reference that vars or eval returned, so you pay for only the part of a large structure you actually need. Pass index or key to pick a single element out of a container: the reply carries that element's own reference, so a deeper call never has to repeat the visualizer's expression for it. A container whose visualizer shows no elements is read a second time with the visualizer off, and the reply reports what the raw layout holds - a map that renders as empty while its own count field is not zero is otherwise indistinguishable from an empty one.")]
         public Task<string> Expand(
@@ -237,7 +251,7 @@ namespace VsDbgMcp.Shim.Tools
             }, filter);
 
         [McpServerTool(Name = "symbols")]
-        [Description("Why one module's symbols are not loaded, and, with load set, an attempt to load them. The report is the Modules window's Symbol Load Information: every path the engine tried and what each one turned out to be, which is the only place a PDB that is present but does not match the binary says so. Loading is the Modules window's Load Symbols, and it does not survive the module unloading and loading again, because the Include/Exclude symbol setting is applied afresh on every load.")]
+        [Description("Why one module's symbols are not loaded, and, with load set, an attempt to load them. The report is the Modules window's Symbol Load Information: every path the engine tried and what each one turned out to be, which is the only place a PDB that is present but does not match the binary says so. Loading is the Modules window's Load Symbols, and it does not survive the module unloading and loading again, because the Include/Exclude symbol setting is applied afresh on every load. A module belongs to a process, so this follows select the way modules and eval do.")]
         public Task<string> Symbols(
             [Description("Module name or part of one, for example 'engine.dll'. An exact name wins over a partial match.")] string module,
             [Description("Try to load its symbols first. Leave this off to only read what the debugger already tried.")] bool load = false,

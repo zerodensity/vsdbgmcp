@@ -122,6 +122,7 @@
     <Compile Include="..\VsDbgMcp.Core\Router.cs" Link="Core\Router.cs" />
     <Compile Include="..\VsDbgMcp.Core\ScratchAddress.cs" Link="Core\ScratchAddress.cs" />
     <Compile Include="..\VsDbgMcp.Core\SourceFreshness.cs" Link="Core\SourceFreshness.cs" />
+    <Compile Include="..\VsDbgMcp.Core\SourceWindow.cs" Link="Core\SourceWindow.cs" />
     <Compile Include="..\VsDbgMcp.Core\SymbolSearch.cs" Link="Core\SymbolSearch.cs" />
     <Compile Include="..\VsDbgMcp.Core\TraceLog.cs" Link="Core\TraceLog.cs" />
     <Compile Include="..\VsDbgMcp.Core\Contracts\Dtos.cs" Link="Core\Contracts\Dtos.cs" />

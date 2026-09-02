@@ -484,6 +484,60 @@ namespace VsDbgMcp.Contracts
         public bool Failed { get; set; }
     }
 
+    /// <summary>
+    /// Everything one stop can be told about the frame it is in: where it is, the code
+    /// there, which binary that code came from, and every value in scope with what is
+    /// wrong with each.
+    ///
+    /// Gathered in one call because the picture is what a reader forms, and assembling
+    /// it out of stack, vars, eval and modules is four round trips in which the frame
+    /// cannot change but the reader's attention can.
+    /// </summary>
+    public sealed class FrameReport
+    {
+        public Frame Frame { get; set; }
+
+        /// <summary>Why this is not the frame that was asked for. Null when it is.</summary>
+        public string FrameNote { get; set; }
+
+        public int ThreadId { get; set; }
+        public string ProcessName { get; set; }
+        public int Pid { get; set; }
+
+        /// <summary>True when a caller picked this thread rather than it being the one that stopped.</summary>
+        public bool ThreadWasSelected { get; set; }
+
+        /// <summary>The module the frame's code is in, or null when it is not known.</summary>
+        public ModuleInfo Module { get; set; }
+
+        /// <summary>The source around the current line. Empty when there is none to show.</summary>
+        public List<SourceLine> Source { get; set; } = new List<SourceLine>();
+
+        /// <summary>
+        /// Whether the lines above are established as the ones running, said whenever
+        /// they are not or it could not be checked. Null only when the file is older
+        /// than the binary, which is the one case with nothing to say.
+        /// </summary>
+        public string SourceWarning { get; set; }
+
+        /// <summary>Arguments, then locals, then anything else in scope not already named.</summary>
+        public List<VarNode> Arguments { get; set; } = new List<VarNode>();
+        public List<VarNode> Locals { get; set; } = new List<VarNode>();
+
+        /// <summary>
+        /// The object the frame is a method on, expanded one level, or null where there
+        /// is none. It is the value most reads are after and the one that reads as an
+        /// ordinary object while holding 0x1.
+        /// </summary>
+        public VarNode This { get; set; }
+
+        /// <summary>Set when a section stopped short, naming which and why.</summary>
+        public string Capped { get; set; }
+
+        /// <summary>Set when nothing could be read at all, saying why and where it can be.</summary>
+        public string Refusal { get; set; }
+    }
+
     public sealed class VarNode
     {
         public string Name { get; set; }

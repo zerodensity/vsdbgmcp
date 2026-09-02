@@ -1030,6 +1030,182 @@ namespace VsDbgMcp.Host
             return ReadIn(chosen, ExpressionEval.Scope(chosen.Frame, scope, depth, filter, sharedAddresses));
         });
 
+        /// <summary>
+        /// Everything one stop can be told about the frame it is in.
+        ///
+        /// Every part of this is readable one call at a time already. What it adds is
+        /// that they are read at the same stop, from the same frame, so nothing has to
+        /// be held in a reader's head across four round trips - and that the module and
+        /// the source are read at all, which nobody does until a value has already
+        /// misled them.
+        /// </summary>
+        public Task<FrameReport> FrameAsync(int? frame, int maxVariables, CancellationToken ct = default) => UIAsync(() =>
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            var chosen = CurrentFrame(frame);
+            if (chosen.Refusal != null) return new FrameReport { Refusal = chosen.Refusal };
+
+            var report = new FrameReport
+            {
+                Frame = FrameReader.Describe(chosen.Frame, chosen.Index),
+                FrameNote = chosen.Note,
+                ThreadWasSelected = _selectedThreadId != 0
+            };
+
+            var thread = CurrentThreadObject();
+            report.ThreadId = ThreadIdOf(thread);
+
+            var who = ProcessIdentity.Of(thread);
+            report.ProcessName = who.Name;
+            report.Pid = who.Pid;
+
+            var capped = new List<string>();
+            report.Arguments = Section(chosen, "args", maxVariables, capped, "arguments");
+
+            // The engine's locals filter hands back the arguments too, so without this
+            // every argument is printed twice and counted twice in what is not evidence.
+            report.Locals = Excluding(
+                Section(chosen, "locals", maxVariables, capped, "locals"), report.Arguments);
+            report.This = ThisObject(chosen);
+            if (capped.Count > 0) report.Capped = string.Join(" ", capped.ToArray());
+
+            DescribeWhereTheCodeCameFrom(report);
+            return report;
+        });
+
+        /// <summary>
+        /// One scope's variables, cut to a length a reader will actually read. A cut is
+        /// recorded rather than shown by absence, because a short list is otherwise a
+        /// complete one.
+        /// </summary>
+        List<VarNode> Section(ChosenFrame chosen, string scope, int max, List<string> capped, string named)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            var read = ExpressionEval.Scope(chosen.Frame, scope, 1, null, true);
+            var nodes = read.Nodes ?? new List<VarNode>();
+
+            if (nodes.Count <= max) return nodes;
+
+            capped.Add(nodes.Count + " " + named + " were in scope and the first " + max +
+                       " are shown; vars(scope: \"" + scope + "\") reads the rest.");
+            return nodes.GetRange(0, max);
+        }
+
+        /// <summary>
+        /// The same variables with the ones already shown taken out, matched on name
+        /// because that is what a reader is matching them on.
+        /// </summary>
+        static List<VarNode> Excluding(List<VarNode> nodes, List<VarNode> shown)
+        {
+            if (nodes == null || shown == null || shown.Count == 0) return nodes ?? new List<VarNode>();
+
+            var already = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var node in shown)
+            {
+                if (!string.IsNullOrEmpty(node.Name)) already.Add(node.Name);
+            }
+
+            var kept = new List<VarNode>();
+            foreach (var node in nodes)
+            {
+                if (string.IsNullOrEmpty(node.Name) || !already.Contains(node.Name)) kept.Add(node);
+            }
+            return kept;
+        }
+
+        /// <summary>
+        /// The object this frame is a method on, one level deep, or null in a free
+        /// function. A frame with no 'this' is the ordinary case and says nothing; a
+        /// 'this' that will not read is worth the row, because that is what an optimized
+        /// frame holding 0x1 looks like.
+        /// </summary>
+        VarNode ThisObject(ChosenFrame chosen)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            var read = Evaluate(chosen, new EvalOptions { Expression = "this" });
+            if (read == null || !read.IsValid) return null;
+
+            var node = new VarNode
+            {
+                Name = "this",
+                Value = read.Value,
+                Type = read.Type,
+                Ref = read.Ref,
+                HasChildren = read.HasChildren
+            };
+
+            if (!node.HasChildren) return node;
+
+            var inside = ExpressionEval.Expand(chosen.Frame, read.Ref ?? "this", 1, null, null, null);
+            node.Children = inside?.Nodes;
+            node.Note = inside?.Message;
+            return node;
+        }
+
+        /// <summary>
+        /// Which binary the frame's code came from, and the source beside it.
+        ///
+        /// The source is read from a file on this machine, which is a different kind of
+        /// claim from everything else in the reply, so whether that file outran the
+        /// binary is answered in the same breath rather than left to be discovered.
+        /// </summary>
+        void DescribeWhereTheCodeCameFrom(FrameReport report)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            var file = report.Frame?.File;
+            var modules = NativeReader.ReadModules(ReadingProgram());
+            report.Module = ModuleNamed(report.Frame?.Module, modules) ?? OwningModule(file, modules);
+
+            if (string.IsNullOrEmpty(file) || report.Frame.Line <= 0) return;
+
+            var lines = SourceWindow.Read(file);
+            if (lines == null)
+            {
+                report.SourceWarning = "There is no readable file at " + file + " on this machine, so the " +
+                                       "code around this line is not shown. A module built elsewhere names " +
+                                       "paths that do not exist here.";
+                return;
+            }
+
+            report.Source = SourceWindow.Around(lines, report.Frame.Line, SourceWindow.Radius);
+            if (report.Source.Count == 0)
+            {
+                report.SourceWarning = file + " has " + lines.Count + " lines and the frame reports line " +
+                                       report.Frame.Line + ", so this is not the file the binary was built " +
+                                       "from. Nothing is shown rather than whatever sits at that offset.";
+                return;
+            }
+
+            var written = SourceFreshness.LastWritten(file);
+            var built = ModuleIdentity.BinaryBuilt(report.Module);
+            report.SourceWarning = SourceWindow.Warning(
+                SourceFreshness.WrittenAfter(written, built),
+                SourceFreshness.Show(written),
+                SourceFreshness.Show(built));
+        }
+
+        /// <summary>The loaded module a frame named, matched on the name the engine gave.</summary>
+        static ModuleInfo ModuleNamed(string name, List<ModuleInfo> modules)
+        {
+            if (string.IsNullOrEmpty(name)) return null;
+
+            foreach (var module in modules)
+            {
+                if (string.Equals(module.Name, name, StringComparison.OrdinalIgnoreCase)) return module;
+            }
+
+            // A frame reports the module by path in some engines and by name in others.
+            foreach (var module in modules)
+            {
+                if (PathUtil.SamePath(module.Path, name)) return module;
+            }
+            return null;
+        }
+
         public Task<VarsResult> ExpandAsync(string reference, int depth, string typeModule, int? index, string key, CancellationToken ct = default) => UIAsync(() =>
         {
             ThreadHelper.ThrowIfNotOnUIThread();
@@ -1117,7 +1293,11 @@ namespace VsDbgMcp.Host
         public Task<SymbolResult> SymbolsAsync(string module, bool load, CancellationToken ct = default) => UIAsync(() =>
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            return SymbolLoad.For(_sink.CurrentProgram, module, load);
+
+            // Symbols belong to a module and a module belongs to a process, so this
+            // follows the caller's pick the way modules does. Reading the process that
+            // stopped answered about a different program's copy of the same name.
+            return SymbolLoad.For(ReadingProgram(), module, load);
         });
 
         // ---------------------------------------------------------------- profiling

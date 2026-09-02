@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- **`frame`**, a new tool: everything one stop can be told about the frame it is in, in
+  a single call. Where it is, the source around the line it stopped on, which binary that
+  code came from and whether the file on disk still matches it, the arguments and locals,
+  `this` expanded one level, and last a list of the values that are not evidence — a local
+  the optimizer kept nothing for, two names sharing one slot, allocator fill, a container
+  claiming to be empty. Each part is readable one call at a time already; what this adds
+  is that they are read at the same stop, and that the module and the source are read at
+  all, which nobody does until a value has already misled them.
+- Showing source is showing something the debugger did not say, so `frame` never shows it
+  without answering whether it is what the process is running. A file written since the
+  module was built says so with both times; a file this machine does not have says that
+  instead of nothing.
+- `symbols` follows `select` the way `modules` and `eval` do. A module belongs to a
+  process, and in a session holding a launcher and what it started it used to report on
+  whichever process had stopped.
+
 ## 0.6.0
 
 - `wait` answers at once when the debuggee has not run since it last stopped, instead of
