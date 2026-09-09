@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.0
+
+- Independent review fixes: rejected/no-debug commands release their operation slots;
+  missing build completion events stay unknown; operation status stays responsive
+  during stalled updates; launch retries and reconnects preserve generation safety.
+- Capture-specific profile stops retain their own results, refresh late-loaded symbols,
+  and recover closed traces despite interrupted metadata writes. Structured waits
+  return JSON for repeated stops and module outcomes.
+
+- Host-owned operation IDs for builds, launches and breakpoint installation, bounded waits, deduplicated retries, and retained status/logs.
+- Build outcomes use VS completion evidence; diagnostic counts describe parsed current-build output rather than the global Error List.
+- Durable CPU captures with owner/session metadata, intervention observations, recovery and export tools, and configurable retention. Collector commands no longer block the VS UI thread.
+- Compact wait/profile output, composable profile filters and subtree focus.
+- Contract version 7 requires updating the host and shim together. See [validation and remaining work](docs/iteration_4.md#validation-and-remaining-work).
+
 ## 0.7.0
 
 - **`frame`**, a new tool: everything one stop can be told about the frame it is in, in

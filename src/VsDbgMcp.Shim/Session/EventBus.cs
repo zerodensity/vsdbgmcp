@@ -183,7 +183,9 @@ namespace VsDbgMcp.Shim.Session
                 if (already != null)
                 {
                     already.Reported = true;
-                    return already.Load;
+                    var load = already.Load;
+                    return new ModuleLoadEvent { InstanceId = load.InstanceId, Name = load.Name, Path = load.Path,
+                        SymbolsLoaded = load.SymbolsLoaded, SymbolStatus = load.SymbolStatus, AlreadyLoaded = true };
                 }
 
                 waiter = new ModuleWaiter
@@ -268,6 +270,41 @@ namespace VsDbgMcp.Shim.Session
         /// Sitting in design mode is also what arms the generation counter, so leaving it
         /// counts a run.
         /// </summary>
+        public void InitializeMode(string instanceId, string mode)
+        {
+            lock (_gate)
+            {
+                if (_modes.ContainsKey(instanceId))
+                {
+                    // Events may have been lost while disconnected. Conservatively
+                    // invalidate identities and stale stops before accepting callbacks.
+                    _generations[instanceId] = GenerationOf(instanceId) + 1;
+                    _sessionStart[instanceId] = _seq;
+                    _startingRun.Remove(instanceId);
+                    _stoppedAt.Remove(instanceId);
+                    for (var node = _modules.First; node != null;)
+                    {
+                        var next = node.Next;
+                        if (Matches(instanceId, node.Value.Load.InstanceId)) _modules.Remove(node);
+                        node = next;
+                    }
+                }
+                _modes[instanceId] = mode ?? DebugModes.Design;
+            }
+        }
+
+        public void ObserveStopMode(string instanceId, string mode)
+        {
+            lock (_gate)
+            {
+                // A first breakpoint can arrive before the delayed mode notification.
+                // Do not consume restart's marker on its old process's exit.
+                if (!string.IsNullOrEmpty(mode) && !IsDesign(mode) &&
+                    _modes.TryGetValue(instanceId, out var previous) && IsDesign(previous))
+                    ModeChanged(instanceId, mode);
+            }
+        }
+
         public void ModeChanged(string instanceId, string mode)
         {
             if (string.IsNullOrEmpty(instanceId) || string.IsNullOrEmpty(mode)) return;

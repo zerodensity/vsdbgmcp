@@ -77,7 +77,7 @@ namespace VsDbgMcp.Host
 
             _eventSink = new DebugEventSink(Log);
             _debugHost = new DebugHost(this, _dte, _solution, _debugger, _eventSink, JoinableTaskFactory, Log);
-            _projectSystem = new ProjectSystem(this, _dte, _solution, JoinableTaskFactory, Log);
+            _projectSystem = new ProjectSystem(this, _dte, _solution, JoinableTaskFactory, Log, await GetServiceAsync(typeof(SVsSolutionBuildManager)) as IVsSolutionBuildManager2);
 
             _server = new PipeServer(Names.PipeName(_pid), _token, _debugHost, _projectSystem, Log);
             _debugHost.AttachServer(_server);
@@ -255,6 +255,7 @@ namespace VsDbgMcp.Host
 
         void OnModuleLoaded(Contracts.ModuleLoadEvent module)
         {
+            _debugHost?.ProfileModulesChanged();
             _server?.Broadcast(events => events.OnModuleLoadAsync(module));
         }
 

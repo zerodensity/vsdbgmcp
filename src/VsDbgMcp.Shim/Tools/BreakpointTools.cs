@@ -30,11 +30,13 @@ namespace VsDbgMcp.Shim.Tools
             [Description("Log only every Nth hit. The debug engine counts, so the message and its expressions are built one time in N - that is what a tracepoint costs. The thread still stops on every hit to be counted, so this cuts the overhead rather than removing it.")] int everyNthHit = 0,
             [Description("Keep at most N records a second, dropping the rest. This only makes the stream readable: the program has already paid for a record by the time it is dropped, so this does nothing about instrumentation distorting what you are measuring. Use everyNthHit for that. Where records arrive without times, because the Debug pane cannot be watched as it fills, the cap cannot be applied to them and everything is kept; trace_read says so rather than calling a cap that did nothing a rate.")] int maxPerSecond = 0,
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            [Description("Stable request ID; reuse after a timeout to prevent duplicate installation.")] string requestId = null)
             => On(instance, ct, async link =>
             {
                 var request = new BreakpointRequest
                 {
+                    RequestId = requestId,
                     File = file,
                     Line = line,
                     Function = function,

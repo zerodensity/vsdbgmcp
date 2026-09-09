@@ -21,10 +21,17 @@ namespace VsDbgMcp.Shim.Tools
             [Description("How long to wait before giving up, in seconds. A timeout says only that no stop arrived; it is not evidence that the program is running or that a breakpoint is never reached.")] int timeoutSeconds = 30,
             [Description("What to wait for. Omit it for the next execution stop. 'module:NAME' returns when a module whose name contains NAME loads, which is how to arm breakpoints in a plugin the host has not loaded yet without polling modules or bp_list; it returns straight away if that module already loaded. Waiting for a stop never returns on a module load.")] string @for = null,
             [Description("Instance id. Omit for the session default, or pass 'any' to return as soon as any connected instance stops - useful when debugging two processes in two windows.")] string instance = null,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            bool structured = false, int? expectedGeneration = null)
         {
             var seconds = Math.Max(1, Math.Min(timeoutSeconds, 600));
 
+            if (@for != null && @for.StartsWith("operation:", StringComparison.OrdinalIgnoreCase))
+            {
+                var link = await Sessions.ResolveAsync(instance, ct).ConfigureAwait(false);
+                var operation = await link.Operations.OperationStatusAsync(@for.Substring(10).Trim(), seconds, ct).ConfigureAwait(false);
+                return Newtonsoft.Json.JsonConvert.SerializeObject(operation);
+            }
             string modulePattern = null;
             if (!string.IsNullOrWhiteSpace(@for))
             {
@@ -61,11 +68,15 @@ namespace VsDbgMcp.Shim.Tools
                 }
             }
 
+            if (expectedGeneration != null && target != null && Sessions.Events.Generation(target) != expectedGeneration)
+                return structured ? Newtonsoft.Json.JsonConvert.SerializeObject(new { eventReceived = false, outcome = "invalid-generation", expectedGeneration, currentGeneration = Sessions.Events.Generation(target) }) :
+                    "invalid generation: expected " + expectedGeneration + ", current " + Sessions.Events.Generation(target) + ".";
             if (modulePattern != null)
             {
                 var module = await Sessions.Events
                     .WaitForModuleAsync(target, modulePattern, TimeSpan.FromSeconds(seconds), ct).ConfigureAwait(false);
-                return Render.ModuleLoad(module, modulePattern);
+                return structured ? Newtonsoft.Json.JsonConvert.SerializeObject(new { eventReceived = module != null && !module.AlreadyLoaded,
+                    outcome = module == null ? "timeout" : module.AlreadyLoaded ? "already-loaded" : "event", module }) : Render.ModuleLoad(module, modulePattern);
             }
 
             // A stop cannot arrive from a debuggee that is already sitting in break, so
@@ -74,10 +85,30 @@ namespace VsDbgMcp.Shim.Tools
             // session. With instance='any' every window has to be sitting still, because
             // one that is running can still stop.
             var sitting = Sessions.Events.AlreadyStopped(target, instances);
-            if (sitting.Count > 0) return Render.AlreadyStopped(sitting);
+            if (sitting.Count > 0) return structured ? Newtonsoft.Json.JsonConvert.SerializeObject(new { eventReceived = false, outcome = "already-stopped", stops = sitting }) : Render.AlreadyStopped(sitting);
 
             var stop = await Sessions.Events.WaitAsync(target, TimeSpan.FromSeconds(seconds), ct).ConfigureAwait(false);
-            return Render.Stop(stop);
+            if (stop != null) return structured ? Newtonsoft.Json.JsonConvert.SerializeObject(new { eventReceived = true, outcome = "event", stop }) : Render.Stop(stop);
+            var states = new List<object>();
+            foreach (var id in instances)
+            {
+                StateObservation observed;
+                try
+                {
+                    var link = await Sessions.ResolveAsync(id, ct).ConfigureAwait(false);
+                    observed = await OperationTools.Snapshot(link, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (!ct.IsCancellationRequested)
+                {
+                    observed = new StateObservation { Mode = "unknown", TimestampUtc = DateTime.UtcNow, Error = ex.Message };
+                }
+                states.Add(new { instanceId = id, stateObserved = observed.Mode, stateTimestamp = observed.TimestampUtc,
+                    sessionGeneration = observed.SessionGeneration, processes = observed.Processes,
+                    lastTransition = observed.LastTransition, error = observed.Error });
+            }
+            var data = Newtonsoft.Json.JsonConvert.SerializeObject(new { eventReceived = false, outcome = "timeout", timeoutSeconds = seconds, observations = states });
+            if (structured) return data;
+            return "timeout: no stop event in " + seconds + " s.\n" + data;
         }
 
         [McpServerTool(Name = "go")]

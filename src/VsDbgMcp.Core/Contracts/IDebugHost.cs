@@ -85,6 +85,9 @@ namespace VsDbgMcp.Contracts
     /// </summary>
     public interface IProjectSystem
     {
+        Task<OperationInfo> BuildBeginAsync(BuildRequest request, CancellationToken ct = default);
+        Task<OpResult> BuildCancelOperationAsync(string id, CancellationToken ct = default);
+        Task<BuildLog> BuildLogAsync(string id, long offset, int maxChars, CancellationToken ct = default);
         Task<BuildResult> BuildAsync(string mode, string project, string configuration, string platform, CancellationToken ct = default);
         Task<OpResult> BuildCancelAsync(CancellationToken ct = default);
         Task<OutputResult> BuildOutputAsync(string pattern, int tailLines, CancellationToken ct = default);

@@ -43,16 +43,69 @@ namespace VsDbgMcp.Shim
               .Append(capture.ProcessName).Append(" (").Append(capture.Pid).Append(")  ")
               .AppendLine(scope);
 
-            if (against != null) Diff(sb, capture, against);
-            else if (query.Function != null) Function(sb, capture, query, total);
-            else if (query.Thread != null) OneThread(sb, capture, query, total);
-            else if (query.Sort == ProfileQuery.Inclusive) Tree(sb, capture, total);
-            else if (query.Sort == ProfileQuery.ByModule) Modules(sb, capture, total);
-            else Summary(sb, capture, query, total);
+            if (capture.Metadata != null)
+                sb.Append("owner: ").Append(capture.Metadata.InstanceId).Append(" / ").Append(capture.Metadata.HostEpoch)
+                  .Append(" generation ").Append(capture.Metadata.SessionGeneration).Append("  captureId ").AppendLine(capture.CaptureId);
+            if (capture.Metadata != null && query.Details)
+            {
+                sb.Append("started UTC: ").Append(capture.Metadata.StartedUtc.ToString("O"))
+                  .Append("; local: ").AppendLine(capture.Metadata.StartedUtc.ToLocalTime().ToString("O"));
+                if (capture.Metadata.Interventions != null)
+                    foreach (var marker in capture.Metadata.Interventions)
+                        sb.Append("intervention ").Append(marker.TimestampUtc.ToString("O")).Append(": ").Append(marker.Kind)
+                          .Append(" ").Append(marker.Detail).AppendLine("; target pause duration unmeasured");
+            }
+            sb.Append("denominator: ").Append(total).Append(query.Thread != null ? " stacked samples in selected thread" : " stacked samples in whole capture").AppendLine();
+            var selected = SelectProfile(capture, query, out var selectionError);
+            if (selectionError != null) sb.AppendLine(selectionError);
+            else if (against != null) Diff(sb, capture, against);
+            else if (query.Function != null) Function(sb, selected, query, total);
+            else if (query.Sort == ProfileQuery.Inclusive) Tree(sb, selected, total, query);
+            else if (query.Sort == ProfileQuery.ByModule) Modules(sb, selected, total);
+            else if (query.Thread != null && query.Module == null) OneThread(sb, selected, query, total);
+            else Summary(sb, selected, query, total);
 
-            Notes(sb, capture);
-            Footer(sb, capture, taken);
+            if (query.Details) { Notes(sb, capture); Footer(sb, capture, taken); }
+            else
+            {
+                if (capture.Stacked < capture.Samples) sb.AppendLine("Quality: some samples have no stacks; details=true shows coverage.");
+                if (capture.Metadata?.Status == "interrupted") sb.AppendLine("Applicability: debugger session changed during this capture; inspect intervention markers.");
+                sb.AppendLine("CPU samples only; blocked time is not measured. details=true shows coverage.");
+            }
             return sb.ToString().TrimEnd();
+        }
+
+        static Capture SelectProfile(Capture capture, ProfileQuery query, out string error)
+        {
+            error = null;
+            var selected = new Capture { Id = capture.Id, CaptureId = capture.CaptureId, Metadata = capture.Metadata,
+                ProcessName = capture.ProcessName, Pid = capture.Pid, Seconds = capture.Seconds,
+                Samples = capture.Samples, Stacked = capture.Stacked, SamplesPerSecond = capture.SamplesPerSecond };
+            selected.Frames.AddRange(capture.Frames);
+            foreach (var thread in capture.Threads) selected.Threads[thread.Key] = thread.Value;
+            string focus = null;
+            if (query.Focus != null)
+            {
+                var matches = capture.Matches(query.Focus);
+                if (matches.Count != 1) { error = "focus must identify one captured function. Candidates: " + string.Join(", ", matches.Take(8)); return selected; }
+                focus = matches[0];
+            }
+            foreach (var stack in capture.Stacks)
+            {
+                if (query.Thread != null && stack.ThreadId != query.Thread) continue;
+                var frames = stack.Frames;
+                if (query.Sort == ProfileQuery.Inclusive && (focus != null || query.Module != null))
+                {
+                    var from = Array.FindIndex(frames, n => (focus == null || capture.Frames[n].Key == focus) &&
+                        (query.Module == null || Contains(capture.Frames[n].Module, query.Module)));
+                    if (from < 0) continue;
+                    frames = frames.Skip(from).ToArray();
+                }
+                else if (query.Module != null && query.Sort == ProfileQuery.ByModule &&
+                    (frames.Length == 0 || !Contains(capture.Frames[frames[frames.Length - 1]].Module, query.Module))) continue;
+                selected.Stacks.Add(new Capture.Stack { Frames = frames, ThreadId = stack.ThreadId, Samples = stack.Samples });
+            }
+            return selected;
         }
 
         static string Scope(Capture capture, ProfileQuery query, Capture against)
@@ -60,7 +113,7 @@ namespace VsDbgMcp.Shim
             if (against != null) return "against #" + against.Id;
             if (query.Function != null) return "one function";
             if (query.Thread != null) return "thread " + query.Thread.Value + " only";
-            if (query.Sort == ProfileQuery.Inclusive) return "inclusive, as a tree";
+            if (query.Sort == ProfileQuery.Inclusive) return "inclusive, as a tree" + (query.Module == null ? "" : ", subtrees rooted in " + query.Module);
             if (query.Sort == ProfileQuery.ByModule) return "self time, by module";
             if (query.Module != null) return "self time in " + query.Module + ", of the whole capture";
             return "self time, all threads";
@@ -178,9 +231,9 @@ namespace VsDbgMcp.Shim
             if (all.Count > 12) sb.Append("    and ").Append(all.Count - 12).AppendLine(" more");
         }
 
-        static void Tree(StringBuilder sb, Capture capture, int total)
+        static void Tree(StringBuilder sb, Capture capture, int total, ProfileQuery query)
         {
-            var nodes = capture.Tree();
+            var nodes = capture.Tree(query.RawTree ? 0 : 0.01, query.Top, query.RawTree || query.Focus != null || query.Module != null);
             if (nodes.Count == 0)
             {
                 sb.AppendLine("  (nothing was sampled)");
@@ -190,10 +243,11 @@ namespace VsDbgMcp.Shim
             foreach (var node in nodes)
                 Line(sb, node.Row.Samples, total, new string(' ', node.Depth * 2) + node.Row.Key, null);
 
-            sb.Append("  branches under 1% are left out").AppendLine(Trimmed(capture));
+            sb.AppendLine("  inclusive percentages overlap; do not sum them.");
+            if (!query.RawTree) sb.Append("  branches under 1% are left out").AppendLine(Trimmed(capture));
             if (capture.TreeWasCut)
                 sb.Append("  the tree is cut off at ").Append(nodes.Count)
-                  .AppendLine(" rows, so branches below that are missing rather than small");
+                  .AppendLine(" rows; increase top or use focus=FUNCTION with sort=inclusive to inspect omitted branches.");
         }
 
         /// <summary>
@@ -216,11 +270,15 @@ namespace VsDbgMcp.Shim
         static void Function(StringBuilder sb, Capture capture, ProfileQuery query, int total)
         {
             var found = capture.Matches(query.Function);
+            if (query.Module != null) found = found.Where(k => capture.Frames.Any(f => f.Key == k && Contains(f.Module, query.Module))).ToList();
             if (found.Count == 0)
             {
                 sb.Append("  Nothing called ").Append(query.Function)
                   .AppendLine(" was sampled. A function that never had a sample land in it or under it ")
                   .AppendLine("  is not in this profile at all; the report without a function names what is.");
+                var tokens = query.Function.Split(new[] { ':', '!', '<', '>' }, StringSplitOptions.RemoveEmptyEntries);
+                var candidates = capture.Inclusive().Where(r => tokens.Any(t => t.Length > 2 && Contains(r.Key, t))).Take(5).ToList();
+                foreach (var candidate in candidates) sb.Append("    candidate: ").Append(candidate.Key).Append("  inclusive ").AppendLine(Samples(candidate.Samples));
                 return;
             }
 
@@ -306,6 +364,11 @@ namespace VsDbgMcp.Shim
             sb.AppendLine("  shares, not counts: two runs of different lengths cannot be compared any other way");
             sb.AppendLine();
 
+            if (before.Metadata != null && now.Metadata != null &&
+                (before.Metadata.Executable != now.Metadata.Executable || before.Metadata.Configuration != now.Metadata.Configuration))
+                sb.AppendLine("Applicability: executable or configuration differs between these captures.");
+            if ((before.Stacked < before.Samples) != (now.Stacked < now.Samples))
+                sb.AppendLine("Coverage: unattributed sample coverage differs between captures.");
             var changes = Capture.Compare(before, now);
             var moved = 0;
             var still = 0;
@@ -447,7 +510,7 @@ namespace VsDbgMcp.Shim
 
         static string Share(int samples, int total) => Percent(samples * 100.0 / Math.Max(1, total));
 
-        static string Percent(double value) => value.ToString("F1", CultureInfo.InvariantCulture) + "%";
+        static string Percent(double value) => value > 0 && value < 0.1 ? "<0.1%" : value.ToString("F1", CultureInfo.InvariantCulture) + "%";
 
         static string Count(int value) => value.ToString("N0", CultureInfo.InvariantCulture);
 

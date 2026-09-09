@@ -121,8 +121,10 @@ namespace VsDbgMcp.Host
             var rpc = new JsonRpc(new HeaderDelimitedMessageHandler(stream, stream, formatter));
             connection.Rpc = rpc;
 
-            rpc.AddLocalRpcTarget(_debug, new JsonRpcTargetOptions { AllowNonPublicInvocation = false });
-            rpc.AddLocalRpcTarget(_projects, new JsonRpcTargetOptions { AllowNonPublicInvocation = false });
+            rpc.AddLocalRpcTarget<IDebugHost>(_debug, new JsonRpcTargetOptions { AllowNonPublicInvocation = false });
+            rpc.AddLocalRpcTarget<IProjectSystem>(_projects, new JsonRpcTargetOptions { AllowNonPublicInvocation = false });
+            if (_debug is IOperationHost operations) rpc.AddLocalRpcTarget<IOperationHost>(operations, new JsonRpcTargetOptions { AllowNonPublicInvocation = false });
+            if (_debug is IProfileHost profiles) rpc.AddLocalRpcTarget<IProfileHost>(profiles, new JsonRpcTargetOptions { AllowNonPublicInvocation = false });
             connection.Events = rpc.Attach<IShimEvents>();
 
             rpc.Disconnected += (_, __) => Remove(connection);

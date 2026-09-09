@@ -70,6 +70,7 @@
   <ItemGroup>
     <Reference Include="System" />
     <Reference Include="System.Core" />
+    <Reference Include="System.IO.Compression" />
     <Reference Include="System.Drawing" />
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System.Design" />
@@ -81,6 +82,14 @@
 
   <ItemGroup>
     <Compile Include="Activity.cs" />
+    <Compile Include="HostOperations.cs" />
+    <Compile Include="..\VsDbgMcp.Core\RetentionPolicy.cs" Link="Core\RetentionPolicy.cs" />
+    <Compile Include="..\VsDbgMcp.Core\ProfileArtifacts.cs" Link="Core\ProfileArtifacts.cs" />
+    <Compile Include="DebugHost.Operations.cs" />
+    <Compile Include="DebugHost.Profiling.cs" />
+    <Compile Include="..\VsDbgMcp.Core\OperationRegistry.cs" Link="Core\OperationRegistry.cs" />
+    <Compile Include="..\VsDbgMcp.Core\BuildDiagnostics.cs" Link="Core\BuildDiagnostics.cs" />
+    <Compile Include="..\VsDbgMcp.Core\Contracts\Operations.cs" Link="Core\Contracts\Operations.cs" />
     <Compile Include="BreakpointTable.cs" />
     <Compile Include="ConsoleBridge.cs" />
     <Compile Include="DebugEventSink.cs" />

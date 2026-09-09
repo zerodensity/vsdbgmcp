@@ -18,7 +18,7 @@ namespace VsDbgMcp.Host
     {
         // ---------------------------------------------------------------- breakpoints
 
-        public Task<BreakpointInfo> BreakpointSetAsync(BreakpointRequest request, CancellationToken ct = default) => UIAsync(() =>
+        Task<BreakpointInfo> BreakpointCoreAsync(BreakpointRequest request, string operationId) => UIAsync(() =>
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -57,6 +57,9 @@ namespace VsDbgMcp.Host
 
                 var created = added != null && added.Count > 0 ? added.Item(1) : NewestMatching(request);
                 if (created == null) return Failed(request, "Visual Studio did not create the breakpoint.");
+                var earlyId = _breakpoints.IdFor(created);
+                HostOperations.Store.Update(operationId, o => { o.State = "created"; o.Breakpoint = new BreakpointInfo { Id = earlyId, OperationId = operationId, Pending = true }; });
+                Mark(string.IsNullOrEmpty(request.LogMessage) ? "breakpoint-installed" : "tracepoint-installed", request.Function ?? request.File);
 
                 if (!string.IsNullOrEmpty(request.LogMessage))
                 {
@@ -1443,54 +1446,6 @@ namespace VsDbgMcp.Host
         });
 
         // ---------------------------------------------------------------- profiling
-
-        public Task<OpResult> ProfileStartAsync(CancellationToken ct = default) => UIOpAsync(() =>
-        {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
-            if (CurrentMode == DebugModes.Design)
-                return OpResult.Bad("Nothing is being debugged, so there is no process to profile. " +
-                                    "Use launch or attach first.");
-
-            if (_profiler == null)
-            {
-                _profiler = Profiler.Find(DevenvPath(), out var missing);
-                if (_profiler == null) return OpResult.Bad(missing);
-            }
-
-            if (_profiler.Running)
-                return OpResult.Bad("A profile is already being collected. Call profile_stop to end it.");
-
-            var target = ProfileTarget(out var refusal);
-            if (refusal != null) return OpResult.Bad(refusal);
-
-            var failure = _profiler.Start(target.Pid, CapturePath(target.Pid));
-            if (failure != null) return OpResult.Bad(failure);
-
-            _profiled = target;
-            return OpResult.Good("Collecting a profile of " + target.Describe() +
-                                 ". Let it do the work you want measured, then call profile_stop. " +
-                                 "Only threads on the CPU are sampled, so time spent blocked will not appear.");
-        });
-
-        public Task<ProfileCollection> ProfileStopAsync(CancellationToken ct = default) => UIAsync(() =>
-        {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
-            if (_profiler == null || !_profiler.Running)
-                return new ProfileCollection { Error = "Nothing is being profiled. Call profile_start first." };
-
-            var failure = _profiler.Stop(out var seconds, out var path);
-            if (failure != null) return new ProfileCollection { Error = failure };
-
-            return new ProfileCollection
-            {
-                Path = path,
-                ProcessName = _profiled.Name,
-                Pid = _profiled.Pid,
-                Seconds = seconds
-            };
-        });
 
         /// <summary>
         /// Which process to profile. With one debuggee it is that one; with several the

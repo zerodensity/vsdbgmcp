@@ -20,4 +20,9 @@
     <ProjectReference Include="..\..\src\VsDbgMcp.Shim\VsDbgMcp.Shim.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\..\src\VsDbgMcp.Host\DebugHost.Profiling.cs" Link="Host\DebugHost.Profiling.cs" />
+    <Compile Include="..\..\src\VsDbgMcp.Host\Profiler.cs" Link="Host\Profiler.cs" />
+  </ItemGroup>
+
 </Project>

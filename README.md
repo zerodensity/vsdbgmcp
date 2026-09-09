@@ -10,8 +10,9 @@ windows can be driven from one agent session.
 
 `wait` blocks on the debugger's own stopping events and reports why execution stopped —
 which breakpoint, which exception, a step completing, the process exiting. `build` and
-`launch` block to completion for the same reason, so nothing has to poll for a state
-change.
+`launch` wait for a bounded interval, then return either their result or a recoverable
+operation ID. `operation_status` waits for or retrieves that result after a timeout or
+reconnect. Reuse `requestId` when retrying build, launch or breakpoint requests.
 
 The agent launches the shim in its working directory; the shim finds the Visual Studio
 that has the matching solution open and connects. No ports and no per-project
@@ -24,8 +25,9 @@ own stdout.
 
 A profile is something an agent can read rather than a file to open. `profile_start` and
 `profile_stop` drive Visual Studio's own sampling collector against a process the
-debugger is already holding; the trace is read and thrown away, and `profile_report`
-answers from what is left — who calls a hot function, which of its source lines the
+debugger is already holding. Aggregates and ownership metadata persist across client
+restarts; `profile_export` writes reports, JSON and optionally retained raw traces.
+`profile_report` answers from those counts — who calls a hot function, which of its source lines the
 samples landed on, which binary the time went to, or what moved since the last
 capture.
 
@@ -129,19 +131,19 @@ connections, and anything that went wrong inside the extension.
 
 ## Tools
 
-51 of them.
+59 tools.
 
 | | |
 |---|---|
 | **session** | `instances` `use` |
-| **lifecycle** | `status` `launch` `attach` `detach` `stop` `restart` `processes` `dump_open` |
+| **lifecycle** | `status` `debug_state` `operations` `operation_status` `launch` `attach` `detach` `stop` `restart` `processes` `dump_open` |
 | **execution** | `wait` `go` `pause` `step` `run_to` `set_next` |
 | **breakpoints** | `bp_set` `bp_list` `bp_remove` `bp_enable` `trace_read` `exceptions_set` |
 | **inspection** | `threads` `stack` `select` `freeze` `frame` `eval` `vars` `expand` `watch_set` `memory` `registers` `disasm` `modules` `symbols` `scratch` `scratch_free` |
-| **profiling** | `profile_start` `profile_stop` `profile_report` |
+| **profiling** | `profile_start` `profile_stop` `profile_report` `profile_status` `profile_recover` `profile_recover_stop` `profile_export` |
 | **evidence** | `triage` `capture` |
 | **debuggee I/O** | `console_read` `console_send` `output` |
-| **build** | `build` `build_cancel` `build_output` `config` `startup_project` |
+| **build** | `build` `build_cancel` `build_output` `build_log` `config` `startup_project` |
 
 Notes on a few:
 
@@ -218,9 +220,9 @@ Notes on a few:
 - **`profile_report`** — asks something else of a profile already taken, without
   collecting again: one function's callers and callees and the source lines inside it,
   the same samples as a call tree, a roll-up per binary, one thread on its own, or what
-  moved since an earlier capture in percentage points. Each is a separate reading and
-  one is answered at a time; asking for two at once is refused rather than quietly
-  answering one. Everywhere a report stops short it says that it stopped, and every
+  moved since an earlier capture in percentage points. Module/thread filters compose
+  with the selected view; conflicting views are rejected with a valid request example.
+  Use `focus` for a subtree and `details` for full metadata. Everywhere a report stops short it says that it stopped, and every
   profile accounts for the processor time actually used against how long the clock ran,
   or says it cannot — because a program waiting on a lock is invisible to a CPU
   profiler, and silence there reads as nothing being wrong.
@@ -253,9 +255,16 @@ docs/marketplace.md  what the listing says and what to change when the product d
 tests build with the dotnet CLI, and the extension needs the MSBuild inside Visual
 Studio, since the VSIX packaging tasks are .NET Framework assemblies.
 
+## Recoverable operations and profiles
+
+[Iteration 4](docs/iteration_4.md) documents operation IDs, invocation-scoped build
+output, bounded debugger snapshots, durable profiling, retention settings and exports.
+The host/shim contract is now version 7; update both together. Live validation of
+these changes remains outstanding after an experimental-instance setup blocker.
+
 ## Status
 
-535 automated tests cover routing, discovery, the event bus, and the whole shim path —
+563 automated tests cover routing, discovery, the event bus, and the whole shim path —
 discovery file, named pipe, JSON-RPC, rendering — against a stand-in for the extension,
 plus the pure decisions: which expression forms to try against a module, which values are
 allocator fill, whether a source file outran its binary, whether a module was deployed

@@ -413,6 +413,17 @@ namespace VsDbgMcp.Tests
         }
 
         [Fact]
+        public async Task Operation_and_snapshot_contracts_round_trip_over_the_pipe()
+        {
+            var tools = new OperationTools(_sessions);
+            var operation = await tools.Status("test-operation");
+            Assert.Equal("test-operation", operation.OperationId);
+            Assert.Empty(await tools.List());
+            Assert.Equal("run", (await tools.Observe()).Mode);
+            Assert.Equal("test-operation", (await tools.Log("test-operation")).OperationId);
+        }
+
+        [Fact]
         public async Task Build_answers_with_errors_rather_than_a_log()
         {
             var text = await new BuildTools(_sessions).Build("build", null, null, null, null, CancellationToken.None);

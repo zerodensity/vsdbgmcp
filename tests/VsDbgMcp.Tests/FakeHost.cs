@@ -15,7 +15,7 @@ namespace VsDbgMcp.Tests
     /// formatter. Lets the whole shim path be tested - discovery, routing, connecting,
     /// calling, and events coming back - without Visual Studio in the picture.
     /// </summary>
-    sealed class FakeHost : IDebugHost, IProjectSystem, IDisposable
+    sealed class FakeHost : IDebugHost, IProjectSystem, IOperationHost, IProfileHost, IDisposable
     {
         readonly string _pipeName;
         readonly CancellationTokenSource _cts = new CancellationTokenSource();
@@ -64,6 +64,8 @@ namespace VsDbgMcp.Tests
                 var rpc = new JsonRpc(new HeaderDelimitedMessageHandler(stream, stream, formatter));
                 rpc.AddLocalRpcTarget<IDebugHost>(this, null);
                 rpc.AddLocalRpcTarget<IProjectSystem>(this, null);
+                rpc.AddLocalRpcTarget<IOperationHost>(this, null);
+                rpc.AddLocalRpcTarget<IProfileHost>(this, null);
 
                 var client = rpc.Attach<IShimEvents>();
                 lock (_gate) _clients.Add(client);
@@ -266,6 +268,17 @@ namespace VsDbgMcp.Tests
             });
             return Task.FromResult(results);
         }
+
+        public Task<OpResult> ProfileBeginAsync(bool retainRaw, CancellationToken ct = default) => ProfileStartAsync(ct);
+        public Task<ProfileCollection> ProfileRecoverAsync(string id, CancellationToken ct = default) => Task.FromResult(new ProfileCollection { CaptureId = id });
+        public Task<ProfileCollection> ProfileStopCaptureAsync(string id, CancellationToken ct = default) => ProfileRecoverAsync(id, ct);
+        public Task<OperationInfo> OperationStatusAsync(string id, int seconds, CancellationToken ct = default) => Task.FromResult(new OperationInfo { OperationId = id });
+        public Task<List<OperationInfo>> OperationsAsync(CancellationToken ct = default) => Task.FromResult(new List<OperationInfo>());
+        public Task<StateObservation> ObserveAsync(CancellationToken ct = default) => Task.FromResult(new StateObservation { Mode = "run", TimestampUtc = DateTime.UtcNow });
+        public async Task<OperationInfo> BuildBeginAsync(BuildRequest request, CancellationToken ct = default) =>
+            new OperationInfo { Build = await BuildAsync(request.Mode, request.Project, request.Configuration, request.Platform, ct), Terminal = true };
+        public Task<OpResult> BuildCancelOperationAsync(string id, CancellationToken ct = default) => BuildCancelAsync(ct);
+        public Task<BuildLog> BuildLogAsync(string id, long offset, int count, CancellationToken ct = default) => Task.FromResult(new BuildLog { OperationId = id });
 
         public Task<BuildResult> BuildAsync(string mode, string project, string configuration, string platform, CancellationToken ct = default)
         {

@@ -103,6 +103,13 @@ namespace VsDbgMcp.Host
 
         public void AttachServer(PipeServer server) => _server = server;
 
+        List<ModuleInfo> ProfileModules(int pid)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            return _sink.Programs.Where(p => ProcessIdentity.Of(p).Pid == pid)
+                .SelectMany(NativeReader.ReadModules).ToList();
+        }
+
         public void SetMode(string mode)
         {
             // A frame does not survive its thread resuming, so neither should a pinned
@@ -124,9 +131,12 @@ namespace VsDbgMcp.Host
 
                 // The process being sampled has gone, so whatever was gathered describes
                 // something that no longer exists and nobody is going to ask for.
-                _profiler?.Abandon();
+                Mark("debugger-design", "Detach or exit; reason unavailable. Capture remains available.");
             }
 
+            if (_reportedMode == DebugModes.Design && mode != DebugModes.Design) _sessionGeneration++;
+            _lastTransition = new Intervention { Kind = "mode:" + mode, TimestampUtc = DateTime.UtcNow, SessionGeneration = _sessionGeneration };
+            Mark("mode:" + mode);
             _reportedMode = mode;
             TaskCompletionSource<string> waiter;
             lock (_modeGate)
@@ -174,6 +184,9 @@ namespace VsDbgMcp.Host
             // Not recorded here: the shim reports the call once it has the reply, which is
             // the only place the text the agent was given exists. Recording here as well
             // would list everything twice, once without its result.
+            var tool = Name(caller);
+            if (new[] { "attach", "detach", "pause", "go", "step", "stop", "restart", "freeze", "bp_remove", "bp_enable", "set_next", "run_to" }.Contains(tool))
+                Mark(tool + "-requested");
             return body();
         }
 
@@ -287,6 +300,7 @@ namespace VsDbgMcp.Host
 
             var status = new HostStatus
             {
+                Observation = LiveObservation(),
                 InstanceId = InstanceId(),
                 Workspace = WorkspaceProbe.Read(_solution),
                 Mode = CurrentMode,
@@ -421,14 +435,14 @@ namespace VsDbgMcp.Host
 
         // ---------------------------------------------------------------- session
 
-        public Task<OpResult> LaunchAsync(LaunchRequest request, CancellationToken ct = default) =>
-            LaunchCoreAsync(request ?? new LaunchRequest(), ct);
-
-        async Task<OpResult> LaunchCoreAsync(LaunchRequest request, CancellationToken ct)
+        async Task<OpResult> LaunchCoreAsync(LaunchRequest request, CancellationToken ct, string operationId = null)
         {
             var prepared = await UIOpAsync(() =>
             {
                 ThreadHelper.ThrowIfNotOnUIThread();
+
+                if (CurrentMode != DebugModes.Design)
+                    return OpResult.Bad("A debug session is already active; no launch was issued.");
 
                 if (!string.IsNullOrEmpty(request.Project))
                 {
@@ -445,6 +459,8 @@ namespace VsDbgMcp.Host
                         return OpResult.Bad("Could not set the debugger arguments: " + applied.Message);
                 }
 
+                if (operationId != null) DescribeLaunch(operationId, request);
+                Mark("launch-requested");
                 return Try(() =>
                 {
                     if (request.NoDebug) _dte.ExecuteCommand("Debug.StartWithoutDebugging");
@@ -453,14 +469,7 @@ namespace VsDbgMcp.Host
                 }, null);
             }).ConfigureAwait(false);
 
-            if (!prepared.Ok) return prepared;
-            if (request.NoDebug) return OpResult.Good("Started without the debugger.");
-
-            var mode = await NextModeAsync(TimeSpan.FromSeconds(60)).ConfigureAwait(false);
-            if (mode == null) return OpResult.Good("Launch issued; the debugger has not reported a state yet.");
-            if (mode == DebugModes.Break) return OpResult.Good("Launched and already stopped. Call wait or status.");
-            if (mode == DebugModes.Design) return OpResult.Bad("The debuggee exited immediately. Check the Debug output pane.");
-            return OpResult.Good("Running.");
+            return prepared;
         }
 
         public Task<OpResult> AttachAsync(AttachRequest request, CancellationToken ct = default) => UIOpAsync(() =>

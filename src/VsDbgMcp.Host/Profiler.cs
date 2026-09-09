@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 
 namespace VsDbgMcp.Host
 {
@@ -22,6 +23,7 @@ namespace VsDbgMcp.Host
     {
         readonly string _collector;
         readonly string _agent;
+        readonly Func<string, Task<string>> _runCommand;
 
         string _session;
         string _output;
@@ -29,10 +31,11 @@ namespace VsDbgMcp.Host
 
         public bool Running => _output != null;
 
-        Profiler(string collector, string agent)
+        internal Profiler(string collector, string agent, Func<string, Task<string>> runCommand = null)
         {
             _collector = collector;
             _agent = agent;
+            _runCommand = runCommand;
         }
 
         /// <summary>
@@ -118,9 +121,9 @@ namespace VsDbgMcp.Host
         /// out from a process id lands outside that range and is refused - while two
         /// windows picking numbers independently would eventually pick the same one.
         /// </summary>
-        public string Start(int pid, string outputPath)
+        public async Task<string> StartAsync(int pid, string outputPath, string sessionId)
         {
-            _session = Guid.NewGuid().ToString();
+            _session = sessionId;
             _output = outputPath;
             _started = DateTime.UtcNow;
 
@@ -134,41 +137,37 @@ namespace VsDbgMcp.Host
                 return ex.Message;
             }
 
-            var failure = Run("start " + _session + " /attach:" + pid + " /loadAgent:" + _agent);
+            var failure = await RunAsync("start " + _session + " /attach:" + pid + " /loadAgent:" + _agent).ConfigureAwait(false);
             if (failure == null) return null;
 
-            _output = null;
+            // A timeout does not establish that start failed. Preserve ownership for an explicit stop.
             return failure;
         }
 
         /// <summary>Stops collecting, or says why it did not stop.</summary>
-        public string Stop(out double seconds, out string path)
+        public void RecoverSession(string sessionId, string path, DateTime started)
         {
-            seconds = (DateTime.UtcNow - _started).TotalSeconds;
-            path = _output;
-            _output = null;
-
-            if (path == null) return "Nothing is being profiled.";
-
-            var failure = Run("stop " + _session + " /output:\"" + path + "\"");
-            if (failure != null) return failure;
-
-            if (File.Exists(path)) return null;
-
-            return "The collector reported no error and wrote nothing. A collection that is stopped the " +
-                   "moment it starts can end with nothing in it; let the program run for a few seconds " +
-                   "between profile_start and profile_stop.";
+            if (!Guid.TryParse(sessionId, out var ignored)) throw new ArgumentException("Invalid retained collector session ID.");
+            if (Running) throw new InvalidOperationException("A collector is already active.");
+            _session = sessionId; _output = path; _started = started;
         }
 
-        /// <summary>Gives up on a collection without keeping what it gathered.</summary>
-        public void Abandon()
+        public sealed class StopResult
         {
-            if (_output == null) return;
-
-            var path = _output;
-            _output = null;
-            Run("stop " + _session + " /output:\"" + path + "\"");
-            Delete(path);
+            public double Seconds;
+            public string Path;
+            public string Error;
+        }
+        public async Task<StopResult> StopAsync()
+        {
+            var result = new StopResult { Seconds = (DateTime.UtcNow - _started).TotalSeconds, Path = _output };
+            if (_output == null) { result.Error = "Nothing is being profiled."; return result; }
+            if (ProfileArtifacts.HasClosedTrace(_output)) { _output = null; return result; }
+            result.Error = await RunAsync("stop " + _session + " /output:\"" + _output + "\"").ConfigureAwait(false);
+            if (result.Error != null && ProfileArtifacts.HasClosedTrace(_output)) result.Error = null;
+            if (result.Error == null && !File.Exists(_output)) result.Error = "Collector returned without a trace; collection coverage unknown.";
+            if (result.Error == null) _output = null;
+            return result;
         }
 
         public static void Delete(string path)
@@ -178,8 +177,9 @@ namespace VsDbgMcp.Host
         }
 
         /// <summary>Null when the collector was happy, otherwise what it said about not being.</summary>
-        string Run(string arguments)
+        async Task<string> RunAsync(string arguments)
         {
+            if (_runCommand != null) return await _runCommand(arguments).ConfigureAwait(false);
             var start = new ProcessStartInfo(_collector, arguments)
             {
                 UseShellExecute = false,
@@ -191,21 +191,24 @@ namespace VsDbgMcp.Host
 
             try
             {
-                using (var process = Process.Start(start))
+                using (var process = new Process { StartInfo = start, EnableRaisingEvents = true })
                 {
-                    var output = process.StandardOutput.ReadToEnd();
-                    var errors = process.StandardError.ReadToEnd();
-
-                    // Far longer than starting or stopping takes. It is here so that a
-                    // collector which never returns cannot take the editor with it.
-                    if (!process.WaitForExit(120000))
+                    var exited = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    process.Exited += (_, __) => exited.TrySetResult(true);
+                    process.Start();
+                    var outputTask = process.StandardOutput.ReadToEndAsync();
+                    var errorTask = process.StandardError.ReadToEndAsync();
+                    var finished = Task.WhenAll(exited.Task, outputTask, errorTask);
+                    if (await Task.WhenAny(finished, Task.Delay(120000)).ConfigureAwait(false) != finished)
                     {
-                        try { process.Kill(); } catch (InvalidOperationException) { }
-                        return "The collector did not answer within two minutes.";
+                        try { if (!process.HasExited) process.Kill(); } catch (InvalidOperationException) { }
+                        _ = finished.ContinueWith(t => { var ignored = t.Exception; }, System.Threading.CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+                        return "The collector did not finish within two minutes; collection state unknown.";
                     }
-
+                    await finished.ConfigureAwait(false);
+                    var output = await outputTask.ConfigureAwait(false);
+                    var errors = await errorTask.ConfigureAwait(false);
                     if (process.ExitCode == 0 && !Complained(output + errors)) return null;
-
                     return Tidy(output + " " + errors);
                 }
             }

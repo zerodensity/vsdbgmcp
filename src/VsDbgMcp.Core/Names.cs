@@ -24,14 +24,14 @@ namespace VsDbgMcp
         /// 6: a debuggee can be profiled, with the extension collecting and the shim
         ///    reading what it collected.
         /// </summary>
-        public const int ContractVersion = 6;
+        public const int ContractVersion = 7;
 
         public const string InstanceFilePrefix = "inst-";
         public const string InstanceFileSuffix = ".json";
 
         /// <summary>Where instances announce themselves. One file per running VS.</summary>
         public static string InstanceDir =>
-            Path.Combine(
+            Environment.GetEnvironmentVariable("VSDBGMCP_DATA_DIR") ?? Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 Product);
 

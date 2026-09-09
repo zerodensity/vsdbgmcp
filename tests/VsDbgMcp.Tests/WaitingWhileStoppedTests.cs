@@ -170,8 +170,8 @@ namespace VsDbgMcp.Tests
 
             Assert.Contains("timeout", text);
             Assert.DoesNotContain("Still running", text);
-            Assert.Contains("nothing", text);
-            Assert.Contains("status", text);
+            Assert.Contains("unknown", text);
+            Assert.Contains("not queried", text);
         }
 
         [Fact]
@@ -233,6 +233,57 @@ namespace VsDbgMcp.Tests
         }
 
         Task Connect() => new LifecycleTools(_sessions).Status(null, CancellationToken.None);
+
+        [Fact]
+        public async Task A_launch_retry_preserves_the_stop_and_the_next_real_run_advances_generation()
+        {
+            await Connect();
+            _host.RaiseModeChange(DebugModes.Design);
+            _host.RaiseModeChange(DebugModes.Run);
+            StopAtBreakpoint();
+            var wait = new ExecutionTools(_sessions);
+            await wait.Wait(1, structured: true);
+            var generation = _sessions.Events.Generation(_host.InstanceId);
+            await new LifecycleTools(_sessions).Launch(requestId: "same-successful-operation");
+            await new LifecycleTools(_sessions).Launch(requestId: "same-successful-operation");
+            Assert.Equal(generation, _sessions.Events.Generation(_host.InstanceId));
+            var stillStopped = Newtonsoft.Json.Linq.JObject.Parse(await wait.Wait(1, structured: true));
+            Assert.Equal("already-stopped", (string)stillStopped["outcome"]);
+            _host.RaiseModeChange(DebugModes.Design);
+            _host.RaiseModeChange(DebugModes.Run);
+            Assert.Equal(generation + 1, _sessions.Events.Generation(_host.InstanceId));
+        }
+
+        [Fact]
+        public async Task Structured_stop_repeats_and_buffered_modules_are_always_json()
+        {
+            await Connect();
+            StopAtBreakpoint();
+            var wait = new ExecutionTools(_sessions);
+            var first = Newtonsoft.Json.Linq.JObject.Parse(await wait.Wait(1, structured: true));
+            var repeat = Newtonsoft.Json.Linq.JObject.Parse(await wait.Wait(1, structured: true));
+            Assert.Equal("event", (string)first["outcome"]);
+            Assert.True((bool)first["eventReceived"]);
+            Assert.Equal("already-stopped", (string)repeat["outcome"]);
+            Assert.False((bool)repeat["eventReceived"]);
+            _host.RaiseModuleLoad(new ModuleLoadEvent { Name = "plugin.dll", SymbolsLoaded = true });
+            var module = Newtonsoft.Json.Linq.JObject.Parse(await wait.Wait(1, "module:plugin", structured: true));
+            Assert.Equal("already-loaded", (string)module["outcome"]);
+            Assert.False((bool)module["eventReceived"]);
+            Assert.Equal("plugin.dll", (string)module["module"]["Name"]);
+        }
+
+        [Fact]
+        public async Task A_first_breakpoint_before_the_mode_event_counts_the_new_run_once()
+        {
+            await Connect();
+            _host.RaiseModeChange(DebugModes.Design);
+            var generation = _sessions.Events.Generation(_host.InstanceId);
+            StopAtBreakpoint();
+            Assert.Equal(generation + 1, _sessions.Events.Generation(_host.InstanceId));
+            _host.RaiseModeChange(DebugModes.Break);
+            Assert.Equal(generation + 1, _sessions.Events.Generation(_host.InstanceId));
+        }
 
         void StopAtBreakpoint() => _host.RaiseStop(new StopEvent
         {

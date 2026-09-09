@@ -394,7 +394,7 @@ namespace VsDbgMcp.Tests
                     Pipe = pipe,
                     Token = "t",
                     Contract = Names.ContractVersion,
-                    DebugMode = DebugModes.Break,
+                    DebugMode = DebugModes.Design,
                     Workspace = new WorkspaceInfo
                     {
                         Kind = WorkspaceKind.Sln,
@@ -430,7 +430,7 @@ namespace VsDbgMcp.Tests
             var text = await new LifecycleTools(_sessions)
                 .Launch(null, null, false, false, null, CancellationToken.None);
 
-            Assert.Contains("belongs to a different run", text);
+            Assert.Contains("belong to a different run", text);
         }
 
         /// <summary>

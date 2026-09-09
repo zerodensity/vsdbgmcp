@@ -195,9 +195,7 @@ namespace VsDbgMcp.Shim
             // Nothing was asked and nothing answered, so the timeout says only that.
             // "Still running" was a claim, and nothing had established it.
             if (e == null)
-                return "timeout: no stop arrived within the timeout. That is neither evidence that the " +
-                       "debuggee is running nor evidence that a breakpoint was never reached - nothing " +
-                       "here checked either. status reads the debugger's mode live.";
+                return "timeout: no stop event received. Current debugger mode: unknown (not queried).";
 
             var sb = new StringBuilder();
             sb.Append(e.InstanceId).Append("  gen ").Append(e.Generation > 0 ? e.Generation.ToString(CultureInfo.InvariantCulture) : "?");
@@ -271,7 +269,7 @@ namespace VsDbgMcp.Shim
                        "here checked whether the debuggee is running; status reads the mode live.";
 
             var sb = new StringBuilder();
-            sb.Append(e.InstanceId).Append("  module loaded: ").Append(e.Name ?? "?");
+            sb.Append(e.InstanceId).Append(e.AlreadyLoaded ? "  module already loaded: " : "  module loaded: ").Append(e.Name ?? "?");
             sb.Append(e.SymbolsLoaded ? "  symbols" : "  NO SYMBOLS");
             if (!e.SymbolsLoaded && !string.IsNullOrEmpty(e.SymbolStatus))
                 sb.Append("  -- ").Append(e.SymbolStatus);
@@ -375,6 +373,7 @@ namespace VsDbgMcp.Shim
         public static string Breakpoint(BreakpointInfo b)
         {
             if (b == null) return "Breakpoint not set.";
+            if (b.Pending) return "Breakpoint operation " + b.OperationId + " pending" + (b.Id > 0 ? " (#" + b.Id + ")" : "") + ". " + b.BindState;
             var sb = new StringBuilder();
             sb.Append('#').Append(b.Id).Append("  ").Append(Where(b));
             sb.Append(b.Bound ? "  bound" : "  UNBOUND");
@@ -383,6 +382,7 @@ namespace VsDbgMcp.Shim
             sb.AppendLine();
             if (!b.Bound && !string.IsNullOrEmpty(b.StaleModules)) sb.AppendLine(b.StaleModules);
             Tracepoint(sb, b);
+            if (b.OperationId != null) sb.Append("operation: ").AppendLine(b.OperationId);
             return sb.ToString().TrimEnd();
         }
 
@@ -959,12 +959,22 @@ namespace VsDbgMcp.Shim
         public static string Build(BuildResult b)
         {
             if (b == null) return "No build result.";
-            if (b.Cancelled) return "Build cancelled after " + b.ElapsedSeconds.ToString("0.0", CultureInfo.InvariantCulture) + "s.";
+            if (b.State != null && b.State != "succeeded" && b.State != "failed" && b.State != "cancelled")
+                return "Build " + b.OperationId + ": " + b.State + ". Evidence: " + b.EvidenceSource + ". " + b.Message + " Raw log: " + b.LogPath;
+            if (b.Cancelled) return "Build " + b.OperationId + " cancelled after " + b.ElapsedSeconds.ToString("0.0", CultureInfo.InvariantCulture) + "s.";
 
             var sb = new StringBuilder();
             sb.Append(b.Succeeded ? "Build succeeded" : "Build FAILED");
             sb.Append(" in ").Append(b.ElapsedSeconds.ToString("0.0", CultureInfo.InvariantCulture)).Append('s');
-            sb.Append("  ").Append(b.TotalErrors).Append(" errors, ").Append(b.TotalWarnings).AppendLine(" warnings");
+            if (b.OperationId != null) sb.Append("  [").Append(b.OperationId).Append(']');
+            sb.Append("  ").Append(b.TotalErrors).Append(" errors, ").Append(b.TotalWarnings).AppendLine(" warnings parsed from build output");
+            if (b.OperationId != null)
+            {
+                sb.Append("Warnings: ").Append(b.UniqueWarnings).AppendLine(" unique parsed diagnostics.");
+                if (!b.DiagnosticsComplete) sb.AppendLine("Complete diagnostic counts: unknown; custom/localized output may not be parsed.");
+                sb.Append("Evidence: ").AppendLine(b.EvidenceSource);
+                sb.Append("Raw log: ").AppendLine(b.LogPath);
+            }
 
             if (b.Diagnostics != null && b.Diagnostics.Count > 0)
             {
@@ -1102,8 +1112,9 @@ namespace VsDbgMcp.Shim
         public static Reply Op(OpResult r, string success)
         {
             if (r == null) return Reply.Bad("No result.");
-            if (r.Ok) return string.IsNullOrEmpty(r.Message) ? success : r.Message;
-            return Reply.Bad("Failed: " + (r.Message ?? "no reason given"));
+            var message = r.Ok ? (string.IsNullOrEmpty(r.Message) ? success : r.Message) : "Failed: " + (r.Message ?? "no reason given");
+            if (r.OperationId != null) message += "\nOperation: " + r.OperationId + ", " + (r.Pending ? "pending (" + r.State + ")" : r.State) + ".";
+            return r.Ok ? (Reply)message : Reply.Bad(message);
         }
     }
 }

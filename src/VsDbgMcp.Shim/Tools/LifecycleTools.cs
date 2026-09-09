@@ -63,7 +63,7 @@ namespace VsDbgMcp.Shim.Tools
             }
 
             var reply = Render.Op(result, success);
-            if (!reply.Failed) return reply.Text + "\n" + note;
+            if (!reply.Failed) return result.Pending ? reply.Text : reply.Text + "\n" + note;
 
             Sessions.Events.RunNotStarted(link.Id);
             return reply;
@@ -77,22 +77,32 @@ namespace VsDbgMcp.Shim.Tools
             => On(instance, ct, async link =>
             {
                 var status = await link.Debug.GetStatusAsync(ct).ConfigureAwait(false);
-                return Render.Status(status, Sessions.Events.Generation(link.Id));
+                var text = Render.Status(status, Sessions.Events.Generation(link.Id));
+                if (status.Observation != null)
+                {
+                    var observed = status.Observation;
+                    text += "\nHost session generation: " + observed.SessionGeneration + ", observed " + observed.TimestampUtc.ToString("O") + ".";
+                    text += "\nActive CPU capture: " + (observed.ActiveProfile == null ? "none" : observed.ActiveProfile.CaptureId + " PID " + observed.ActiveProfile.Pid + " " + observed.ActiveProfile.Status);
+                    if (observed.LastProfile != null) text += "\nLatest retained capture: " + observed.LastProfile.CaptureId + " PID " + observed.LastProfile.Pid + " generation " + observed.LastProfile.SessionGeneration;
+                }
+                return text;
             });
 
         [McpServerTool(Name = "launch")]
-        [Description("Start debugging (F5). Blocks until the process is running or has already stopped, then reports which. Does not return before the debuggee exists, so there is no need to poll afterwards.")]
+        [Description("Start debugging (F5). Blocks until the process is running or has already stopped, then reports which. Returns a confirmed state or a pending operationId after 30 seconds. Query operation_status before retrying.")]
         public Task<string> Launch(
             [Description("Project to launch. Omit to use the solution's startup project.")] string project = null,
             [Description("Command line arguments for the debuggee.")] string args = null,
             [Description("Break at the entry point instead of running to the first breakpoint.")] bool stopAtEntry = false,
             [Description("Run without the debugger attached (Ctrl+F5). Breakpoints will not hit.")] bool noDebug = false,
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            [Description("Stable request ID; reuse identical arguments after a timeout.")] string requestId = null)
             => On(instance, ct, async link =>
             {
                 var request = new LaunchRequest
                 {
+                    RequestId = requestId,
                     Project = project,
                     Args = args,
                     StopAtEntry = stopAtEntry,
@@ -105,9 +115,12 @@ namespace VsDbgMcp.Shim.Tools
                 if (noDebug)
                     return Render.Op(await link.Debug.LaunchAsync(request, ct).ConfigureAwait(false), "Launched.");
 
-                Sessions.Events.MarkSeen(link.Id);
-                return await StartRun(link, () => link.Debug.LaunchAsync(request, ct), "Launched.", NewRun)
-                    .ConfigureAwait(false);
+                // A retry can return a previous operation, even after reconnecting.
+                // Only actual debugger events establish a new launch session.
+                var result = await link.Debug.LaunchAsync(request, ct).ConfigureAwait(false);
+                var reply = Render.Op(result, "Launched.");
+                return !reply.Failed && !result.Pending ? reply.Text + "\nIdentities from before this operation's run belong to a different run. " +
+                    "A requestId retry returns that same operation; compare the generation number before reusing identities." : reply;
             }, args ?? project);
 
         [McpServerTool(Name = "attach")]

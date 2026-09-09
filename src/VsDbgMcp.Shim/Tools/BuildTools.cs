@@ -13,34 +13,40 @@ namespace VsDbgMcp.Shim.Tools
         public BuildTools(SessionManager sessions) : base(sessions) { }
 
         [McpServerTool(Name = "build")]
-        [Description("Build, rebuild, or clean, and block until it finishes. Returns the errors themselves - deduplicated, with file and line, worst first - not the raw build log. There is no build-status tool because this one does not return early.")]
+        [Description("Build, rebuild, or clean with a recoverable operation ID. Returns the errors themselves - deduplicated, with file and line, worst first - not the raw build log. Waits up to waitSeconds, then returns an operationId for operation_status. A wait timeout does not cancel the build.")]
         public Task<string> Build(
             [Description("build, rebuild, or clean.")] string mode = "build",
             [Description("Project to build. Omit to build the whole solution.")] string project = null,
             [Description("Configuration such as Debug or Release. Omit to keep the current one.")] string configuration = null,
             [Description("Platform such as x64. Omit to keep the current one.")] string platform = null,
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            [Description("Stable caller request ID. Reuse with identical arguments after a transport timeout.")] string requestId = null,
+            [Description("Maximum seconds to wait, 0 to 60. Zero starts and returns immediately.")] int waitSeconds = 30)
             => On(instance, ct, async link =>
             {
                 var normalized = (mode ?? "build").Trim().ToLowerInvariant();
                 if (normalized != "build" && normalized != "rebuild" && normalized != "clean")
                     return "mode must be build, rebuild, or clean.";
 
-                var result = await link.Project.BuildAsync(normalized, project, configuration, platform, ct)
-                    .ConfigureAwait(false);
-                return Render.Build(result);
+                var operation = await link.Project.BuildBeginAsync(new VsDbgMcp.Contracts.BuildRequest {
+                    RequestId = requestId, Mode = normalized, Project = project, Configuration = configuration,
+                    Platform = platform, WaitSeconds = waitSeconds }, ct).ConfigureAwait(false);
+                if (operation.Build != null) return Render.Build(operation.Build);
+                return "Build " + operation.OperationId + ": " + operation.State + ". " + operation.Message +
+                    (operation.Terminal ? "" : " Query operation_status to wait or recover its result.");
             }, project == null ? mode : mode + " " + project);
 
         [McpServerTool(Name = "build_cancel")]
         [Description("Cancel a build that is in progress. Use this when a build is taking far longer than it should rather than waiting out the timeout.")]
         public Task<string> BuildCancel(
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            [Description("Build operation ID. Omit for the latest build owned by this host.")] string operationId = null)
             => On(instance, ct, async link =>
             {
-                var result = await link.Project.BuildCancelAsync(ct).ConfigureAwait(false);
-                return Render.Op(result, "Build cancelled.");
+                var result = await link.Project.BuildCancelOperationAsync(operationId, ct).ConfigureAwait(false);
+                return Render.Op(result, "Cancel request returned.");
             });
 
         [McpServerTool(Name = "build_output", ReadOnly = true)]

@@ -39,7 +39,7 @@ namespace VsDbgMcp.Shim.Profiling
         public static Capture Read(ProfileCollection collection, IReadOnlyList<ModuleInfo> modules, out string error)
         {
             error = null;
-            var workspace = Path.Combine(Path.GetTempPath(), "vsdbgmcp-profile-" + collection.Pid);
+            var workspace = Path.Combine(Path.GetTempPath(), "vsdbgmcp-profile-" + Guid.NewGuid().ToString("N"));
 
             try
             {
@@ -56,7 +56,7 @@ namespace VsDbgMcp.Shim.Profiling
             finally
             {
                 Discard(workspace);
-                Discard(collection.Path);
+                // The caller owns retention and deletes only after durable aggregation.
             }
         }
 

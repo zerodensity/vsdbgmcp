@@ -28,6 +28,8 @@ namespace VsDbgMcp.Shim.Session
 
         public InstanceRecord Record { get; private set; }
         public IDebugHost Debug { get; private set; }
+        public IOperationHost Operations { get; private set; }
+        public IProfileHost Profiles { get; private set; }
         public IProjectSystem Project { get; private set; }
         public string HostVersion { get; private set; }
         public string LastError { get; private set; }
@@ -63,7 +65,12 @@ namespace VsDbgMcp.Shim.Session
                 _rpc = new JsonRpc(new HeaderDelimitedMessageHandler(_pipe, _pipe, formatter));
                 _rpc.AddLocalRpcTarget<IShimEvents>(this, null);
                 Debug = _rpc.Attach<IDebugHost>();
+                Operations = _rpc.Attach<IOperationHost>();
+                Profiles = _rpc.Attach<IProfileHost>();
                 Project = _rpc.Attach<IProjectSystem>();
+                // Seed before callbacks can arrive. Reconnecting invalidates observations
+                // from the gap, even if the instance record still names the same PID.
+                _bus.InitializeMode(Id, Record.DebugMode);
                 _rpc.StartListening();
 
                 HostVersion = await Debug.HandshakeAsync(Names.ContractVersion, Record.Token).ConfigureAwait(false);
@@ -87,6 +94,8 @@ namespace VsDbgMcp.Shim.Session
             _rpc = null;
             _pipe = null;
             Debug = null;
+            Operations = null;
+            Profiles = null;
             Project = null;
         }
 
@@ -97,6 +106,7 @@ namespace VsDbgMcp.Shim.Session
             if (stop != null)
             {
                 stop.InstanceId = Id;
+                _bus.ObserveStopMode(Id, stop.Mode);
                 _bus.Publish(stop);
                 if (!string.IsNullOrEmpty(stop.Mode)) Record.DebugMode = stop.Mode;
             }

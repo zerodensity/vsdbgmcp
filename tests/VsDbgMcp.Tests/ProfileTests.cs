@@ -372,20 +372,18 @@ namespace VsDbgMcp.Tests
         }
 
         [Fact]
-        public void Asking_for_a_tree_of_one_module_is_refused_rather_than_answered_for_everything()
+        public void Module_and_tree_filters_compose()
         {
             var clash = new ProfileQuery { Module = "app", Sort = ProfileQuery.Inclusive }.Conflict(false);
 
-            Assert.NotNull(clash);
-            Assert.Contains("sort: inclusive", clash);
-            Assert.Contains("module", clash);
+            Assert.Null(clash);
         }
 
         [Theory]
-        [InlineData("function", "thread")]
-        [InlineData("function", "sort")]
-        [InlineData("thread", "sort")]
-        public void Any_two_readings_clash(string first, string second)
+        [InlineData("function", "sort", true)]
+        [InlineData("function", "thread", false)]
+        [InlineData("thread", "sort", false)]
+        public void Filters_compose_but_conflicting_views_are_rejected(string first, string second, bool conflicts)
         {
             var query = new ProfileQuery();
             foreach (var one in new[] { first, second })
@@ -395,7 +393,7 @@ namespace VsDbgMcp.Tests
                 if (one == "sort") query.Sort = ProfileQuery.Inclusive;
             }
 
-            Assert.NotNull(query.Conflict(false));
+            Assert.Equal(conflicts, query.Conflict(false) != null);
         }
 
         [Fact]

@@ -26,6 +26,9 @@ namespace VsDbgMcp.Shim.Profiling
 
         /// <summary>How many rows before the rest is folded into one line.</summary>
         public int Top { get; set; } = 12;
+        public bool Details { get; set; } = true;
+        public string Focus { get; set; }
+        public bool RawTree { get; set; }
 
         /// <summary>
         /// Refuses a query that asked for two readings at once, or null when it asked
@@ -38,22 +41,19 @@ namespace VsDbgMcp.Shim.Profiling
         /// </summary>
         public string Conflict(bool comparing)
         {
-            var asked = new System.Collections.Generic.List<string>();
-
-            if (comparing) asked.Add("against");
-            if (Function != null) asked.Add("function");
-            if (Thread != null) asked.Add("thread");
-            if (Sort != Self) asked.Add("sort: " + Sort);
-
-            // A module narrows the plain listing and nothing else, so it clashes with
-            // any other reading rather than only with particular ones.
-            if (Module != null && asked.Count > 0) asked.Add("module");
-
-            if (asked.Count < 2) return null;
-
-            return string.Join(" and ", asked.ToArray()) +
-                   " are different readings of the profile, and this answers one at a time. " +
-                   "Ask for one, then the other; the profile is kept, so the second is free.";
+            var fields = new System.Collections.Generic.List<string>();
+            if (Function != null) fields.Add("function");
+            if (Thread != null) fields.Add("thread");
+            if (Module != null) fields.Add("module");
+            if (Sort != Self) fields.Add("sort");
+            if (Focus != null) fields.Add("focus");
+            if (comparing && fields.Count > 0)
+                return "against conflicts with " + string.Join(", ", fields) + ". Valid request: {\"capture\":1,\"against\":2}.";
+            if (Function != null && (Sort != Self || Focus != null))
+                return "function conflicts with sort/focus. Valid request: {\"function\":\"Name\",\"thread\":123}. Use focus with sort=\"inclusive\" for a subtree.";
+            if (Focus != null && Sort != Inclusive)
+                return "focus requires sort=inclusive. Valid request: {\"sort\":\"inclusive\",\"focus\":\"Name\"}.";
+            return null;
         }
     }
 }

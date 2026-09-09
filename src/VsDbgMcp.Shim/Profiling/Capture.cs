@@ -17,6 +17,9 @@ namespace VsDbgMcp.Shim.Profiling
     public sealed class Capture
     {
         public int Id { get; set; }
+        public string CaptureId { get; set; }
+        public VsDbgMcp.Contracts.ProfileCollection Metadata { get; set; }
+        public int AggregationVersion { get; set; } = 1;
         public string ProcessName { get; set; }
         public int Pid { get; set; }
         public double Seconds { get; set; }
@@ -355,7 +358,7 @@ namespace VsDbgMcp.Shim.Profiling
         /// </summary>
         public bool TreeWasCut { get; private set; }
 
-        public List<Node> Tree(double prune = 0.01, int limit = 40)
+        public List<Node> Tree(double prune = 0.01, int limit = 40, bool raw = false)
         {
             var nodes = new List<Node>();
             TreeWasCut = false;
@@ -363,7 +366,7 @@ namespace VsDbgMcp.Shim.Profiling
             var total = live.Sum(s => s.Samples);
             if (total == 0) return nodes;
 
-            var from = EntryDepth();
+            var from = raw ? 0 : EntryDepth();
             Walk(live, from, from, total, prune, limit, nodes);
             TreeWasCut = nodes.Count >= limit;
             return nodes;

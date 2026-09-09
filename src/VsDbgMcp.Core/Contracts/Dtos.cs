@@ -5,6 +5,9 @@ namespace VsDbgMcp.Contracts
 {
     public sealed class OpResult
     {
+        public string OperationId { get; set; }
+        public string State { get; set; }
+        public bool Pending { get; set; }
         public bool Ok { get; set; }
         public string Message { get; set; }
 
@@ -82,6 +85,7 @@ namespace VsDbgMcp.Contracts
     /// </summary>
     public sealed class ModuleLoadEvent
     {
+        public bool AlreadyLoaded { get; set; }
         public string InstanceId { get; set; }
         public string Name { get; set; }
         public string Path { get; set; }
@@ -127,6 +131,7 @@ namespace VsDbgMcp.Contracts
 
     public sealed class HostStatus
     {
+        public StateObservation Observation { get; set; }
         public string InstanceId { get; set; }
         public WorkspaceInfo Workspace { get; set; }
         public string Mode { get; set; }
@@ -201,6 +206,7 @@ namespace VsDbgMcp.Contracts
 
     public sealed class BreakpointRequest
     {
+        public string RequestId { get; set; }
         public string Kind { get; set; } = BreakpointKind.Location;
         public string File { get; set; }
         public int Line { get; set; }
@@ -328,6 +334,8 @@ namespace VsDbgMcp.Contracts
 
     public sealed class BreakpointInfo
     {
+        public string OperationId { get; set; }
+        public bool Pending { get; set; }
         public int Id { get; set; }
         public string Kind { get; set; }
         public string File { get; set; }
@@ -818,7 +826,23 @@ namespace VsDbgMcp.Contracts
     /// </summary>
     public sealed class ProfileCollection
     {
-        /// <summary>The .diagsession the collector wrote. The reader owns it and deletes it.</summary>
+        public string CaptureId { get; set; }
+        public string CollectorSessionId { get; set; }
+        public bool? RawAvailable { get; set; }
+        public string InstanceId { get; set; }
+        public string HostEpoch { get; set; }
+        public int SessionGeneration { get; set; }
+        public DateTime StartedUtc { get; set; }
+        public DateTime? EndedUtc { get; set; }
+        public DateTime? ProcessStartedUtc { get; set; }
+        public string Configuration { get; set; }
+        public string Executable { get; set; }
+        public string Status { get; set; }
+        public bool RetainRaw { get; set; }
+        public List<ModuleInfo> Modules { get; set; }
+        public List<Intervention> Interventions { get; set; }
+        public string MetadataPath { get; set; }
+        /// <summary>The collector package. Delete only after successful durable aggregation unless retention was requested.</summary>
         public string Path { get; set; }
 
         public string ProcessName { get; set; }
@@ -860,6 +884,10 @@ namespace VsDbgMcp.Contracts
 
     public sealed class BuildDiagnostic
     {
+        public string OperationId { get; set; }
+        public string Configuration { get; set; }
+        public string Source { get; set; }
+        public DateTime TimestampUtc { get; set; }
         public string Severity { get; set; }
         public string Code { get; set; }
         public string Text { get; set; }
@@ -871,6 +899,12 @@ namespace VsDbgMcp.Contracts
 
     public sealed class BuildResult
     {
+        public string OperationId { get; set; }
+        public string State { get; set; }
+        public bool DiagnosticsComplete { get; set; }
+        public int UniqueWarnings { get; set; }
+        public string EvidenceSource { get; set; }
+        public string LogPath { get; set; }
         public bool Succeeded { get; set; }
         public bool Cancelled { get; set; }
         public double ElapsedSeconds { get; set; }
@@ -882,6 +916,7 @@ namespace VsDbgMcp.Contracts
 
     public sealed class LaunchRequest
     {
+        public string RequestId { get; set; }
         public string Project { get; set; }
         public string Args { get; set; }
         public Dictionary<string, string> Env { get; set; }
