@@ -8,6 +8,10 @@ Status: built and working. Sections 1 to 13 are the design as intended; section
 14 records what building it actually changed, and the README says what has and
 has not been exercised against a live debuggee.
 
+The tool catalog below reflects 0.8.0. Later operation and capture semantics are
+documented in [Recoverable operations and captures](iteration_4.md); they supersede
+the original blocking and transient-profile design described here.
+
 ## 1. Goals
 
 1. **One global client config.** Configure it once per machine and it works in
@@ -270,12 +274,13 @@ Names are short and unprefixed; MCP clients namespace by server already.
 **Session** (2)
 `instances()`, `use(instance)`
 
-**Lifecycle** (8)
+**Lifecycle** (11)
 `status()` — instance, workspace, mode, current thread and frame, top frames,
 pending exception, breakpoints hit, pinned watch values. One cheap call.
 `launch(project?, args?, env?, stopAtEntry?, noDebug?)`,
 `attach(pid | nameRegex)`, `detach(process?)`, `stop(process?)`, `restart()`,
 `processes()`, `dump_open(path)`
+`debug_state()`, `operations()`, `operation_status(operationId, waitSeconds?)`
 
 **Execution** (6)
 `wait(timeout, for?, instance?)`, `go()`, `pause()`, `step(kind, count?)`,
@@ -287,16 +292,19 @@ and size; plus condition, hit count, and log message for tracepoints.
 `bp_list()`, `bp_remove(id)`, `bp_enable(id, on)`,
 `trace_read(id, tail?)`, `exceptions_set(category, code, breakOn)`
 
-**Inspection** (15)
+**Inspection** (16)
 `threads(depth?)`, `stack(thread?, count?)`, `select(thread?, frame?)`,
 `freeze(thread, on)`, `eval(expr, opts)`, `vars(scope, depth, filter)`,
 `expand(ref, depth, index?, key?)`, `watch_set(exprs[])`, `memory(addrOrExpr, size, format)`,
 `registers(group?)`, `disasm(addr?, count)`, `modules(filter?)`,
 `symbols(module, load?)`, `scratch(type?, bytes?)`, `scratch_free(address)`
+`frame(thread?, frame?, maxVariables?)`
 
-**Profiling** (3)
+**Profiling** (7)
 `profile_start()`, `profile_stop()`,
 `profile_report(capture?, against?, function?, module?, thread?, sort?, top?)`
+`profile_status()`, `profile_recover(captureId)`, `profile_recover_stop(captureId)`,
+`profile_export(directory, capture?, includeRaw?, captureId?)`
 
 **Evidence** (2)
 `triage()`, `capture(region?)`
@@ -305,12 +313,13 @@ and size; plus condition, hit count, and log message for tracepoints.
 `console_read(tail?)`, `console_send(text | keys)`,
 `output(pane, pattern?, tail?)`
 
-**Build** (5)
+**Build** (6)
 `build(mode, project?, config?, platform?)` where mode is build, rebuild, or
 clean. `build_cancel()`, `build_output(pattern?)`, `config(get|set)`,
 `startup_project(get|set)`
+`build_log(operationId, offset?, maxChars?)`
 
-**50 tools.** What is held to is what each one is: a tool answers one question.
+**59 tools.** What is held to is what each one is: a tool answers one question.
 A tool that needs a mode argument to say which question it is answering is two
 tools, and a question already answered does not need a second way to ask it.
 

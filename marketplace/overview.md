@@ -10,8 +10,16 @@ Studio windows can be driven from one agent session.
 
 **Waiting works.** `wait` blocks on the debugger's own events and reports *why* execution
 stopped — which breakpoint, which exception, a step completing, the process exiting.
-Nothing here asks an agent to poll for a state change, and `build` and `launch` block to
-completion for the same reason.
+A timeout reports that no event arrived, alongside a timestamped state observation;
+it does not claim the program is running or making progress. Structured responses
+also distinguish a new stop from one the debugger is still sitting at.
+
+**Long operations keep their identity.** `build`, `launch`, and `bp_set` return a result
+or a pending operation ID after a bounded wait. `operation_status` can read or wait for
+that operation without entering Visual Studio's UI queue. Retrying with the same
+`requestId` and arguments reuses the request within the same host session. Build logs
+remain available for each invocation, and diagnostic counts describe the captured build
+output, so an old Error List entry cannot decide whether the new build succeeded.
 
 **One configuration, every window.** The agent launches the shim in its working
 directory; the shim finds the Visual Studio that has the matching solution open and
@@ -34,18 +42,27 @@ reply and cannot expand a tree, so a dead end costs it the whole question.
 a process the debugger is **already** attached to, so a profile is something taken
 during a debug session rather than instead of one.
 
-What comes back is not a file to open. The trace is read and thrown away, and
-`profile_report` answers from what is left, as often as you like and without collecting
-again: who calls a hot function and which of its source lines the samples landed on, the
-same samples as a call tree, a roll-up per binary — the first question to ask of a host
-with plugins in it — one thread on its own, or what moved since an earlier capture, in
-percentage points.
+The first report is compact. `profile_report` can then show who calls a hot function,
+which source lines the samples landed on, a call tree, a roll-up per binary, or what
+moved since an earlier capture. Module and thread filters combine with the selected
+view; `focus` selects a subtree and `details` adds coverage and capture metadata.
+
+Each capture has a stable ID, owner process, session information, timestamps, and
+debugger intervention markers. Results persist across reconnects. `profile_status`
+lists saved captures, `profile_recover` reads a completed package after an interruption,
+and `profile_recover_stop` explicitly stops a retained collector session before recovery.
+`profile_export` writes structured JSON, a readable report, and an optional raw trace.
+
+Raw traces are deleted only after the aggregate is saved successfully, unless raw
+retention was requested with `profile_start(retainRaw: true)` or recovery needs the
+evidence. Retention limits are configurable. Late-loaded module symbols are added to
+the capture's saved catalog when available.
 
 Function names come from the symbols the debugger has already loaded for the session, so
 there is no wait on a symbol server for modules nobody asked about. And because CPU
-sampling cannot see a thread that is blocked, every profile accounts for the processor
-time actually used against how long the clock ran, or says it cannot: a program stuck on
-a lock reads as a program stuck on a lock, not as a program with nothing slow in it.
+sampling cannot see a thread that is blocked, reports distinguish sampled CPU work from
+elapsed time and expose available coverage information. Few samples do not establish
+that nothing was slow, or identify what a thread was waiting for.
 
 ## Setup
 
@@ -90,7 +107,7 @@ all.
 
 ## Tools
 
-50 of them, grouped as: session, lifecycle, execution, breakpoints, inspection,
+59 of them, grouped as: session, lifecycle, execution, breakpoints, inspection,
 profiling, evidence, debuggee I/O, and build.
 
 Worth knowing about:
@@ -98,6 +115,16 @@ Worth knowing about:
 - **`wait`** — pass `instance: "any"` to return as soon as *any* connected window stops,
   which is how you debug a client and a server at once. `for: "module:NAME"` waits for a
   module to load, which is how to arm breakpoints in a plugin before its host loads it.
+- **`operation_status` / `operations`** — find a retained operation and follow its
+  outcome after the original call stopped waiting. `wait(for: "operation:ID")` can
+  wait for it too.
+- **`build_log`** — read one build's saved output incrementally, even after another
+  build has run. Parsed warning occurrences and unique warnings are reported separately.
+- **`debug_state`** — a bounded snapshot of debugger mode, registered processes,
+  session generation, and active and retained captures, without evaluating watches.
+- **`frame`** — the current location, source and module checks, arguments, locals,
+  and suspect values in one reply. It takes a second reading of doubtful values before
+  reporting what could not be established.
 - **`eval`** — refuses to call functions unless you pass `allowSideEffects`, because the
   native evaluator really runs them.
 - **`scratch`** — the evaluator will not invent a temporary, so a function with a
@@ -130,7 +157,14 @@ missing, `profile_start` says so and names what to install.
   Visual Studio 2026, so there is no category to configure. The tool says so plainly
   rather than pretending.
 - Profiling is CPU sampling only. Time spent blocked is invisible to it, which every
-  profile says. Allocation and file I/O collectors exist and are not wired up.
+  profile says. Scheduler/off-CPU tracing, allocation, and file I/O collectors are
+  not wired up. Intervention markers do not measure how long the target was paused.
+- An operation timeout does not cancel a build or interrupt a COM call stuck inside
+  Visual Studio. Unobserved outcomes remain pending or unknown. After a host restart,
+  inspect the saved operation ID before issuing a new request.
+- Build diagnostic counts cover recognized output, not every possible compiler or
+  localized message. Complete counts remain unknown; the retained log supplies the
+  underlying evidence.
 - A PDB's GUID and age are not reported; the debug interfaces do not expose them. The
   image's own time stamp and the engine's verbose symbol search answer the same question
   by another route.
