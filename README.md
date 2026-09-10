@@ -131,7 +131,7 @@ connections, and anything that went wrong inside the extension.
 
 ## Tools
 
-59 tools.
+60 tools.
 
 | | |
 |---|---|
@@ -143,7 +143,7 @@ connections, and anything that went wrong inside the extension.
 | **profiling** | `profile_start` `profile_stop` `profile_report` `profile_status` `profile_recover` `profile_recover_stop` `profile_export` |
 | **evidence** | `triage` `capture` |
 | **debuggee I/O** | `console_read` `console_send` `output` |
-| **build** | `build` `build_cancel` `build_output` `build_log` `config` `startup_project` |
+| **build** | `build` `build_cancel` `build_output` `build_log` `build_diagnostics` `config` `startup_project` |
 
 Notes on a few:
 
@@ -259,12 +259,13 @@ Studio, since the VSIX packaging tasks are .NET Framework assemblies.
 
 [Iteration 4](docs/iteration_4.md) documents operation IDs, invocation-scoped build
 output, bounded debugger snapshots, durable profiling, retention settings and exports.
-The host/shim contract is now version 7; update both together. Live validation of
-these changes remains outstanding after an experimental-instance setup blocker.
+[Iteration 5](docs/iteration_5.md) adds actionable operation status, structured
+MSBuild binary-log import, and repeatable live tests in an isolated VS profile.
+Version 0.9.0 uses host/shim contract 8; update both together.
 
 ## Status
 
-563 automated tests cover routing, discovery, the event bus, and the whole shim path —
+585 automated tests cover routing, discovery, the event bus, and the whole shim path —
 discovery file, named pipe, JSON-RPC, rendering — against a stand-in for the extension,
 plus the pure decisions: which expression forms to try against a module, which values are
 allocator fill, whether a source file outran its binary, whether a module was deployed
@@ -318,6 +319,13 @@ process's exit with the new run's number, reporting two runs as one.
 
 Known gaps:
 
+- **A timeout cannot interrupt a COM call.** `operation_status` gives the retained
+  outcome and next tool call, with a bounded live check. Unknown outcomes stay
+  unknown even when VS becomes idle; inspect effects before deciding to retry.
+- **Live build output parsing is incomplete.** `build_diagnostics` reads structured
+  warning/error events from a separately recorded MSBuild `.binlog`, including
+  project/configuration ownership. It does not automatically record VS builds or
+  count tool messages emitted only as text.
 - **`exceptions_set` does not work.** `DTE.Debugger.ExceptionGroups` returns nothing on
   Visual Studio 2026, so there is no category to configure. The tool reports that rather
   than pretending. Making it work means going to the debug engine directly, the same way

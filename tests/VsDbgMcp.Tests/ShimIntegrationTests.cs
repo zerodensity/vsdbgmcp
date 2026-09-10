@@ -70,6 +70,17 @@ namespace VsDbgMcp.Tests
         }
 
         [Fact]
+        public async Task Operation_status_returns_an_actionable_response_over_the_pipe()
+        {
+            var result = await new OperationTools(_sessions).Status("build-test");
+            Assert.Equal("build-test", result.OperationId);
+            Assert.Equal("pending", result.State);
+            Assert.Equal("operation_status", result.NextAction.Tool);
+            Assert.Equal("build-test", result.NextAction.Arguments["operationId"]);
+            Assert.Null(result.Details);
+        }
+
+        [Fact]
         public async Task The_working_directory_alone_reaches_the_right_instance()
         {
             var status = await new LifecycleTools(_sessions).Status(null, CancellationToken.None);

@@ -441,32 +441,39 @@ namespace VsDbgMcp.Host
             {
                 ThreadHelper.ThrowIfNotOnUIThread();
 
-                if (CurrentMode != DebugModes.Design)
-                    return OpResult.Bad("A debug session is already active; no launch was issued.");
-
-                if (!string.IsNullOrEmpty(request.Project))
+                if (operationId != null && !HostOperations.Store.TryStartCommand(operationId))
+                    return OpResult.Bad("Launch record closed before dispatch; no command issued.");
+                try
                 {
-                    var set = SetStartupProject(request.Project);
-                    if (!set.Ok) return set;
+
+                    if (CurrentMode != DebugModes.Design)
+                        return OpResult.Bad("A debug session is already active; no launch was issued.");
+
+                    if (!string.IsNullOrEmpty(request.Project))
+                    {
+                        var set = SetStartupProject(request.Project);
+                        if (!set.Ok) return set;
+                    }
+
+                    if (!string.IsNullOrEmpty(request.Args))
+                    {
+                        // Launching with arguments silently dropped is worse than not
+                        // launching: the debuggee would take a path the caller did not ask for.
+                        var applied = SetStartArguments(request.Args);
+                        if (!applied.Ok)
+                            return OpResult.Bad("Could not set the debugger arguments: " + applied.Message);
+                    }
+
+                    if (operationId != null) DescribeLaunch(operationId, request);
+                    Mark("launch-requested");
+                    return Try(() =>
+                    {
+                        if (request.NoDebug) _dte.ExecuteCommand("Debug.StartWithoutDebugging");
+                        else if (request.StopAtEntry) _dte.ExecuteCommand("Debug.StepInto");
+                        else _dte.ExecuteCommand("Debug.Start");
+                    }, null);
                 }
-
-                if (!string.IsNullOrEmpty(request.Args))
-                {
-                    // Launching with arguments silently dropped is worse than not
-                    // launching: the debuggee would take a path the caller did not ask for.
-                    var applied = SetStartArguments(request.Args);
-                    if (!applied.Ok)
-                        return OpResult.Bad("Could not set the debugger arguments: " + applied.Message);
-                }
-
-                if (operationId != null) DescribeLaunch(operationId, request);
-                Mark("launch-requested");
-                return Try(() =>
-                {
-                    if (request.NoDebug) _dte.ExecuteCommand("Debug.StartWithoutDebugging");
-                    else if (request.StopAtEntry) _dte.ExecuteCommand("Debug.StepInto");
-                    else _dte.ExecuteCommand("Debug.Start");
-                }, null);
+                finally { if (operationId != null) HostOperations.Store.CommandReturned(operationId); }
             }).ConfigureAwait(false);
 
             return prepared;

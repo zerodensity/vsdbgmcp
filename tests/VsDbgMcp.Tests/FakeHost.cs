@@ -272,7 +272,7 @@ namespace VsDbgMcp.Tests
         public Task<OpResult> ProfileBeginAsync(bool retainRaw, CancellationToken ct = default) => ProfileStartAsync(ct);
         public Task<ProfileCollection> ProfileRecoverAsync(string id, CancellationToken ct = default) => Task.FromResult(new ProfileCollection { CaptureId = id });
         public Task<ProfileCollection> ProfileStopCaptureAsync(string id, CancellationToken ct = default) => ProfileRecoverAsync(id, ct);
-        public Task<OperationInfo> OperationStatusAsync(string id, int seconds, CancellationToken ct = default) => Task.FromResult(new OperationInfo { OperationId = id });
+        public Task<OperationInfo> OperationStatusAsync(string id, int seconds, CancellationToken ct = default) => Task.FromResult(new OperationInfo { OperationId = id, Kind = "build", State = "requested" });
         public Task<List<OperationInfo>> OperationsAsync(CancellationToken ct = default) => Task.FromResult(new List<OperationInfo>());
         public Task<StateObservation> ObserveAsync(CancellationToken ct = default) => Task.FromResult(new StateObservation { Mode = "run", TimestampUtc = DateTime.UtcNow });
         public async Task<OperationInfo> BuildBeginAsync(BuildRequest request, CancellationToken ct = default) =>

@@ -25,7 +25,7 @@ namespace VsDbgMcp.Host
                     var observed = Store.Read(id);
                     var issued = observed.State != "requested";
                     Store.Update(id, o => { o.State = issued ? "unknown" : "failed"; o.Message = ex.Message +
-                        (issued ? " The request may remain inside VS; reconcile before retrying." : ""); o.EvidenceSource = "host exception"; }, !issued);
+                        (issued ? " The request may remain inside VS; query operation_status before retrying." : ""); o.EvidenceSource = "host exception"; }, !issued);
                 }
             });
         }
@@ -56,10 +56,11 @@ namespace VsDbgMcp.Host
                 var path = Path.Combine(dir, id + ".json");
                 if (!File.Exists(path)) continue;
                 var record = JsonConvert.DeserializeObject<OperationInfo>(File.ReadAllText(path));
+                record.Historical = true;
                 if (!record.Terminal)
                 {
                     record.State = "unknown";
-                    record.Message = "Host restarted or unavailable; the saved record does not establish completion. Reconcile before retrying.";
+                    record.Message = "Host restarted or unavailable; the saved record does not establish completion. Inspect the command's effects before deciding whether to start another request.";
                 }
                 return record;
             }

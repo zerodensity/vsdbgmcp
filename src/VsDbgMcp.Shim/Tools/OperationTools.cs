@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,19 +15,23 @@ namespace VsDbgMcp.Shim.Tools
         public OperationTools(SessionManager sessions) : base(sessions) { }
 
         [McpServerTool(Name = "operation_status", ReadOnly = true, UseStructuredContent = true)]
-        [Description("Read a retained build, launch or breakpoint operation, optionally waiting for its terminal result. Works without the VS UI thread. A wait timeout never cancels the operation. Reuse requestId on retries to avoid duplicates.")]
-        public async Task<OperationInfo> Status(string operationId, int waitSeconds = 0, string instance = null, CancellationToken ct = default)
+        [Description("After build, launch or bp_set returns an operationId, call this to get its outcome and suggested next tool call. Set waitSeconds to wait for progress. Status remains available when VS is busy; a live check adds at most one second. Never retries or cancels the command. Unknown outcomes require inspecting effects before a new attempt.")]
+        public async Task<OperationResponse> Status(
+            [Description("ID returned by the original tool call.")] string operationId,
+            [Description("Wait up to 60 seconds for the retained result; zero reads immediately, with at most one second for live evidence.")] int waitSeconds = 0,
+            string instance = null, CancellationToken ct = default,
+            [Description("Include internal dispatch state, timestamps and evidence. Usually unnecessary; the default gives the outcome and next action.")] bool details = false)
         {
             var link = await Sessions.ResolveAsync(instance, ct).ConfigureAwait(false);
-            return await link.Operations.OperationStatusAsync(operationId, waitSeconds, ct).ConfigureAwait(false);
+            return OperationResponse.From(await link.Operations.OperationStatusAsync(operationId, waitSeconds, ct).ConfigureAwait(false), link.Id, details);
         }
 
         [McpServerTool(Name = "operations", ReadOnly = true, UseStructuredContent = true)]
-        [Description("List operations retained by this VS host, including requests still pending inside VS. Does not need the VS UI thread and does not issue or retry any command.")]
-        public async Task<List<OperationInfo>> List(string instance = null, CancellationToken ct = default)
+        [Description("Find an operationId after losing the original reply. Lists compact retained outcomes and next actions. Use operation_status for fresh evidence or to wait. Never starts or retries a command.")]
+        public async Task<List<OperationResponse>> List(string instance = null, CancellationToken ct = default)
         {
             var link = await Sessions.ResolveAsync(instance, ct).ConfigureAwait(false);
-            return await link.Operations.OperationsAsync(ct).ConfigureAwait(false);
+            return (await link.Operations.OperationsAsync(ct).ConfigureAwait(false)).Select(o => { var response = OperationResponse.From(o, link.Id); response.Result = null; return response; }).ToList();
         }
 
         [McpServerTool(Name = "debug_state", ReadOnly = true, UseStructuredContent = true)]

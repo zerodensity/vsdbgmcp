@@ -12,6 +12,16 @@ namespace VsDbgMcp.Shim.Tools
     {
         public BuildTools(SessionManager sessions) : base(sessions) { }
 
+        [McpServerTool(Name = "build_diagnostics", ReadOnly = true, UseStructuredContent = true)]
+        [Description("Use an existing MSBuild .binlog when build output is incomplete or structured compiler diagnostics are needed. Reads offline without running a build. Returns outcome, warning/error events, ownership and coverage. Filters limit rows; counts always cover the whole file. A binlog is not recorded automatically by build.")]
+        public Task<VsDbgMcp.Shim.Builds.BinaryBuildReport> Diagnostics(
+            [Description("Absolute path to an existing MSBuild .binlog file.")] string binlog,
+            [Description("Case-insensitive substring of project path; filters returned rows only.")] string project = null,
+            [Description("Case-insensitive substring of configuration, such as Debug|x64; filters returned rows only.")] string configuration = null,
+            [Description("Maximum diagnostic rows, 1 to 1000. Defaults to 25; truncated indicates more matching rows.")] int maxDiagnostics = 25,
+            CancellationToken ct = default) =>
+            Task.Run(() => VsDbgMcp.Shim.Builds.BinaryBuildDiagnostics.Read(binlog, project, configuration, maxDiagnostics, ct), ct);
+
         [McpServerTool(Name = "build")]
         [Description("Build, rebuild, or clean with a recoverable operation ID. Returns the errors themselves - deduplicated, with file and line, worst first - not the raw build log. Waits up to waitSeconds, then returns an operationId for operation_status. A wait timeout does not cancel the build.")]
         public Task<string> Build(

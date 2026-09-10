@@ -36,12 +36,13 @@ namespace VsDbgMcp
                     created = false;
                     return _copy(previous);
                 }
-                previous = _items.Values.FirstOrDefault(x => x.Kind == kind && !x.Terminal);
+                previous = _items.Values.FirstOrDefault(x => x.Kind == kind && x.BlocksNewRequests);
                 if (exclusive && previous != null)
                     throw new InvalidOperationException(kind + " already pending: " + previous.OperationId + ". Query operation_status before retrying.");
                 result = new OperationInfo { OperationId = kind + "-" + Guid.NewGuid().ToString("N"),
                     RequestId = requestId, Request = request, Kind = kind, HostEpoch = Epoch, InstanceId = _instanceId,
-                    StartedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow, State = "requested" };
+                    StartedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow, State = "requested",
+                    ExecutionPhase = "queued", BlocksNewRequests = exclusive };
                 _items.Add(result.OperationId, result);
                 _done.Add(result.OperationId, new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously));
                 _updateGates.Add(result.OperationId, new object());
@@ -59,7 +60,9 @@ namespace VsDbgMcp
         public List<OperationInfo> All()
         { lock (_gate) return _items.Values.OrderByDescending(x => x.StartedUtc).Select(_copy).ToList(); }
 
-        public OperationInfo Update(string id, Action<OperationInfo> update, bool terminal = false)
+        public OperationInfo Update(string id, Action<OperationInfo> update, bool terminal = false) => Mutate(id, update, terminal, false);
+
+        OperationInfo Mutate(string id, Action<OperationInfo> update, bool terminal, bool lifecycle)
         {
             OperationInfo result;
             TaskCompletionSource<bool> done = null;
@@ -71,24 +74,68 @@ namespace VsDbgMcp
             {
                 OperationInfo item;
                 lock (_gate) item = _copy(_items[id]);
-                if (item.Terminal) return _copy(item);
+                if (item.Terminal && !lifecycle) return _copy(item);
                 update(item);
                 item.UpdatedUtc = DateTime.UtcNow;
-                if (terminal)
+                if (terminal || item.Terminal)
                 {
                     item.Terminal = true;
-                    item.CompletedUtc = item.UpdatedUtc;
+                    item.CompletedUtc = item.CompletedUtc ?? item.UpdatedUtc;
+                    item.BlocksNewRequests = (item.CommandInFlight || item.State == "unknown") && item.BlocksNewRequests;
                 }
                 lock (_gate)
                 {
                     _items[id] = _copy(item);
-                    if (terminal) done = _done[id];
+                    // A retained result with an unresolved dispatch must not turn
+                    // the model's requested wait into an immediate polling loop.
+                    if (item.Terminal && !item.BlocksNewRequests) done = _done[id];
                     result = _copy(item);
                 }
             }
             Persist(result);
             done?.TrySetResult(true);
             return result;
+        }
+
+        public bool TryStartCommand(string id)
+        {
+            bool started = false;
+            Mutate(id, o =>
+            {
+                if (o.Terminal || o.CommandStartedUtc != null) return;
+                started = true;
+                o.ExecutionPhase = "in-call";
+                o.CommandInFlight = true;
+                o.CommandStartedUtc = DateTime.UtcNow;
+            }, false, false);
+            return started;
+        }
+
+        public void CommandReturned(string id) => Mutate(id, o =>
+        {
+            o.CommandInFlight = false;
+            o.CommandReturnedUtc = DateTime.UtcNow;
+            o.ExecutionPhase = "returned";
+            if (o.Terminal && o.State != "unknown") o.BlocksNewRequests = false;
+        }, false, true);
+
+        // Only uncertainty plus a fresh idle observation can retire unresolved work.
+        // Normal pending work may still be queued inside VS after dispatch returns.
+        public OperationInfo ObserveIdle(string id, StateObservation observation)
+        {
+            return Mutate(id, o =>
+            {
+                if (o.State != "unknown" || o.CommandInFlight || o.CommandReturnedUtc == null ||
+                    observation == null || observation.TimestampUtc < o.CommandReturnedUtc) return;
+                var idle = o.Kind == "build" ? observation.BuildBusy == false :
+                    o.Kind == "launch" && observation.Mode == "design";
+                if (!idle || !o.BlocksNewRequests) return;
+                o.Observation = observation;
+                o.BlocksNewRequests = false;
+                o.Terminal = true;
+                o.Message = (o.Message == null ? "" : o.Message + " ") +
+                    "The command returned and VS was observed idle. The outcome is still unknown; inspect its effects before starting another request.";
+            }, false, true);
         }
 
         void Persist(OperationInfo snapshot)

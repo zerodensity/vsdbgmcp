@@ -68,6 +68,14 @@ namespace VsDbgMcp.Host
         bool _cancelObserved;
         BuildEvents _buildEvents;
 
+        internal bool? ObserveBuildBusy()
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (_buildManager == null) return null;
+            Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(_buildManager.QueryBuildManagerBusy(out var busy));
+            return busy != 0;
+        }
+
         public ProjectSystem(VsDbgMcpPackage package, DTE2 dte, IVsSolution solution, JoinableTaskFactory jtf, Action<string> log, IVsSolutionBuildManager2 buildManager)
         {
             _package = package;
@@ -115,60 +123,72 @@ namespace VsDbgMcp.Host
             await UIAsync(() =>
             {
                 ThreadHelper.ThrowIfNotOnUIThread();
-                if (HostOperations.Store.Read(id).CancelRequested)
+                if (!HostOperations.Store.TryStartCommand(id)) return false;
+                try
                 {
-                    HostOperations.Store.Update(id, o => { o.State = "cancelled"; o.Message = "Cancelled before dispatch; no VS build started."; }, true);
-                    return false;
-                }
-                if (_buildManager == null) throw new InvalidOperationException("Visual Studio build manager unavailable.");
-                Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(_buildManager.QueryBuildManagerBusy(out var busy));
-                if (busy != 0) throw new InvalidOperationException("Visual Studio is already building; no second build was started.");
-                if (!_dte.Solution.IsOpen) throw new InvalidOperationException("No solution is open.");
-                var target = FindProjectUniqueName(request.Project);
-                if (request.Project != null && target == null) throw new InvalidOperationException("No project named '" + request.Project + "'.");
-                IVsHierarchy hierarchy = null;
-                if (target != null) Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(_solution.GetProjectOfUniqueName(target, out hierarchy));
-                var applied = string.IsNullOrEmpty(request.Configuration) && string.IsNullOrEmpty(request.Platform)
-                    ? OpResult.Good() : ApplyConfiguration(request.Configuration, request.Platform);
-                if (!applied.Ok) throw new InvalidOperationException(applied.Message);
-                if (_buildCookie == 0)
-                    Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(_buildManager.AdviseUpdateSolutionEvents(this, out _buildCookie));
-                if (_buildEvents == null)
-                {
-                    _buildEvents = _dte.Events.BuildEvents;
-                    _buildEvents.OnBuildProjConfigDone += (project, config, platform, solutionConfig, success) =>
+                    if (HostOperations.Store.Read(id).CancelRequested)
                     {
-                        if (_activeBuild == null) return;
-                        HostOperations.Store.Update(_activeBuild, o => { o.LastProgress = project; o.LastProgressUtc = DateTime.UtcNow; });
-                    };
+                        HostOperations.Store.Update(id, o => { o.State = "cancelled"; o.Message = "Cancelled before dispatch; no VS build started."; }, true);
+                        return false;
+                    }
+                    if (_buildManager == null) throw new InvalidOperationException("Visual Studio build manager unavailable.");
+                    Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(_buildManager.QueryBuildManagerBusy(out var busy));
+                    if (busy != 0) throw new InvalidOperationException("Visual Studio is already building; no second build was started.");
+                    if (!_dte.Solution.IsOpen) throw new InvalidOperationException("No solution is open.");
+                    var target = FindProjectUniqueName(request.Project);
+                    if (request.Project != null && target == null) throw new InvalidOperationException("No project named '" + request.Project + "'.");
+                    IVsHierarchy hierarchy = null;
+                    if (target != null) Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(_solution.GetProjectOfUniqueName(target, out hierarchy));
+                    var applied = string.IsNullOrEmpty(request.Configuration) && string.IsNullOrEmpty(request.Platform)
+                        ? OpResult.Good() : ApplyConfiguration(request.Configuration, request.Platform);
+                    if (!applied.Ok) throw new InvalidOperationException(applied.Message);
+                    if (_buildCookie == 0)
+                        Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(_buildManager.AdviseUpdateSolutionEvents(this, out _buildCookie));
+                    if (_buildEvents == null)
+                    {
+                        _buildEvents = _dte.Events.BuildEvents;
+                        _buildEvents.OnBuildProjConfigDone += (project, config, platform, solutionConfig, success) =>
+                        {
+                            if (_activeBuild == null) return;
+                            HostOperations.Store.Update(_activeBuild, o => { o.LastProgress = project; o.LastProgressUtc = DateTime.UtcNow; });
+                        };
+                    }
+                    // A fresh VS profile may expose the pane before its text document
+                    // is available. Optional output capture must not prevent dispatch.
+                    try { _outputSeen = ReadBuildPane(); }
+                    catch (Exception ex)
+                    {
+                        _outputSeen = "";
+                        HostOperations.Store.Update(id, o => o.Message = "Initial build output unavailable: " + ex.Message);
+                    }
+                    _buildLog = "";
+                    _observedBusy = false;
+                    _cancelObserved = false;
+                    var configName = _dte.Solution.SolutionBuild.ActiveConfiguration?.Name;
+                    var solutionName = _dte.Solution.FullName;
+                    var configuration = configName + "|" + (_dte.Solution.SolutionBuild.ActiveConfiguration as SolutionConfiguration2)?.PlatformName;
+                    _activeBuild = id;
+                    HostOperations.Store.Update(id, o => { o.State = "accepted"; o.Solution = solutionName;
+                        o.Configuration = configuration;
+                        o.LogPath = System.IO.Path.Combine(HostOperations.DirectoryPath, id + ".log"); });
+                    var flags = request.Mode == "clean" ? VSSOLNBUILDUPDATEFLAGS.SBF_OPERATION_CLEAN : VSSOLNBUILDUPDATEFLAGS.SBF_OPERATION_BUILD;
+                    if (request.Mode == "rebuild") flags |= VSSOLNBUILDUPDATEFLAGS.SBF_OPERATION_FORCE_UPDATE;
+                    int hr;
+                    if (target == null) hr = _buildManager.StartSimpleUpdateSolutionConfiguration((uint)flags, 0, 0);
+                    else
+                    {
+                        hr = _buildManager.StartUpdateProjectConfigurations(1, new[] { hierarchy }, (uint)flags, 0);
+                    }
+                    if (Microsoft.VisualStudio.ErrorHandler.Failed(hr))
+                    {
+                        _activeBuild = null;
+                        HostOperations.Store.Update(id, o => { o.State = "failed"; o.Message = "Visual Studio rejected build dispatch (HRESULT 0x" + hr.ToString("X8") + ").";
+                            o.EvidenceSource = "build manager dispatch HRESULT"; }, true);
+                        return false;
+                    }
+                    return true;
                 }
-                _outputSeen = ReadBuildPane();
-                _buildLog = "";
-                _observedBusy = false;
-                _cancelObserved = false;
-                var configName = _dte.Solution.SolutionBuild.ActiveConfiguration?.Name;
-                var solutionName = _dte.Solution.FullName;
-                var configuration = configName + "|" + (_dte.Solution.SolutionBuild.ActiveConfiguration as SolutionConfiguration2)?.PlatformName;
-                _activeBuild = id;
-                HostOperations.Store.Update(id, o => { o.State = "accepted"; o.Solution = solutionName;
-                    o.Configuration = configuration;
-                    o.LogPath = System.IO.Path.Combine(HostOperations.DirectoryPath, id + ".log"); });
-                var flags = request.Mode == "clean" ? VSSOLNBUILDUPDATEFLAGS.SBF_OPERATION_CLEAN : VSSOLNBUILDUPDATEFLAGS.SBF_OPERATION_BUILD;
-                if (request.Mode == "rebuild") flags |= VSSOLNBUILDUPDATEFLAGS.SBF_OPERATION_FORCE_UPDATE;
-                int hr;
-                if (target == null) hr = _buildManager.StartSimpleUpdateSolutionConfiguration((uint)flags, 0, 0);
-                else
-                {
-                    hr = _buildManager.StartUpdateProjectConfigurations(1, new[] { hierarchy }, (uint)flags, 0);
-                }
-                if (Microsoft.VisualStudio.ErrorHandler.Failed(hr))
-                {
-                    _activeBuild = null;
-                    HostOperations.Store.Update(id, o => { o.State = "failed"; o.Message = "Visual Studio rejected build dispatch (HRESULT 0x" + hr.ToString("X8") + ").";
-                        o.EvidenceSource = "build manager dispatch HRESULT"; }, true);
-                    return false;
-                }
-                return true;
+                finally { HostOperations.Store.CommandReturned(id); }
             }).ConfigureAwait(false);
 
             // Reconcile missed events internally. The caller can reconnect or stop waiting.

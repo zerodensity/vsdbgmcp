@@ -24,7 +24,7 @@ namespace VsDbgMcp
         /// 6: a debuggee can be profiled, with the extension collecting and the shim
         ///    reading what it collected.
         /// </summary>
-        public const int ContractVersion = 7;
+        public const int ContractVersion = 8;
 
         public const string InstanceFilePrefix = "inst-";
         public const string InstanceFileSuffix = ".json";

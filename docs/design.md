@@ -8,9 +8,10 @@ Status: built and working. Sections 1 to 13 are the design as intended; section
 14 records what building it actually changed, and the README says what has and
 has not been exercised against a live debuggee.
 
-The tool catalog below reflects 0.8.0. Later operation and capture semantics are
-documented in [Recoverable operations and captures](iteration_4.md); they supersede
-the original blocking and transient-profile design described here.
+The tool catalog below reflects 0.9.0. Current operation and capture semantics are
+documented in [Recoverable operations and captures](iteration_4.md) and
+[Actionable status and diagnostic evidence](iteration_5.md); they supersede the
+original blocking and transient-profile design described here.
 
 ## 1. Goals
 
@@ -280,7 +281,7 @@ pending exception, breakpoints hit, pinned watch values. One cheap call.
 `launch(project?, args?, env?, stopAtEntry?, noDebug?)`,
 `attach(pid | nameRegex)`, `detach(process?)`, `stop(process?)`, `restart()`,
 `processes()`, `dump_open(path)`
-`debug_state()`, `operations()`, `operation_status(operationId, waitSeconds?)`
+`debug_state()`, `operations()`, `operation_status(operationId, waitSeconds?, details?)`
 
 **Execution** (6)
 `wait(timeout, for?, instance?)`, `go()`, `pause()`, `step(kind, count?)`,
@@ -319,7 +320,12 @@ clean. `build_cancel()`, `build_output(pattern?)`, `config(get|set)`,
 `startup_project(get|set)`
 `build_log(operationId, offset?, maxChars?)`
 
-**59 tools.** What is held to is what each one is: a tool answers one question.
+`build_diagnostics(binlog, project?, configuration?, maxDiagnostics?)` imports an
+existing MSBuild binary log offline. It does not evaluate projects, rebuild, or
+attribute an arbitrary file to a live VS operation. See [iteration 5](iteration_5.md)
+for actionable status responses and the isolated live validation harness.
+
+**60 tools.** What is held to is what each one is: a tool answers one question.
 A tool that needs a mode argument to say which question it is answering is two
 tools, and a question already answered does not need a second way to ask it.
 

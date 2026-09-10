@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.0
+
+- Make `operation_status`, `operations`, and operation waits return compact outcomes
+  and actionable next calls. Keep dispatch evidence behind `details=true`; refresh
+  unresolved-operation protection from returned/idle evidence without inventing success.
+- Add repository guidance in `AGENTS.md` prioritizing model-facing tool selection,
+  schemas, concise responses, uncertainty, and recovery behavior.
+- Add offline `build_diagnostics` for structured MSBuild `.binlog` events, including
+  project/configuration ownership, occurrence counts, filters, and completeness.
+- Add an isolated Visual Studio live validation harness. Fix first-build dispatch
+  when a fresh VS profile's output pane does not yet expose its text document.
+- Host/shim contract 8 requires updating both together. See [iteration 5](docs/iteration_5.md).
+
 ## 0.8.0
 
 - Independent review fixes: rejected/no-debug commands release their operation slots;

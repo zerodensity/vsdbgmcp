@@ -22,6 +22,7 @@ namespace VsDbgMcp.Host
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
+            if (!HostOperations.Store.TryStartCommand(operationId)) return Failed(request, "Breakpoint record closed before dispatch.");
             try
             {
                 Breakpoints added;
@@ -114,6 +115,7 @@ namespace VsDbgMcp.Host
             {
                 return Failed(request, ex.Message);
             }
+            finally { HostOperations.Store.CommandReturned(operationId); }
         });
 
         /// <summary>

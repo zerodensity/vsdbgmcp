@@ -44,6 +44,7 @@ namespace VsDbgMcp.Host
         PipeServer _server;
         DebugHost _debugHost;
         ProjectSystem _projectSystem;
+        internal bool? ObserveBuildBusy() => _projectSystem?.ObserveBuildBusy();
         DebugEventSink _eventSink;
         TracePaneWatch _traceWatch;
 

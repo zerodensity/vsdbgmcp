@@ -37,11 +37,41 @@ namespace VsDbgMcp.Host
         {
             if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Give an operationId from build, launch or bp_set.");
             var item = await HostOperations.Store.WaitAsync(id, waitSeconds, ct).ConfigureAwait(false);
-            return item ?? HostOperations.Historical(id) ?? throw new ArgumentException("Unknown operationId: " + id);
+            if (item == null) return HostOperations.Historical(id) ?? throw new ArgumentException("Unknown operationId: " + id);
+            if (item.Terminal && item.State != "unknown" && !item.BlocksNewRequests) return item;
+            // Retained status remains available even when VS cannot service its UI queue.
+            var query = ObserveAsync();
+            StateObservation observation = null;
+            if (await Task.WhenAny(query, Task.Delay(1000, ct)).ConfigureAwait(false) == query)
+            {
+                try { observation = await query.ConfigureAwait(false); }
+                catch (Exception ex) { observation = new StateObservation { Mode = "unknown", TimestampUtc = DateTime.UtcNow, Error = ex.Message }; }
+            }
+            ct.ThrowIfCancellationRequested();
+            if (observation != null && item.State == "unknown") HostOperations.Store.ObserveIdle(id, observation);
+            item = HostOperations.Store.Read(id);
+            item.Observation = observation ?? new StateObservation { Mode = "unknown", TimestampUtc = DateTime.UtcNow, Error = "VS state query unavailable; retained operation status is shown." };
+            return item;
         }
 
         // No watches, expression evaluation, stack walking, or target pauses.
-        public Task<StateObservation> ObserveAsync(CancellationToken ct = default) => UIAsync(LiveObservation);
+        readonly object _observationGate = new object();
+        Task<StateObservation> _pendingObservation;
+        public Task<StateObservation> ObserveAsync(CancellationToken ct = default)
+        {
+            lock (_observationGate)
+            {
+                if (_pendingObservation == null || _pendingObservation.IsCompleted)
+                {
+                    _pendingObservation = Task.Run(() => UIAsync(LiveObservation));
+                    // A timed-out observer must not leave an unobserved fault, or enqueue
+                    // another UI walk while the original request is still blocked.
+                    _ = _pendingObservation.ContinueWith(t => { var ignored = t.Exception; },
+                        CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+                }
+                return _pendingObservation;
+            }
+        }
         StateObservation LiveObservation()
         {
             ThreadHelper.ThrowIfNotOnUIThread();
@@ -56,6 +86,8 @@ namespace VsDbgMcp.Host
                 observation.EvidenceSource = "live DTE debugger mode and registered processes";
             }
             catch (Exception ex) { observation.Mode = "unknown"; observation.Error = ex.Message; }
+            try { observation.BuildBusy = _package.ObserveBuildBusy(); }
+            catch (Exception ex) { observation.Error = (observation.Error == null ? "" : observation.Error + "; ") + "Build state unavailable: " + ex.Message; }
             return observation;
         }
 

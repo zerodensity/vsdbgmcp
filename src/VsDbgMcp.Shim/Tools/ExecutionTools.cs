@@ -30,7 +30,7 @@ namespace VsDbgMcp.Shim.Tools
             {
                 var link = await Sessions.ResolveAsync(instance, ct).ConfigureAwait(false);
                 var operation = await link.Operations.OperationStatusAsync(@for.Substring(10).Trim(), seconds, ct).ConfigureAwait(false);
-                return Newtonsoft.Json.JsonConvert.SerializeObject(operation);
+                return System.Text.Json.JsonSerializer.Serialize(OperationResponse.From(operation, link.Id), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
             }
             string modulePattern = null;
             if (!string.IsNullOrWhiteSpace(@for))

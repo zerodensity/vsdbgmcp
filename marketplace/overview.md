@@ -16,7 +16,8 @@ also distinguish a new stop from one the debugger is still sitting at.
 
 **Long operations keep their identity.** `build`, `launch`, and `bp_set` return a result
 or a pending operation ID after a bounded wait. `operation_status` can read or wait for
-that operation without entering Visual Studio's UI queue. Retrying with the same
+that operation even when Visual Studio's UI is busy; a live check adds at most one
+second. Retrying with the same
 `requestId` and arguments reuses the request within the same host session. Build logs
 remain available for each invocation, and diagnostic counts describe the captured build
 output, so an old Error List entry cannot decide whether the new build succeeded.
@@ -107,7 +108,7 @@ all.
 
 ## Tools
 
-59 of them, grouped as: session, lifecycle, execution, breakpoints, inspection,
+60 tools, grouped as: session, lifecycle, execution, breakpoints, inspection,
 profiling, evidence, debuggee I/O, and build.
 
 Worth knowing about:
@@ -117,9 +118,13 @@ Worth knowing about:
   module to load, which is how to arm breakpoints in a plugin before its host loads it.
 - **`operation_status` / `operations`** — find a retained operation and follow its
   outcome after the original call stopped waiting. `wait(for: "operation:ID")` can
-  wait for it too.
+  wait for it too. `operation_status` returns a compact outcome and suggested next
+  tool call; `details: true` adds dispatch evidence.
 - **`build_log`** — read one build's saved output incrementally, even after another
   build has run. Parsed warning occurrences and unique warnings are reported separately.
+- **`build_diagnostics`** — import structured warning/error events from an existing
+  MSBuild `.binlog`, with project/configuration ownership and explicit completeness.
+  This offline tool does not rebuild or require a running Visual Studio instance.
 - **`debug_state`** — a bounded snapshot of debugger mode, registered processes,
   session generation, and active and retained captures, without evaluating watches.
 - **`frame`** — the current location, source and module checks, arguments, locals,
@@ -160,11 +165,13 @@ missing, `profile_start` says so and names what to install.
   profile says. Scheduler/off-CPU tracing, allocation, and file I/O collectors are
   not wired up. Intervention markers do not measure how long the target was paused.
 - An operation timeout does not cancel a build or interrupt a COM call stuck inside
-  Visual Studio. Unobserved outcomes remain pending or unknown. After a host restart,
-  inspect the saved operation ID before issuing a new request.
-- Build diagnostic counts cover recognized output, not every possible compiler or
-  localized message. Complete counts remain unknown; the retained log supplies the
-  underlying evidence.
+  Visual Studio. `operation_status` retains uncertainty and suggests the next tool
+  call. Fresh idle evidence may release duplicate protection, but does not prove
+  success or make repeating the command safe. Historical records are read-only.
+- Live build diagnostic counts cover recognized output, not every possible compiler
+  or localized message. `build_diagnostics` can read a separately recorded binary
+  log; counts cover structured events in that file. Text-only diagnostics remain
+  outside those counts, and VS builds do not automatically record a binary log.
 - A PDB's GUID and age are not reported; the debug interfaces do not expose them. The
   image's own time stamp and the engine's verbose symbol search answer the same question
   by another route.

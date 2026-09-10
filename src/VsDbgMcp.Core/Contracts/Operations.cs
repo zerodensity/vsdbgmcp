@@ -25,6 +25,7 @@ namespace VsDbgMcp.Contracts
         public DateTime TimestampUtc { get; set; }
         public string EvidenceSource { get; set; }
         public string Error { get; set; }
+        public bool? BuildBusy { get; set; }
         public int SessionGeneration { get; set; }
         public List<ProcessInfo> Processes { get; set; }
         public Intervention LastTransition { get; set; }
@@ -49,11 +50,17 @@ namespace VsDbgMcp.Contracts
         public string RequestId { get; set; }
         public string InstanceId { get; set; }
         public string HostEpoch { get; set; }
+        public bool Historical { get; set; }
         public string Kind { get; set; }
         public string Solution { get; set; }
         public string Configuration { get; set; }
         public string State { get; set; }
         public bool Terminal { get; set; }
+        public string ExecutionPhase { get; set; }
+        public bool CommandInFlight { get; set; }
+        public bool BlocksNewRequests { get; set; }
+        public DateTime? CommandStartedUtc { get; set; }
+        public DateTime? CommandReturnedUtc { get; set; }
         public bool CancelRequested { get; set; }
         public DateTime StartedUtc { get; set; }
         public DateTime UpdatedUtc { get; set; }
