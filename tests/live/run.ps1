@@ -4,6 +4,7 @@ param(
     [ValidatePattern('^CodexMcp[A-Za-z0-9]+$')][string]$RootSuffix = 'CodexMcpValidation',
     [switch]$SkipBuild,
     [switch]$Profiles,
+    [switch]$ShimUpgrade,
     [ValidateRange(15, 300)][int]$StartupSeconds = 120
 )
 $ErrorActionPreference = 'Stop'
@@ -39,7 +40,49 @@ foreach ($taskTracked in (& git -C $taskRoot ls-files -- tests/fixtures/cpp)) {
 if ($LASTEXITCODE -ne 0) { throw 'Experimental deployment failed.' }
 
 $taskChild = $null
+$taskOldShim = $null
+$taskOtherShim = $null
+$taskSmokeShim = Join-Path $taskRoot 'artifacts\shim\vsdbgmcp.exe'
+
+function Start-TestShim([string]$Path) {
+    $taskStart = [Diagnostics.ProcessStartInfo]::new($Path)
+    $taskStart.UseShellExecute = $false
+    $taskStart.CreateNoWindow = $true
+    $taskStart.RedirectStandardInput = $true
+    $taskStart.RedirectStandardOutput = $true
+    $taskStart.RedirectStandardError = $true
+    $taskStart.Environment['VSDBGMCP_DATA_DIR'] = $taskData
+    $taskProcess = [Diagnostics.Process]::Start($taskStart)
+    try {
+        $taskProcess.StandardInput.WriteLine('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"shim-upgrade-test","version":"1"}}}')
+        $taskProcess.StandardInput.Flush()
+        $taskRead = $taskProcess.StandardOutput.ReadLineAsync()
+        if (!$taskRead.Wait(20000)) { throw 'Test shim did not initialize.' }
+        $taskReply = $taskRead.Result | ConvertFrom-Json
+        if (!$taskReply.result.serverInfo) { throw 'Test shim returned no MCP server identity.' }
+        $taskProcess.StandardInput.WriteLine('{"jsonrpc":"2.0","method":"notifications/initialized"}')
+        $taskProcess.StandardInput.Flush()
+        return $taskProcess
+    }
+    catch {
+        if (!$taskProcess.HasExited) { $taskProcess.Kill() }
+        $taskProcess.Dispose()
+        throw
+    }
+}
+
 try {
+    if ($ShimUpgrade) {
+        # Build an older-version real MCP shim into only this run's private data
+        # directory. Keep its client-side stdio open through extension startup.
+        $taskOldBin = Join-Path $taskData 'bin'
+        & dotnet publish (Join-Path $taskRoot 'src\VsDbgMcp.Shim\VsDbgMcp.Shim.csproj') -c Release -r win-x64 --self-contained true `
+            -o $taskOldBin '-p:Version=0.0.0' "-p:ArtifactsPath=$(Join-Path $taskRun 'old-shim-build')" --nologo
+        if ($LASTEXITCODE -ne 0) { throw 'Old-version test shim build failed.' }
+        $taskOldShim = Start-TestShim (Join-Path $taskOldBin 'vsdbgmcp.exe')
+        $taskOtherShim = Start-TestShim $taskSmokeShim
+        $taskSmokeShim = Join-Path $taskOldBin 'vsdbgmcp.exe'
+    }
     # ResetSettings applies only to this named experimental profile. It also avoids
     # asking the first-run UI which development settings the test instance should use.
     $taskArgs = @('/RootSuffix', $RootSuffix, '/NoSplash', '/ResetSettings', 'General',
@@ -58,13 +101,30 @@ try {
         }
         Start-Sleep -Milliseconds 500
     } while ($true)
-    $taskPythonArgs = @((Join-Path $PSScriptRoot 'smoke.py'), '--shim', (Join-Path $taskRoot 'artifacts\shim\vsdbgmcp.exe'), '--data', $taskData,
+    if ($ShimUpgrade) {
+        if (!$taskOldShim.WaitForExit(30000)) { throw 'The updated extension did not retire the old installed shim.' }
+        if ($taskOtherShim.HasExited) { throw 'Extension staging stopped a shim from another directory.' }
+        $taskInstalledVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($taskSmokeShim).FileVersion
+        $taskBundledVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $taskRoot 'artifacts\shim\vsdbgmcp.exe')).FileVersion
+        if ($taskInstalledVersion -ne $taskBundledVersion) { throw 'The staged shim does not match the bundled version.' }
+        @{ oldShimExited = $true; otherShimSurvived = $true; installedVersion = $taskInstalledVersion } |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRun 'shim-upgrade.json')
+        Write-Host "Shim upgrade: old installed process exited; other-directory shim survived; installed $taskInstalledVersion."
+    }
+    $taskPythonArgs = @((Join-Path $PSScriptRoot 'smoke.py'), '--shim', $taskSmokeShim, '--data', $taskData,
         '--fixture', $taskFixture, '--pid', $taskChild.Id, '--output', (Join-Path $taskRun 'results.json'))
     if ($Profiles) { $taskPythonArgs += '--profiles' }
     & python @taskPythonArgs
     if ($LASTEXITCODE -ne 0) { throw "Live checks failed. See $taskRun." }
 }
 finally {
+    foreach ($taskShim in @($taskOldShim, $taskOtherShim)) {
+        if ($taskShim) {
+            if (!$taskShim.HasExited) { $taskShim.Kill() }
+            $null = $taskShim.WaitForExit(5000)
+            $taskShim.Dispose()
+        }
+    }
     # This handle is exclusively the process started above. No process-name cleanup.
     if ($taskChild -and !$taskChild.HasExited) {
         $null = $taskChild.CloseMainWindow()

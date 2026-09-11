@@ -17,7 +17,12 @@ namespace Microsoft.VisualStudio.Shell
 }
 namespace VsDbgMcp.Host
 {
-    static class Names { public static string InstanceDir; }
+    static class Names
+    {
+        public static string InstanceDir;
+        public const string Product = VsDbgMcp.Names.Product;
+        public static string ShimDir => Path.Combine(InstanceDir, "bin");
+    }
     static class HostOperations
     {
         public static OperationRegistry Store;

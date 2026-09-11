@@ -110,6 +110,7 @@
     <Compile Include="Profiler.cs" />
     <Compile Include="Scratch.cs" />
     <Compile Include="ShimStaging.cs" />
+    <Compile Include="ShimProcesses.cs" />
     <Compile Include="StatusWindow.cs" />
     <Compile Include="SymbolLoad.cs" />
     <Compile Include="TracePaneWatch.cs" />

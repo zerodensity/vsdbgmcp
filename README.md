@@ -51,6 +51,13 @@ The shim gets a path of its own rather than staying inside the extension because
 Studio regenerates an extension's folder on every update, and the path in the agent's
 configuration has to outlive that.
 
+**Updates:** when the updated extension first loads, it installs the new
+shim and stops previous shim processes from that installation. The MCP client must
+reconnect to launch the new version; restart its MCP server if it does not reconnect
+automatically. Failed staging leaves existing processes alive and logs recovery guidance
+in the Debugger MCP Server output pane. An interrupted tool call has an unknown outcome;
+after reconnecting, inspect any known operation ID before retrying work.
+
 ### Building it
 
 ```powershell

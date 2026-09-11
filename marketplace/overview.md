@@ -81,6 +81,11 @@ Install the extension and restart Visual Studio. It copies a small server execut
 `%LOCALAPPDATA%\vsdbgmcp\bin` on startup — no .NET runtime needed, nothing else to
 download.
 
+**Updates:** after installing the replacement on extension startup,
+previous shim processes from that installation are stopped. Clients must reconnect
+to launch the new version; restart the client's MCP server if it does not reconnect
+automatically. Failed staging keeps existing processes alive and logs recovery guidance.
+
 Then point your agent at it, once, globally:
 
 ```powershell

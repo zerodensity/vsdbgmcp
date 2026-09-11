@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.3
+
+- After successfully staging an extension update, stop previous shim processes from
+  that installation, including older releases without update support. Match executable
+  paths and retain process handles so unrelated shims and newly launched replacements
+  are preserved. Serialize staging across VS windows and publish the executable last.
+- Failed staging keeps existing shims alive. Report process exits separately from
+  failures to inspect or stop them, with MCP reconnect guidance. Clients that do not
+  reconnect automatically still require an MCP server restart; interrupted tool calls
+  do not establish cancellation or success.
+
 ## 0.9.2
 
 - Use 12-character lowercase alphanumeric operation, capture, and host-session IDs.
