@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.1
+
+- Return `capture` screenshots as native MCP PNG image content with a short dimensions
+  and requested-region summary, instead of base64 text. Capture failures now set
+  `isError`; activity reports contain only the summary. Tool arguments and the
+  host/shim contract are unchanged.
+
 ## 0.9.0
 
 - Make `operation_status`, `operations`, and operation waits return compact outcomes

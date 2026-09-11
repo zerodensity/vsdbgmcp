@@ -8,7 +8,7 @@ Status: built and working. Sections 1 to 13 are the design as intended; section
 14 records what building it actually changed, and the README says what has and
 has not been exercised against a live debuggee.
 
-The tool catalog below reflects 0.9.0. Current operation and capture semantics are
+The tool catalog below reflects 0.9.1. Current operation and capture semantics are
 documented in [Recoverable operations and captures](iteration_4.md) and
 [Actionable status and diagnostic evidence](iteration_5.md); they supersede the
 original blocking and transient-profile design described here.
@@ -488,9 +488,12 @@ Not a longer tool list — a different one.
 - **Console programs need their stdio.** `console_read` and `console_send`
   reach the debuggee's console buffer. Without them a large share of C++
   debugging is done blind.
-- **`capture()`** screenshots the debuggee window using Windows Graphics
-  Capture, which keeps working while the process is stopped and while the
-  window is occluded. This is evidence collection for a stopped process,
+- **`capture()`** screenshots the debuggee window using `PrintWindow` with
+  full-content rendering, intended to work while stopped or occluded.
+  Since 0.9.1, the shim returns native MCP PNG image content alongside a short
+  dimensions and requested-region summary; errors are text with `isError: true`.
+  The host contract remains unchanged, and activity reports omit image data.
+  This is evidence collection for a stopped process,
   adjacent to `triage()` — it is not the UI automation ruled out in section 1.
 - **Several processes at once are the normal case**, not an edge case: a
   launcher and what it starts, a host and its workers, mixed-mode and

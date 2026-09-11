@@ -31,6 +31,11 @@ the candidates and the exact value to pass, so the next call succeeds.
 answers a crash in one call. `bp_set` can watch an address for writes. `console_read`
 reaches the debuggee's own stdout.
 
+**Native screenshots.** `capture` returns the debuggee window as MCP
+PNG image content with a compact dimensions summary for image-capable clients.
+An optional `region` requests a crop in window-relative pixels. Capture failures
+return text with `isError: true`.
+
 **A reply never claims more than it found.** A breakpoint that cannot report a hit count
 says so rather than printing zero. A profile with too few samples refuses to rank them.
 A module without symbols names the call that would name its functions. Where an answer

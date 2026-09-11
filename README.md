@@ -147,6 +147,12 @@ connections, and anything that went wrong inside the extension.
 
 Notes on a few:
 
+- **`capture`** — returns the debuggee window as native MCP PNG image
+  content with a short dimensions summary. `region: "x,y,width,height"` requests a
+  crop in window-relative pixels; the summary identifies the requested region and
+  actual output dimensions. Image-capable clients can pass the screenshot to the
+  model directly. Failures return text with `isError: true`.
+
 - **`wait`** — `instance: "any"` returns as soon as any connected window stops, which is
   how to debug a client and a server at once. `for: "module:NAME"` waits for a module to
   load instead of for a stop, which is how to arm breakpoints in a plugin before its host
@@ -261,7 +267,7 @@ Studio, since the VSIX packaging tasks are .NET Framework assemblies.
 output, bounded debugger snapshots, durable profiling, retention settings and exports.
 [Iteration 5](docs/iteration_5.md) adds actionable operation status, structured
 MSBuild binary-log import, and repeatable live tests in an isolated VS profile.
-Version 0.9.0 uses host/shim contract 8; update both together.
+Version 0.9.1 uses host/shim contract 8; update both together.
 
 ## Status
 

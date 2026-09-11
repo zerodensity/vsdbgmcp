@@ -18,7 +18,7 @@ namespace VsDbgMcp.Tests
     /// disk, real named pipe, real JSON-RPC, real tool rendering. What this cannot cover
     /// is Visual Studio's own behaviour, which needs the extension loaded.
     /// </summary>
-    public class ShimIntegrationTests : IDisposable
+    public partial class ShimIntegrationTests : IDisposable
     {
         readonly string _dir;
         readonly string _pipe;

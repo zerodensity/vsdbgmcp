@@ -452,7 +452,14 @@ namespace VsDbgMcp.Tests
             return Task.FromResult(result);
         }
         public Task<string> TriageAsync(CancellationToken ct = default) => Task.FromResult("nothing to triage");
-        public Task<CaptureResult> CaptureAsync(int[] region, CancellationToken ct = default) => Task.FromResult(new CaptureResult());
+        public CaptureResult NextCapture { get; set; } = new CaptureResult();
+        public int[] LastCaptureRegion { get; private set; }
+        public Task<CaptureResult> CaptureAsync(int[] region, CancellationToken ct = default)
+        {
+            Record("capture");
+            LastCaptureRegion = region;
+            return Task.FromResult(NextCapture);
+        }
         public Task<ConsoleResult> ConsoleReadAsync(int tailLines, CancellationToken ct = default) => Task.FromResult(new ConsoleResult { Text = "hello from the debuggee" });
         public Task<OpResult> ConsoleSendAsync(string text, string keys, CancellationToken ct = default) => Ok();
         public Task<OutputResult> OutputReadAsync(string pane, string pattern, int tailLines, CancellationToken ct = default) => Task.FromResult(new OutputResult());
