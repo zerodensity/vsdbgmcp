@@ -23,8 +23,9 @@ namespace VsDbgMcp
         ///    heap can be borrowed for an out-parameter.
         /// 6: a debuggee can be profiled, with the extension collecting and the shim
         ///    reading what it collected.
+        /// 9: compact capture IDs; older shims require GUID-shaped capture IDs.
         /// </summary>
-        public const int ContractVersion = 8;
+        public const int ContractVersion = 9;
 
         public const string InstanceFilePrefix = "inst-";
         public const string InstanceFileSuffix = ".json";

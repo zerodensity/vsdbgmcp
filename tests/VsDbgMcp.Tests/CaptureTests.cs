@@ -124,6 +124,11 @@ namespace VsDbgMcp.Tests
                 await Request("initialize", new { protocolVersion = "2025-11-25", capabilities = new { }, clientInfo = new { name = "capture-test", version = "1" } });
                 await process.StandardInput.WriteLineAsync("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}");
                 var catalog = await Request("tools/list", new { });
+                foreach (var name in new[] { "profile_status", "debug_state" })
+                {
+                    var schema = catalog.GetProperty("tools").EnumerateArray().Single(t => t.GetProperty("name").GetString() == name).GetRawText();
+                    Assert.DoesNotContain("collectorSessionId", schema, StringComparison.OrdinalIgnoreCase);
+                }
                 var tool = catalog.GetProperty("tools").EnumerateArray().Single(t => t.GetProperty("name").GetString() == "capture");
                 Assert.Equal(new[] { "instance", "region" }, tool.GetProperty("inputSchema").GetProperty("properties").EnumerateObject().Select(p => p.Name).OrderBy(n => n));
                 Assert.False(tool.TryGetProperty("outputSchema", out _));

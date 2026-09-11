@@ -22,7 +22,8 @@ namespace VsDbgMcp.Host
         public async Task<OpResult> ProfileBeginAsync(bool retainRaw, CancellationToken ct = default)
         {
             var operation = HostOperations.Store.Begin("profile-start", null, retainRaw.ToString(), true, out var created);
-            var captureId = Guid.NewGuid().ToString("N");
+            var captureId = ShortId.New(id => File.Exists(Path.Combine(ProfileDirectory, id + ".json")) ||
+                File.Exists(Path.Combine(ProfileDirectory, id + ".diagsession")));
             HostOperations.Store.Update(operation.OperationId, o => o.Message = "Reserved capture " + captureId);
             HostOperations.Run(operation.OperationId, async () =>
             {
@@ -44,7 +45,7 @@ namespace VsDbgMcp.Host
                         PruneRawProfiles();
                         var id = captureId;
                         _profiled = target;
-                        var profile = new ProfileCollection { CaptureId = id, CollectorSessionId = id, InstanceId = InstanceId(), HostEpoch = HostOperations.Store.Epoch,
+                        var profile = new ProfileCollection { CaptureId = id, CollectorSessionId = Guid.NewGuid().ToString("N"), InstanceId = InstanceId(), HostEpoch = HostOperations.Store.Epoch,
                             SessionGeneration = _sessionGeneration, StartedUtc = DateTime.UtcNow, ProcessName = target.Name, Pid = target.Pid,
                             Configuration = ActiveConfiguration(), Status = "starting", RetainRaw = retainRaw,
                             Path = Path.Combine(ProfileDirectory, id + ".diagsession"), MetadataPath = Path.Combine(ProfileDirectory, id + ".json"),
@@ -249,7 +250,7 @@ namespace VsDbgMcp.Host
 
         public Task<ProfileCollection> ProfileRecoverAsync(string captureId, CancellationToken ct = default)
         {
-            if (!Guid.TryParseExact(captureId, "N", out var ignored)) throw new ArgumentException("Invalid captureId.");
+            if (!ShortId.IsCaptureId(captureId)) throw new ArgumentException("Invalid captureId. Use the ID returned by profile_status.");
             var path = Path.Combine(ProfileDirectory, captureId + ".json");
             if (!File.Exists(path)) throw new ArgumentException("No retained capture " + captureId);
             var collection = JsonConvert.DeserializeObject<ProfileCollection>(File.ReadAllText(path));
@@ -258,7 +259,7 @@ namespace VsDbgMcp.Host
 
         public Task<ProfileCollection> ProfileStopCaptureAsync(string captureId, CancellationToken ct = default)
         {
-            if (!Guid.TryParseExact(captureId, "N", out var ignored)) throw new ArgumentException("Invalid captureId.");
+            if (!ShortId.IsCaptureId(captureId)) throw new ArgumentException("Invalid captureId. Use the ID returned by profile_status.");
             return StopProfileAsync(captureId, ct);
         }
 

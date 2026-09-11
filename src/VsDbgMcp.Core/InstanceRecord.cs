@@ -20,9 +20,12 @@ namespace VsDbgMcp
         public string StartedAt { get; set; }
 
         /// <summary>
-        /// Short, human-typable, stable for the life of the process: "App#42696".
+        /// Compact instance handle: the Visual Studio process ID, stable for its lifetime.
         /// </summary>
-        public string Id
+        public string Id => Pid.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        /// <summary>Accepted for compatibility with existing instance arguments.</summary>
+        public string LegacyId
         {
             get
             {
@@ -51,7 +54,7 @@ namespace VsDbgMcp
         /// <summary>Solution filter path when the instance was opened through a .slnf.</summary>
         public string Filter { get; set; }
 
-        /// <summary>Display name without extension, used to build the instance id.</summary>
+        /// <summary>Display name without extension, also accepted as a routing prefix.</summary>
         public string Name { get; set; }
     }
 

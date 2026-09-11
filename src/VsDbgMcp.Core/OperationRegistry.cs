@@ -19,27 +19,37 @@ namespace VsDbgMcp
         readonly Func<OperationInfo, OperationInfo> _copy;
         readonly Action<OperationInfo> _save;
         readonly string _instanceId;
-        public string Epoch { get; } = Guid.NewGuid().ToString("N");
+        readonly Func<string, bool> _idInUse;
+        public string Epoch { get; } = ShortId.New();
 
-        public OperationRegistry(Func<OperationInfo, OperationInfo> copy, Action<OperationInfo> save = null, string instanceId = null)
-        { _copy = copy; _save = save; _instanceId = instanceId; }
+        public OperationRegistry(Func<OperationInfo, OperationInfo> copy, Action<OperationInfo> save = null, string instanceId = null,
+            Func<string, bool> idInUse = null)
+        { _copy = copy; _save = save; _instanceId = instanceId; _idInUse = idInUse; }
 
         public OperationInfo Begin(string kind, string requestId, string request, bool exclusive, out bool created)
         {
+            lock (_gate)
+            {
+                var existing = Existing(kind, requestId, request, exclusive);
+                if (existing != null) { created = false; return _copy(existing); }
+            }
+            // Historical collision checks may touch disk. Never hold up status reads.
+            var id = ShortId.New(candidate =>
+            {
+                lock (_gate) if (_items.ContainsKey(candidate)) return true;
+                return _idInUse?.Invoke(candidate) ?? false;
+            });
             OperationInfo result;
             lock (_gate)
             {
-                var previous = _items.Values.FirstOrDefault(x => x.Kind == kind && x.RequestId == requestId && requestId != null);
+                // Recheck after allocation: another caller may have won this request.
+                var previous = Existing(kind, requestId, request, exclusive);
                 if (previous != null)
                 {
-                    if (previous.Request != request) throw new InvalidOperationException("requestId was already used with different arguments.");
                     created = false;
                     return _copy(previous);
                 }
-                previous = _items.Values.FirstOrDefault(x => x.Kind == kind && x.BlocksNewRequests);
-                if (exclusive && previous != null)
-                    throw new InvalidOperationException(kind + " already pending: " + previous.OperationId + ". Query operation_status before retrying.");
-                result = new OperationInfo { OperationId = kind + "-" + Guid.NewGuid().ToString("N"),
+                result = new OperationInfo { OperationId = id,
                     RequestId = requestId, Request = request, Kind = kind, HostEpoch = Epoch, InstanceId = _instanceId,
                     StartedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow, State = "requested",
                     ExecutionPhase = "queued", BlocksNewRequests = exclusive };
@@ -51,6 +61,21 @@ namespace VsDbgMcp
             }
             Persist(result);
             return result;
+        }
+
+        // Called under _gate, both before and after allocating an ID.
+        OperationInfo Existing(string kind, string requestId, string request, bool exclusive)
+        {
+            var previous = _items.Values.FirstOrDefault(x => x.Kind == kind && x.RequestId == requestId && requestId != null);
+            if (previous != null)
+            {
+                if (previous.Request != request) throw new InvalidOperationException("requestId was already used with different arguments.");
+                return previous;
+            }
+            previous = _items.Values.FirstOrDefault(x => x.Kind == kind && x.BlocksNewRequests);
+            if (exclusive && previous != null)
+                throw new InvalidOperationException(kind + " already pending: " + previous.OperationId + ". Query operation_status before retrying.");
+            return null;
         }
 
         public OperationInfo Read(string id)

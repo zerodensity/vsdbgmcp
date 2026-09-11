@@ -40,7 +40,8 @@ namespace VsDbgMcp
             if (string.IsNullOrWhiteSpace(spec)) return null;
             spec = spec.Trim();
 
-            var exact = instances.Where(i => string.Equals(i.Id, spec, StringComparison.OrdinalIgnoreCase)).ToList();
+            var exact = instances.Where(i => string.Equals(i.Id, spec, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(i.LegacyId, spec, StringComparison.OrdinalIgnoreCase)).ToList();
             if (exact.Count == 1) return RouteResult.Ok(exact[0], "id");
 
             if (int.TryParse(spec, out var pid))
@@ -50,7 +51,7 @@ namespace VsDbgMcp
             }
 
             var byPrefix = instances
-                .Where(i => i.Id.StartsWith(spec, StringComparison.OrdinalIgnoreCase))
+                .Where(i => i.LegacyId.StartsWith(spec, StringComparison.OrdinalIgnoreCase))
                 .ToList();
             if (byPrefix.Count == 1) return RouteResult.Ok(byPrefix[0], "prefix");
             if (byPrefix.Count > 1)

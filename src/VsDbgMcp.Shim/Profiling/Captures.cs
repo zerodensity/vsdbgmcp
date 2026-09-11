@@ -41,13 +41,14 @@ namespace VsDbgMcp.Shim.Profiling
         {
             lock (_gate)
             {
-                if (capture.CaptureId == null) capture.CaptureId = Guid.NewGuid().ToString("N");
+                if (capture.CaptureId == null) capture.CaptureId = ShortId.New(id => _taken.Any(c => c.CaptureId == id) ||
+                    (_directory != null && File.Exists(Path.Combine(_directory, id + ".json"))));
+                if (!ShortId.IsCaptureId(capture.CaptureId)) throw new ArgumentException("Invalid captureId.");
                 var existing = _taken.FirstOrDefault(c => c.CaptureId == capture.CaptureId);
                 if (existing != null) return existing;
                 capture.Id = _next++;
                 if (_directory != null)
                 {
-                    if (!Guid.TryParseExact(capture.CaptureId, "N", out var ignored)) throw new ArgumentException("Invalid captureId.");
                     var path = Path.Combine(_directory, capture.CaptureId + ".json");
                     var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
                     File.WriteAllText(temp, JsonConvert.SerializeObject(capture));
@@ -79,7 +80,7 @@ namespace VsDbgMcp.Shim.Profiling
         static string CollectionDirectory => Path.Combine(Names.InstanceDir, "profiles", "collections");
         public static ProfileCollection ReadCollection(string id)
         {
-            if (!Guid.TryParseExact(id, "N", out var ignored)) throw new ArgumentException("Invalid captureId.");
+            if (!ShortId.IsCaptureId(id)) throw new ArgumentException("Invalid captureId. Use the ID returned by profile_status.");
             var collection = JsonConvert.DeserializeObject<ProfileCollection>(File.ReadAllText(Path.Combine(CollectionDirectory, id + ".json")));
             collection.RawAvailable = collection.Path != null && File.Exists(collection.Path);
             return collection;

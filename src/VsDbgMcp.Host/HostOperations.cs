@@ -12,7 +12,7 @@ namespace VsDbgMcp.Host
     static class HostOperations
     {
         static readonly object DiskGate = new object();
-        public static readonly OperationRegistry Store = new OperationRegistry(Copy, Save, Process.GetCurrentProcess().Id.ToString());
+        public static readonly OperationRegistry Store = new OperationRegistry(Copy, Save, Process.GetCurrentProcess().Id.ToString(), HasHistory);
         public static readonly string DirectoryPath = Path.Combine(Names.InstanceDir, "operations", Store.Epoch);
         public static T Copy<T>(T value) => JsonConvert.DeserializeObject<T>(JsonConvert.SerializeObject(value));
         public static void Run(string id, Func<Task> work)
@@ -65,6 +65,12 @@ namespace VsDbgMcp.Host
                 return record;
             }
             return null;
+        }
+
+        static bool HasHistory(string id)
+        {
+            var root = Path.GetDirectoryName(DirectoryPath);
+            return Directory.Exists(root) && Directory.EnumerateDirectories(root).Any(dir => File.Exists(Path.Combine(dir, id + ".json")));
         }
     }
 }

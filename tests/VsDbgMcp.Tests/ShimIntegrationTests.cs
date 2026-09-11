@@ -85,7 +85,7 @@ namespace VsDbgMcp.Tests
         {
             var status = await new LifecycleTools(_sessions).Status(null, CancellationToken.None);
 
-            Assert.Contains("App#", status);
+            Assert.Contains(Process.GetCurrentProcess().Id.ToString(), status);
             Assert.Contains(DebugModes.Break, status);
             Assert.Contains("Mesh::Upload", status);
             Assert.Contains("Debug|x64", status);
@@ -450,7 +450,7 @@ namespace VsDbgMcp.Tests
         {
             var text = await Failure.Text(new LifecycleTools(_sessions).Status("Nope#1", CancellationToken.None));
 
-            Assert.Contains("App#", text);
+            Assert.Contains(Process.GetCurrentProcess().Id.ToString(), text);
             Assert.Contains("instance=", text);
         }
 
@@ -459,7 +459,7 @@ namespace VsDbgMcp.Tests
         {
             var text = await new SessionTools(_sessions).Instances(CancellationToken.None);
 
-            Assert.Contains("App#", text);
+            Assert.Contains(Process.GetCurrentProcess().Id.ToString(), text);
             Assert.Contains("App.slnx", text);
             Assert.Contains(@"D:\repo\Engine\src", text);
         }

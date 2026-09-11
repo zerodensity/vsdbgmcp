@@ -66,7 +66,8 @@ namespace VsDbgMcp.Tests
             Assert.Equal(WorkspaceKind.Slnx, parsed.Workspace.Kind);
             Assert.Equal(@"D:\repo\Engine", parsed.Workspace.Root);
             Assert.Equal("App", parsed.Workspace.Name);
-            Assert.Equal("App#4242", parsed.Id);
+            Assert.Equal("4242", parsed.Id);
+            Assert.Equal("App#4242", parsed.LegacyId);
             Assert.Contains(Capabilities.DataBreakpoints, parsed.Capabilities);
         }
 

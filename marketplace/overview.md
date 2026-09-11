@@ -27,6 +27,11 @@ directory; the shim finds the Visual Studio that has the matching solution open 
 connects. No ports, no per-project setup. When the choice is ambiguous the error names
 the candidates and the exact value to pass, so the next call succeeds.
 
+**Compact IDs.** Operation, capture, and host-session handles use 12
+lowercase alphanumeric characters. Instance selectors use VS process numbers.
+Existing retained IDs and legacy instance selectors remain accepted; collector GUIDs
+stay internal. Update both host and shim together for contract 9.
+
 **C++ gets real tools.** A breakpoint that will never bind says so and says why. `triage`
 answers a crash in one call. `bp_set` can watch an address for writes. `console_read`
 reaches the debuggee's own stdout.

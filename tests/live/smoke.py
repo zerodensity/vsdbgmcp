@@ -22,7 +22,7 @@ def main():
     workspace = {k.lower(): v for k, v in record['workspace'].items()}
     assert record['pid'] == int(args.pid)
     assert Path(workspace['file']).resolve() == fixture / 'DebugTarget.sln'
-    instance = workspace['name'] + '#' + args.pid
+    instance = args.pid
     env = dict(os.environ, VSDBGMCP_DATA_DIR=args.data)
     child = None
     replies = queue.Queue()
@@ -75,6 +75,11 @@ def main():
     def text(response):
         return '\n'.join(c.get('text', '') for c in response.get('content', []) if c.get('type') == 'text')
 
+    def operation_id(response):
+        found = re.search(r'(?:\bBuild |\[|\bOperation: )([a-z0-9]{12})(?:\]|[:, ])', text(response))
+        assert found, response
+        return found.group(1)
+
     def data(response):
         value = response.get('structuredContent')
         if value is None:
@@ -109,7 +114,7 @@ def main():
         call('build_output')
         for mode in ('rebuild', 'build'):
             reply = call('build', mode=mode, configuration='Debug', platform='x64', waitSeconds=0, requestId='live-' + mode)
-            operation = re.search(r'build-[0-9a-f]+', text(reply)).group()
+            operation = operation_id(reply)
             if mode == 'rebuild':
                 child.terminate()
                 child.wait(timeout=5)
@@ -125,7 +130,7 @@ def main():
         try:
             source.write_text(original + '\n#error LIVE_EXPECTED_BUILD_FAILURE\n')
             reply = call('build', requestId='live-failed', waitSeconds=0)
-            failed = complete(re.search(r'build-[0-9a-f]+', text(reply)).group())
+            failed = complete(operation_id(reply))
             assert field(failed, 'state') == 'failed', failed
             assert 'LIVE_EXPECTED_BUILD_FAILURE' in text(call('build_log', operationId=field(failed, 'operationId')))
         finally:
@@ -138,7 +143,7 @@ def main():
                           '</Target></Project>')
         try:
             reply = call('build', mode='rebuild', requestId='live-cancel', waitSeconds=0)
-            cancel_id = re.search(r'build-[0-9a-f]+', text(reply)).group()
+            cancel_id = operation_id(reply)
             deadline = time.monotonic() + 15
             while time.monotonic() < deadline:
                 progress = data(call('operation_status', operationId=cancel_id, waitSeconds=1))
@@ -150,7 +155,7 @@ def main():
             assert field(cancelled, 'state') == 'cancelled', cancelled
 
             reply = call('build', mode='rebuild', requestId='live-follow-action', waitSeconds=0)
-            follow_id = re.search(r'build-[0-9a-f]+', text(reply)).group()
+            follow_id = operation_id(reply)
             pending = data(call('operation_status', operationId=follow_id))
             assert field(pending, 'state') == 'pending', pending
             assert field(pending, 'details') is None
@@ -171,7 +176,7 @@ def main():
         finally:
             target.unlink()
         reply = call('build', requestId='live-restored', waitSeconds=0)
-        restored = complete(re.search(r'build-[0-9a-f]+', text(reply)).group())
+        restored = complete(operation_id(reply))
         assert field(restored, 'state') == 'succeeded', restored
 
         project = fixture / 'diagnostics.proj'
@@ -188,7 +193,7 @@ def main():
         line = next(i for i, value in enumerate(source.read_text().splitlines(), 1) if 'int total = 0;' in value)
         call('bp_set', file=str(source), line=line, requestId='live-breakpoint')
         launch = call('launch', project='DebugTarget', requestId='live-launch')
-        operation = re.search(r'launch-[0-9a-f]+', text(launch)).group()
+        operation = operation_id(launch)
         assert field(complete(operation), 'state') == 'succeeded'
         stopped = json.loads(text(call('wait', timeoutSeconds=20, structured=True)))
         assert stopped['outcome'] in ('event', 'already-stopped')
@@ -200,14 +205,15 @@ def main():
             assert 'Collecting capture' in text(call('profile_start', retainRaw=True))
             profile = field(data(call('debug_state')), 'activeProfile')
             capture_id = field(profile, 'captureId')
-            assert capture_id
+            assert re.fullmatch(r'[a-z0-9]{12}', capture_id), capture_id
+            assert not any(k.lower() == 'collectorsessionid' for k in profile), profile
         call('detach')
         assert field(data(call('debug_state')), 'mode') == 'design'
         if args.profiles:
             stopped = text(call('profile_stop'))
-            pending = re.search(r'profile-stop-[0-9a-f]+', stopped)
+            pending = re.search(r'operation_status ([a-z0-9]{12})', stopped)
             if pending:
-                assert field(complete(pending.group()), 'state') == 'succeeded'
+                assert field(complete(pending.group(1)), 'state') == 'succeeded'
             else:
                 assert 'capture #1' in stopped, stopped
             collector_stopped = True
@@ -226,9 +232,9 @@ def main():
                     if child.poll() is not None:
                         connect()
                     recovery = text(call('profile_recover_stop', captureId=capture_id))
-                    pending = re.search(r'profile-stop-[0-9a-f]+', recovery)
+                    pending = re.search(r'operation_status ([a-z0-9]{12})', recovery)
                     if pending:
-                        complete(pending.group())
+                        complete(pending.group(1))
             finally:
                 child.terminate()
                 child.wait(timeout=5)

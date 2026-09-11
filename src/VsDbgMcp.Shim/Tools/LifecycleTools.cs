@@ -77,6 +77,7 @@ namespace VsDbgMcp.Shim.Tools
             => On(instance, ct, async link =>
             {
                 var status = await link.Debug.GetStatusAsync(ct).ConfigureAwait(false);
+                status.InstanceId = link.Id;
                 var text = Render.Status(status, Sessions.Events.Generation(link.Id));
                 if (status.Observation != null)
                 {

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.2
+
+- Use 12-character lowercase alphanumeric operation, capture, and host-session IDs.
+  Keep IDs stable through retries and reconnects; accept existing retained IDs.
+- Show Visual Studio process numbers as instance IDs, while accepting legacy
+  `Name#PID` selectors and solution-name prefixes. Keep collector GUIDs internal
+  to persistence and omit them from `profile_status` and `debug_state` responses.
+- Host/shim contract 9 requires updating both together because older shims reject
+  compact capture IDs. Native debugger numbers and caller-supplied request IDs are unchanged.
+
 ## 0.9.1
 
 - Return `capture` screenshots as native MCP PNG image content with a short dimensions

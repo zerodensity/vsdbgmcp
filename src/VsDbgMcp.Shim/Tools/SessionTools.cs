@@ -22,7 +22,7 @@ namespace VsDbgMcp.Shim.Tools
         [McpServerTool(Name = "use")]
         [Description("Set the default Visual Studio instance for the rest of this session, so other tools do not need an 'instance' argument. Pass an id from 'instances', or leave empty to go back to picking by working directory.")]
         public async Task<string> Use(
-            [Description("Instance id such as 'App#42696'. A unique prefix or a bare process id also works. Empty clears the default.")] string instance = null,
+            [Description("Visual Studio process ID from instances, such as '42696'. Legacy Name#PID and unique solution-name prefixes are also accepted. Empty clears the default.")] string instance = null,
             CancellationToken ct = default)
         {
             try

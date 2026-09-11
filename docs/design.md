@@ -8,8 +8,11 @@ Status: built and working. Sections 1 to 13 are the design as intended; section
 14 records what building it actually changed, and the README says what has and
 has not been exercised against a live debuggee.
 
-The tool catalog below reflects 0.9.1. Current operation and capture semantics are
-documented in [Recoverable operations and captures](iteration_4.md) and
+The tool catalog below reflects 0.9.2. Operation, capture, and host-session
+IDs are 12 lowercase alphanumeric characters; instance IDs are VS process numbers.
+Collector session GUIDs remain internal to collection and persistence. Legacy IDs
+remain accepted, and host/shim contract 9 prevents older shims rejecting new captures.
+Operation and capture workflows are documented in [Recoverable operations and captures](iteration_4.md) and
 [Actionable status and diagnostic evidence](iteration_5.md); they supersede the
 original blocking and transient-profile design described here.
 
@@ -207,7 +210,7 @@ what lets an agent recover in a single round trip:
 
 ```
 Several instances match this directory. Pass instance= to choose:
-  Engine#42696   D:\repo\Engine   Engine.sln    break
+  42696         D:\repo\Engine   Engine.sln    break
   Editor#51120   D:\repo\Editor   Editor.slnx   run
 ```
 
@@ -247,7 +250,8 @@ Supporting rules:
 
 ### Addressing from the tool layer
 
-- `instances()` lists them. Ids are human-typable and stable: `App#42696`.
+- `instances()` lists them. IDs are VS process numbers: `42696`.
+  Legacy `App#42696` selectors and unique solution-name prefixes still work.
   Unambiguous prefixes are accepted.
 - `use(instance)` sets a sticky default **for the MCP session**, not globally
   and not on disk.
@@ -338,7 +342,7 @@ stopped:
 
 ```json
 {
-  "instance": "Engine#42696",
+  "instance": "42696",
   "reason": "exception",
   "exception": { "code": "0xC0000005", "name": "Access violation",
                  "address": "0x7ff6...", "firstChance": false },

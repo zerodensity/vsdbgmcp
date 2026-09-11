@@ -79,7 +79,7 @@ namespace VsDbgMcp.Shim.Tools
 
         [McpServerTool(Name = "profile_status", ReadOnly = true, UseStructuredContent = true)]
         [Description("List persisted capture metadata, including owner PID, host epoch, debug generation, timestamps, status, intervention markers and raw trace path. A saved collecting state is not a live collector health check.")]
-        public System.Collections.Generic.List<VsDbgMcp.Contracts.ProfileCollection> ProfileStatus() => Captures.Collections();
+        public System.Collections.Generic.List<ProfileResponse> ProfileStatus() => Captures.Collections().ConvertAll(ProfileResponse.From);
 
         [McpServerTool(Name = "profile_export")]
         [Description("Export a capture as structured JSON, a readable report, and an optional retained raw trace. Existing destination files are not overwritten. Works without a live debugger.")]

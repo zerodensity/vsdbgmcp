@@ -88,6 +88,7 @@
     <Compile Include="DebugHost.Operations.cs" />
     <Compile Include="DebugHost.Profiling.cs" />
     <Compile Include="..\VsDbgMcp.Core\OperationRegistry.cs" Link="Core\OperationRegistry.cs" />
+    <Compile Include="..\VsDbgMcp.Core\ShortId.cs" Link="Core\ShortId.cs" />
     <Compile Include="..\VsDbgMcp.Core\BuildDiagnostics.cs" Link="Core\BuildDiagnostics.cs" />
     <Compile Include="..\VsDbgMcp.Core\Contracts\Operations.cs" Link="Core\Contracts\Operations.cs" />
     <Compile Include="BreakpointTable.cs" />

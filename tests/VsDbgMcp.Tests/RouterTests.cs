@@ -43,7 +43,7 @@ namespace VsDbgMcp.Tests
             var route = Router.ByDirectory(instances, @"D:\repo\Engine\src");
 
             Assert.Equal(RouteOutcome.Resolved, route.Outcome);
-            Assert.Equal("Engine#100", route.Instance.Id);
+            Assert.Equal("100", route.Instance.Id);
         }
 
         [Fact]
@@ -58,7 +58,7 @@ namespace VsDbgMcp.Tests
             var route = Router.ByDirectory(instances, @"D:\repo\Engine\src");
 
             Assert.Equal(RouteOutcome.Resolved, route.Outcome);
-            Assert.Equal("Engine#200", route.Instance.Id);
+            Assert.Equal("200", route.Instance.Id);
         }
 
         [Fact]
@@ -116,8 +116,8 @@ namespace VsDbgMcp.Tests
             Assert.Equal(RouteOutcome.Ambiguous, route.Outcome);
 
             var explanation = Router.Explain(route, @"D:\repo\App\src");
-            Assert.Contains("Core#100", explanation);
-            Assert.Contains("Tools#200", explanation);
+            Assert.Contains("100", explanation);
+            Assert.Contains("200", explanation);
             Assert.Contains("instance=", explanation);
         }
 
@@ -129,7 +129,7 @@ namespace VsDbgMcp.Tests
             var route = Router.ByDirectory(instances, @"C:\somewhere\else");
 
             Assert.Equal(RouteOutcome.NoMatch, route.Outcome);
-            Assert.Contains("Engine#100", Router.Explain(route, @"C:\somewhere\else"));
+            Assert.Contains("100", Router.Explain(route, @"C:\somewhere\else"));
         }
 
         [Fact]
@@ -142,10 +142,10 @@ namespace VsDbgMcp.Tests
         }
 
         [Theory]
-        [InlineData("Engine#100", "Engine#100")]
-        [InlineData("100", "Engine#100")]
-        [InlineData("Eng", "Engine#100")]
-        [InlineData("engine#100", "Engine#100")]
+        [InlineData("Engine#100", "100")]
+        [InlineData("100", "100")]
+        [InlineData("Eng", "100")]
+        [InlineData("engine#100", "100")]
         public void Explicit_selection_accepts_id_pid_and_prefix(string spec, string expected)
         {
             var instances = new List<InstanceRecord>

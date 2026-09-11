@@ -147,6 +147,13 @@ connections, and anything that went wrong inside the extension.
 
 Notes on a few:
 
+- **Compact IDs** — new operation, capture, and host-session IDs use
+  12 lowercase alphanumeric characters, such as `7b4n9x2m6k8q`. Copy the complete
+  returned ID into follow-up calls; retries and reconnects keep the same identity.
+  Existing retained IDs still work. Instance IDs are VS process numbers such as
+  `42696`; legacy `Name#PID` selectors and unique solution-name prefixes also work.
+  Collector GUIDs stay internal. This change requires host/shim contract 9.
+
 - **`capture`** — returns the debuggee window as native MCP PNG image
   content with a short dimensions summary. `region: "x,y,width,height"` requests a
   crop in window-relative pixels; the summary identifies the requested region and
@@ -267,7 +274,7 @@ Studio, since the VSIX packaging tasks are .NET Framework assemblies.
 output, bounded debugger snapshots, durable profiling, retention settings and exports.
 [Iteration 5](docs/iteration_5.md) adds actionable operation status, structured
 MSBuild binary-log import, and repeatable live tests in an isolated VS profile.
-Version 0.9.1 uses host/shim contract 8; update both together.
+Version 0.9.2 uses host/shim contract 9; update both together.
 
 ## Status
 

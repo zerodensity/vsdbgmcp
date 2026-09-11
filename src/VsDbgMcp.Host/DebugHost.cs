@@ -340,9 +340,7 @@ namespace VsDbgMcp.Host
         string InstanceId()
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            var workspace = WorkspaceProbe.Read(_solution);
-            var name = string.IsNullOrEmpty(workspace?.Name) ? "vs" : workspace.Name;
-            return name + "#" + System.Diagnostics.Process.GetCurrentProcess().Id;
+            return System.Diagnostics.Process.GetCurrentProcess().Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
         int BreakpointCount()

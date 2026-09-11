@@ -71,11 +71,11 @@ namespace VsDbgMcp.Tests
             Directory.CreateDirectory(Path.Combine(_dir, "profiles", "collections"));
         }
         public void Dispose() { Directory.Delete(_dir, true); }
-        ProfileCollection Collection(string status = "collecting")
+        ProfileCollection Collection(string status = "collecting", bool legacy = false)
         {
-            var id = Guid.NewGuid().ToString("N");
+            var id = legacy ? Guid.NewGuid().ToString("N") : ShortId.New();
             var root = Path.Combine(_dir, "profiles", "collections", id);
-            var result = new ProfileCollection { CaptureId = id, CollectorSessionId = id, Path = root + ".diagsession",
+            var result = new ProfileCollection { CaptureId = id, CollectorSessionId = legacy ? id : Guid.NewGuid().ToString("N"), Path = root + ".diagsession",
                 MetadataPath = root + ".json", StartedUtc = DateTime.UtcNow.AddSeconds(-5), SessionGeneration = 1, HostEpoch = HostOperations.Store.Epoch,
                 Status = status, Pid = 42, Modules = new List<ModuleInfo>() };
             File.WriteAllText(result.MetadataPath, JsonConvert.SerializeObject(result));
@@ -92,6 +92,52 @@ namespace VsDbgMcp.Tests
             var result = new Profiler("unused", "unused", command);
             result.RecoverSession(collection.CollectorSessionId, collection.Path, collection.StartedUtc);
             return result;
+        }
+
+        [Fact]
+        public async Task Start_issues_short_handles_and_keeps_the_collector_guid_private()
+        {
+            var commands = new List<string>();
+            DebugHost host = null;
+            var profiler = new Profiler("unused", "unused", command =>
+            {
+                commands.Add(command);
+                if (command.StartsWith("stop ")) Package(host.Active.Path);
+                return Task.FromResult<string>(null);
+            });
+            host = new DebugHost(null, profiler);
+            var started = await host.ProfileBeginAsync(true);
+            Assert.True(started.Ok);
+            Assert.True(ShortId.IsValid(started.OperationId));
+            var active = host.Active;
+            Assert.True(ShortId.IsValid(active.CaptureId));
+            Assert.True(Guid.TryParseExact(active.CollectorSessionId, "N", out _));
+            Assert.NotEqual(active.CaptureId, active.CollectorSessionId);
+            Assert.StartsWith("start " + active.CollectorSessionId + " ", commands.Single());
+            var recovered = await host.ProfileRecoverAsync(active.CaptureId);
+            Assert.Equal(active.CollectorSessionId, recovered.CollectorSessionId);
+            var stopped = await host.ProfileStopCaptureAsync(active.CaptureId);
+            Assert.Null(stopped.Error);
+            Assert.StartsWith("stop " + active.CollectorSessionId + " ", commands.Last());
+            Assert.Equal(active.CaptureId, stopped.CaptureId);
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task Retained_short_and_legacy_captures_recover_and_stop_the_owned_collector(bool legacy)
+        {
+            var collection = Collection(legacy: legacy);
+            var host = new DebugHost(collection, Collector(collection, command =>
+            {
+                Assert.StartsWith("stop " + collection.CollectorSessionId + " ", command);
+                Package(collection.Path);
+                return Task.FromResult<string>(null);
+            }));
+            Assert.Equal(collection.CollectorSessionId, (await host.ProfileRecoverAsync(collection.CaptureId)).CollectorSessionId);
+            var stopped = await host.ProfileStopCaptureAsync(collection.CaptureId);
+            Assert.Null(stopped.Error);
+            Assert.Equal(collection.CaptureId, stopped.CaptureId);
         }
 
         [Fact]

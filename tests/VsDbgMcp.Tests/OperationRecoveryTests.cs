@@ -165,15 +165,20 @@ namespace VsDbgMcp.Tests
             Assert.Contains("parsed", report);
         }
 
-        [Fact]
-        public void Persisted_aggregates_survive_a_new_store_and_export_without_a_debugger()
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void Persisted_aggregates_survive_a_new_store_and_export_without_a_debugger(bool legacy)
         {
             var root = Path.Combine(Path.GetTempPath(), "vsdbgmcp-test-" + Guid.NewGuid().ToString("N"));
             try
             {
                 var store = new Captures(Path.Combine(root, "store"));
                 var capture = Example();
+                if (legacy) capture.CaptureId = Guid.NewGuid().ToString("N");
                 store.Keep(capture);
+                if (!legacy) Assert.True(ShortId.IsValid(capture.CaptureId));
+                Assert.Same(capture, store.Keep(capture));
                 var reconnected = new Captures(Path.Combine(root, "store"));
                 var restored = reconnected.FindStable(capture.CaptureId);
                 Assert.NotNull(restored);
