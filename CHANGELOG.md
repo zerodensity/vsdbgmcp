@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.10.0
 
 - Replies open with what happened in Visual Studio since the previous call: stops,
   exits, builds finishing, debugging starting or ending, a window closing.
