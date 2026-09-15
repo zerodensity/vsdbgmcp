@@ -80,12 +80,12 @@ namespace VsDbgMcp.Shim.Tools
         /// <summary>
         /// Runs a call that ends the debug session, and owns the ending it causes.
         ///
-        /// What the expectation buys is silence: the →design transition this call brings
-        /// about is not news to whoever asked for it. What it costs while it is open is
-        /// every Exited stop of that window, hidden outright — not just kept out of the
-        /// digest but out of status and the recent list too. So it is registered only
-        /// when the session really is ending, and withdrawn the moment nothing is coming
-        /// to consume it, whether the call came back refusing or never came back at all.
+        /// What the expectation buys is silence: the change to design mode this call
+        /// brings about is not news to whoever asked for it. What it costs while it is
+        /// open is every Exited stop of that window, hidden outright: not just kept out
+        /// of the digest but out of status and the recent list too. So it is registered
+        /// only when the session really is ending, and withdrawn the moment nothing is
+        /// coming to consume it, whether the call came back refusing or never came back.
         ///
         /// <paramref name="wholeSession"/> is false for a stop or detach aimed at one
         /// pid: those normally leave the session running, and for fifteen seconds any
@@ -129,12 +129,13 @@ namespace VsDbgMcp.Shim.Tools
                     if (observed.LastProfile != null) text += "\nLatest retained capture: " + observed.LastProfile.CaptureId + " PID " + observed.LastProfile.Pid + " generation " + observed.LastProfile.SessionGeneration;
                 }
 
-                // status answers for one window, so it accounts for that window only.
-                // A stop in another one still reaches the digest, where the instance
-                // prefix says which window it was.
-                var recent = EventLines.Recent(Sessions.Log.Recent(link.Id, 5), Sessions.ConnectedCount > 1, DateTime.UtcNow);
+                // status answers for one window, so it accounts for that window only,
+                // and only for the lines it shows. A stop in another window, or one
+                // older than these five, still reaches the digest.
+                var shown = Sessions.Log.Recent(link.Id, 5);
+                var recent = EventLines.Recent(shown, Sessions.ConnectedCount > 1, DateTime.UtcNow);
                 if (recent != null) text += "\n" + recent;
-                Sessions.Log.MarkSeen(link.Id);
+                Sessions.Log.MarkSeen(shown);
 
                 return text;
             });

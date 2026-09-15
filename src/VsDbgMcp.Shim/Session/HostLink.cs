@@ -24,7 +24,7 @@ namespace VsDbgMcp.Shim.Session
 
         /// <summary>
         /// Whether this ever finished connecting. A handshake that fails tears the pipe
-        /// down, which raises Disconnected — and a window that never answered is not a
+        /// down, which raises Disconnected, and a window that never answered is not a
         /// window that closed. Reporting it as one told the model its window had gone
         /// while it sat there, open, still loading.
         /// </summary>

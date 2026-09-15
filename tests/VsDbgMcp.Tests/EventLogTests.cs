@@ -65,6 +65,17 @@ namespace VsDbgMcp.Tests
         }
 
         [Fact]
+        public void Marking_the_entries_shown_leaves_the_ones_that_did_not_fit()
+        {
+            var log = NewLog();
+            for (var i = 0; i < 7; i++) log.Stopped(Stop("App#1"));
+
+            log.MarkSeen(log.Recent("App#1", 5));
+
+            Assert.Equal(2, log.TakeUnseen().Count);
+        }
+
+        [Fact]
         public void Entries_come_back_oldest_first()
         {
             var log = NewLog();
@@ -294,6 +305,10 @@ namespace VsDbgMcp.Tests
             Assert.Equal(EventKind.DebuggingStarted, Assert.Single(log.TakeUnseen()).Kind);
         }
 
+        /// <summary>
+        /// The host notices the launch has ended by polling after the run started, so
+        /// the mode change is always pushed before the operation is.
+        /// </summary>
         [Fact]
         public void A_launch_that_builds_first_still_owns_the_run_it_starts()
         {
@@ -302,10 +317,23 @@ namespace VsDbgMcp.Tests
 
             log.Expect("App#1", Expected.RunStart, "ab12");
             _now = _now.AddMinutes(3);
-            log.OperationDone(Operation("ab12", "launch"));
             log.ModeChanged("App#1", DebugModes.Run);
+            log.OperationDone(Operation("ab12", "launch"));
 
             Assert.Equal(EventKind.OperationDone, Assert.Single(log.TakeUnseen()).Kind);
+        }
+
+        [Fact]
+        public void A_launch_whose_end_was_never_pushed_stops_owning_runs_eventually()
+        {
+            var log = NewLog();
+            log.InitializeMode("App#1", DebugModes.Design);
+
+            log.Expect("App#1", Expected.RunStart, "ab12");
+            _now = _now.AddMinutes(31);
+            log.ModeChanged("App#1", DebugModes.Run);
+
+            Assert.Equal(EventKind.DebuggingStarted, Assert.Single(log.TakeUnseen()).Kind);
         }
 
         [Fact]

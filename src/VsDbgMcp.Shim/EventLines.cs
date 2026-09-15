@@ -205,8 +205,8 @@ namespace VsDbgMcp.Shim
         const int ReasonLength = 100;
 
         /// <summary>
-        /// Why, in the room one line has. A host message runs to a paragraph — the one
-        /// that retires unresolved work is about 110 characters on its own — and this
+        /// Why, in the room one line has. A host message runs to a paragraph (the one
+        /// that retires unresolved work is about 110 characters on its own) and this
         /// goes at the top of a reply beside everything else that happened. The whole
         /// text is in operation_status.
         /// </summary>
@@ -225,9 +225,9 @@ namespace VsDbgMcp.Shim
             n.ToString(CultureInfo.InvariantCulture) + " " + noun + (n == 1 ? "" : "s");
 
         /// <summary>
-        /// How long ago, when that is worth saying. Under a minute it is "just now" by
-        /// construction — the reply is being read as it is written — and a time on
-        /// every line would be noise on all of them.
+        /// How long ago, when that is worth saying. Under a minute it is "just now",
+        /// because the reply is being read as it is written, and a time on every line
+        /// would be noise on all of them.
         /// </summary>
         static string Age(TimeSpan since)
         {

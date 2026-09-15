@@ -80,6 +80,16 @@ namespace VsDbgMcp.Shim.Session
         /// </summary>
         static readonly TimeSpan ExpectationLife = TimeSpan.FromSeconds(15);
 
+        /// <summary>
+        /// How long an expectation tied to a pending operation lives. A launch builds
+        /// first, for minutes when it is C++, and the run it starts is announced by the
+        /// mode change before the host notices the operation has ended. So the
+        /// expectation cannot be kept alive by the operation ending; it has to outlast
+        /// the build on its own. The bound is for a host too old to push operations
+        /// ending, where nothing else would ever close it.
+        /// </summary>
+        static readonly TimeSpan OperationLife = TimeSpan.FromMinutes(30);
+
         /// <summary>How many reported operation ids to remember for pushes that have not landed yet.</summary>
         const int ReportedKept = 64;
 
@@ -278,9 +288,19 @@ namespace VsDbgMcp.Shim.Session
         }
 
         /// <summary>
+        /// These entries were shown. status shows the last few of a window and marks
+        /// only those, so an older one it had no room for still reaches the digest.
+        /// </summary>
+        public void MarkSeen(IEnumerable<LogEntry> shown)
+        {
+            if (shown == null) return;
+            lock (_gate) foreach (var entry in shown) entry.Seen = true;
+        }
+
+        /// <summary>
         /// The first unshown entry of these kinds, or the next one to arrive. Null on
         /// timeout, and null kinds means any. What it returns is marked shown, because
-        /// every caller reports it — so an entry the accept predicate turns down is
+        /// every caller reports it, so an entry the accept predicate turns down is
         /// left alone for the digest to carry. A caller that ends up not reporting what
         /// it was given hands it back with <see cref="PutBack"/>.
         ///
@@ -351,6 +371,8 @@ namespace VsDbgMcp.Shim.Session
         /// It expires, because the call may have started nothing. An expectation that
         /// outlived its change swallows somebody else's; one that expires too early
         /// echoes this session's own. Fifteen seconds is where those two cost least.
+        /// One tied to a pending operation lives as long as the operation can, because
+        /// the change it waits for comes at the end of a build of any length.
         /// </summary>
         public void Expect(string instanceId, Expected kind, string operationId = null)
         {
@@ -364,7 +386,7 @@ namespace VsDbgMcp.Shim.Session
                     InstanceId = instanceId,
                     Kind = kind,
                     OperationId = operationId,
-                    Deadline = _now() + ExpectationLife
+                    Deadline = _now() + (operationId == null ? ExpectationLife : OperationLife)
                 });
             }
         }
@@ -379,9 +401,9 @@ namespace VsDbgMcp.Shim.Session
         /// <summary>
         /// An operation has reached its end.
         ///
-        /// A launch may build for minutes before the run starts, so an expectation tied
-        /// to one is kept alive until the operation itself finishes, and dropped
-        /// outright when it failed: no run is coming after a build that did not link.
+        /// An expectation tied to this operation is dropped outright when it failed, no
+        /// run being on its way after a build that did not link, and otherwise given the
+        /// ordinary fifteen seconds: the change it waits for is due now, if at all.
         /// </summary>
         public void OperationDone(OperationInfo operation)
         {
