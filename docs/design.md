@@ -372,6 +372,38 @@ the module is already loaded. Module loads are buffered in a stream of their own
 so a `wait` for a stop is never woken by one — the whole agent loop reads a
 returning `wait` as "the debuggee stopped".
 
+### Events reach the model without it asking
+
+`wait` answers the call that is waiting for something. Most of what happens in
+Visual Studio happens while the agent is not waiting at all — it is reading a file,
+writing a fix, thinking — and none of that has to go looking for it. A journal in
+the shim keeps everything that happened since the model last saw it: stops, exits,
+a build finishing, debugging starting or ending, a window closing. Every reply
+opens with what is in it, "Since your last call:" and one line per event, ahead of
+the tool's own answer, because a long reply is truncated from the bottom by some
+clients and because the debuggee having exited changes how everything under it
+should be read. Nothing is added when nothing happened; a fixed line on every
+reply is a tax on hundreds of calls and teaches the model to stop reading it.
+
+`wait` reads the same journal, widened: `for: "any"` blocks for the next event of
+any kind rather than only a stop, and `for: "output:REGEX"` for a Debug-pane line.
+A wait also stops sitting out its timeout the moment a stop has become
+impossible — debugging ending before one arrived, or the window closing — for the
+same reason a wait already answers at once when the debuggee has not run since it
+last stopped: a timeout read as "this code is never reached" is a wrong answer the
+tool can avoid giving.
+
+`status` carries the same journal too, the last few events for the one window it
+answers for, under `Recent:`, and marks them read as it lists them so they do not
+also open the reply as a digest. It answers for one window only, so an event in a
+different one is still unread and still reaches the digest, with the instance
+naming which window it happened in.
+
+One renderer writes every line all three read — the digest, `status`, and `wait`'s
+own text replies — so a line recognised in one place is the same line everywhere,
+and a model that starts `vsdbgmcp --follow` in the background recognises its
+lines too.
+
 ### Evaluation must not silently run the program
 
 The native expression evaluator will call functions inside an expression if
@@ -699,6 +731,17 @@ Visual Studio's own behaviour, which is where the last three live.
 
   Deferred rather than dropped: it is purely additive. No contract changes, no
   tool changes, and nothing about it gets harder by waiting.
+- **Pushing an event straight into the conversation, not just onto the next
+  reply or a stream beside it.** Claude Code's channel extension lets a stdio
+  server declare `capabilities.experimental["claude/channel"]` and send a
+  notification the model receives while idle, without a call and without a
+  background process the client has to be told to run. It is a research
+  preview behind a flag today, so it is not built; the seams are, because
+  what it needs already exists for `--follow` — the journal to subscribe to
+  and a connection kept open on the server's own initiative rather than a
+  call's. See §5.10 of
+  `docs/superpowers/specs/2026-09-11-event-awareness-design.md` for the shape
+  it would take.
 - Managed-specific tooling: TPL task lists, async call stacks.
 - Approval mode for destructive tools.
 - Memory writes.
@@ -804,5 +847,3 @@ leaves as an error result carrying the reason and nothing else.
 
 - Tool naming convention. Short and unprefixed reads well, but it is worth
   revisiting once there are real transcripts to look at.
-- Whether `status()` should carry a compact recent-events tail, or whether that
-  belongs only in `wait()`'s return value.

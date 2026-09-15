@@ -20,6 +20,7 @@ namespace VsDbgMcp.Tests
         readonly string _pipeName;
         readonly CancellationTokenSource _cts = new CancellationTokenSource();
         readonly List<IShimEvents> _clients = new List<IShimEvents>();
+        readonly List<JsonRpc> _rpcs = new List<JsonRpc>();
         readonly object _gate = new object();
         Task _listener;
 
@@ -68,44 +69,57 @@ namespace VsDbgMcp.Tests
                 rpc.AddLocalRpcTarget<IProfileHost>(this, null);
 
                 var client = rpc.Attach<IShimEvents>();
-                lock (_gate) _clients.Add(client);
+                lock (_gate) { _clients.Add(client); _rpcs.Add(rpc); }
 
                 rpc.StartListening();
             }
         }
 
-        /// <summary>Pushes a stop the way the debug engine would.</summary>
-        public void RaiseStop(StopEvent stop)
+        void Push(Func<IShimEvents, Task> send)
         {
             List<IShimEvents> targets;
             lock (_gate) targets = new List<IShimEvents>(_clients);
             foreach (var client in targets)
             {
-                try { client.OnStopAsync(stop).GetAwaiter().GetResult(); } catch { }
+                try { send(client).GetAwaiter().GetResult(); } catch { }
             }
         }
+
+        /// <summary>Pushes a stop the way the debug engine would.</summary>
+        public void RaiseStop(StopEvent stop) => Push(c => c.OnStopAsync(stop));
 
         /// <summary>Pushes a debugger mode change the way the shell would.</summary>
         public void RaiseModeChange(string mode)
         {
             Mode = mode;
-
-            List<IShimEvents> targets;
-            lock (_gate) targets = new List<IShimEvents>(_clients);
-            foreach (var client in targets)
-            {
-                try { client.OnModeChangedAsync(null, mode).GetAwaiter().GetResult(); } catch { }
-            }
+            Push(c => c.OnModeChangedAsync(null, mode));
         }
 
         /// <summary>Pushes a module load the way the debug engine would.</summary>
-        public void RaiseModuleLoad(ModuleLoadEvent module)
+        public void RaiseModuleLoad(ModuleLoadEvent module) => Push(c => c.OnModuleLoadAsync(module));
+
+        /// <summary>Pushes an operation reaching its end.</summary>
+        public void RaiseOperationChanged(OperationInfo operation) => Push(c => c.OnOperationChangedAsync(operation));
+
+        /// <summary>Pushes the solution changing.</summary>
+        public void RaiseWorkspaceChanged() => Push(c => c.OnWorkspaceChangedAsync(null));
+
+        /// <summary>Pushes a Debug pane line.</summary>
+        public void RaiseOutput(OutputEvent output) => Push(c => c.OnOutputAsync(output));
+
+        /// <summary>Closes every connection, the way Visual Studio closing does.</summary>
+        public void Drop()
         {
-            List<IShimEvents> targets;
-            lock (_gate) targets = new List<IShimEvents>(_clients);
-            foreach (var client in targets)
+            List<JsonRpc> connections;
+            lock (_gate)
             {
-                try { client.OnModuleLoadAsync(module).GetAwaiter().GetResult(); } catch { }
+                connections = new List<JsonRpc>(_rpcs);
+                _rpcs.Clear();
+                _clients.Clear();
+            }
+            foreach (var rpc in connections)
+            {
+                try { rpc.Dispose(); } catch { }
             }
         }
 
@@ -276,7 +290,8 @@ namespace VsDbgMcp.Tests
         public Task<List<OperationInfo>> OperationsAsync(CancellationToken ct = default) => Task.FromResult(new List<OperationInfo>());
         public Task<StateObservation> ObserveAsync(CancellationToken ct = default) => Task.FromResult(new StateObservation { Mode = "run", TimestampUtc = DateTime.UtcNow });
         public async Task<OperationInfo> BuildBeginAsync(BuildRequest request, CancellationToken ct = default) =>
-            new OperationInfo { Build = await BuildAsync(request.Mode, request.Project, request.Configuration, request.Platform, ct), Terminal = true };
+            new OperationInfo { OperationId = "build-1", Kind = "build", State = "failed", Terminal = true,
+                Build = await BuildAsync(request.Mode, request.Project, request.Configuration, request.Platform, ct) };
         public Task<OpResult> BuildCancelOperationAsync(string id, CancellationToken ct = default) => BuildCancelAsync(ct);
         public Task<BuildLog> BuildLogAsync(string id, long offset, int count, CancellationToken ct = default) => Task.FromResult(new BuildLog { OperationId = id });
 

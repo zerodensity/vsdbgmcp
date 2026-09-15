@@ -41,6 +41,18 @@ namespace VsDbgMcp.Shim.Session
         public string Cwd { get; }
         public EventBus Events { get; } = new EventBus();
 
+        /// <summary>What happened while the model was not looking.</summary>
+        public EventLog Log { get; } = new EventLog();
+
+        /// <summary>
+        /// How many windows are connected. The digest names the instance only when
+        /// there is more than one, because with one it is noise on every line.
+        /// </summary>
+        public int ConnectedCount
+        {
+            get { lock (_links) return _links.Values.Count(l => l.IsConnected); }
+        }
+
         /// <summary>The profiles taken in this session, so one can be read against another.</summary>
         public Profiling.Captures Captures { get; }
 
@@ -68,15 +80,16 @@ namespace VsDbgMcp.Shim.Session
                         continue;
                     }
 
-                    var link = new HostLink(record, Events);
+                    var link = new HostLink(record, Events, Log);
                     await link.ConnectAsync(ct).ConfigureAwait(false);
-                    _links[record.Pid] = link;
+                    lock (_links) _links[record.Pid] = link;
                 }
 
                 foreach (var pid in _links.Keys.Where(p => !seen.Contains(p)).ToList())
                 {
+                    _links[pid].ReportGone();
                     _links[pid].Dispose();
-                    _links.Remove(pid);
+                    lock (_links) _links.Remove(pid);
                 }
 
                 return _links.Values.ToList();
@@ -125,7 +138,8 @@ namespace VsDbgMcp.Shim.Session
             if (route == null || route.Outcome != RouteOutcome.Resolved)
                 throw new RoutingException(Router.Explain(route ?? new RouteResult { Outcome = RouteOutcome.NoInstances }, Cwd));
 
-            var link = _links[route.Instance.Pid];
+            HostLink link;
+            lock (_links) link = _links[route.Instance.Pid];
             if (!link.IsConnected && !await link.ConnectAsync(ct).ConfigureAwait(false))
             {
                 throw new RoutingException(
@@ -135,6 +149,27 @@ namespace VsDbgMcp.Shim.Session
             }
 
             return link;
+        }
+
+        /// <summary>
+        /// Keeps connections to every window open, looking for new ones every couple of
+        /// seconds, until the token is cancelled. A call refreshes on its way through,
+        /// so the server never needs this; something that only listens does.
+        /// </summary>
+        public async Task KeepConnectedAsync(CancellationToken ct, Func<IReadOnlyList<HostLink>, Task> after = null)
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                IReadOnlyList<HostLink> links = new List<HostLink>();
+
+                try { links = await RefreshAsync(true, ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { throw; }
+                catch { /* one window that will not answer is no reason to stop watching. */ }
+
+                if (after != null) await after(links).ConfigureAwait(false);
+
+                await Task.Delay(RefreshInterval, ct).ConfigureAwait(false);
+            }
         }
 
         /// <summary>Sets the default target for this session. Empty clears it.</summary>
@@ -157,8 +192,14 @@ namespace VsDbgMcp.Shim.Session
 
         public void Dispose()
         {
-            foreach (var link in _links.Values) link.Dispose();
-            _links.Clear();
+            List<HostLink> links;
+            lock (_links)
+            {
+                links = _links.Values.ToList();
+                _links.Clear();
+            }
+
+            foreach (var link in links) link.Dispose();
         }
     }
 }

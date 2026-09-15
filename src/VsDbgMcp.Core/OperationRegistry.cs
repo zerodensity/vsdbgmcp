@@ -22,6 +22,12 @@ namespace VsDbgMcp
         readonly Func<string, bool> _idInUse;
         public string Epoch { get; } = ShortId.New();
 
+        /// <summary>
+        /// An operation has reached its end. Raised once, after the locks are released, so
+        /// a handler that broadcasts over a pipe cannot hold up anyone reading status.
+        /// </summary>
+        public event Action<OperationInfo> Completed;
+
         public OperationRegistry(Func<OperationInfo, OperationInfo> copy, Action<OperationInfo> save = null, string instanceId = null,
             Func<string, bool> idInUse = null)
         { _copy = copy; _save = save; _instanceId = instanceId; _idInUse = idInUse; }
@@ -92,6 +98,7 @@ namespace VsDbgMcp
             OperationInfo result;
             TaskCompletionSource<bool> done = null;
             object updateGate;
+            bool wasTerminal;
             lock (_gate) updateGate = _updateGates[id];
             // Serialize mutations of this operation, without blocking observation or
             // unrelated operations if an owner's update callback unexpectedly stalls.
@@ -99,6 +106,7 @@ namespace VsDbgMcp
             {
                 OperationInfo item;
                 lock (_gate) item = _copy(_items[id]);
+                wasTerminal = item.Terminal;
                 if (item.Terminal && !lifecycle) return _copy(item);
                 update(item);
                 item.UpdatedUtc = DateTime.UtcNow;
@@ -119,6 +127,7 @@ namespace VsDbgMcp
             }
             Persist(result);
             done?.TrySetResult(true);
+            if (!wasTerminal && result.Terminal) Completed?.Invoke(result);
             return result;
         }
 

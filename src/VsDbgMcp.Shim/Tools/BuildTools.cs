@@ -42,6 +42,7 @@ namespace VsDbgMcp.Shim.Tools
                 var operation = await link.Project.BuildBeginAsync(new VsDbgMcp.Contracts.BuildRequest {
                     RequestId = requestId, Mode = normalized, Project = project, Configuration = configuration,
                     Platform = platform, WaitSeconds = waitSeconds }, ct).ConfigureAwait(false);
+                if (operation.Terminal) Sessions.Log.OperationReported(operation.OperationId);
                 if (operation.Build != null) return Render.Build(operation.Build);
                 return "Build " + operation.OperationId + ": " + operation.State + ". " + operation.Message +
                     (operation.Terminal ? "" : " Query operation_status to wait or recover its result.");

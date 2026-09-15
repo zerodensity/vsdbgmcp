@@ -13,7 +13,7 @@ namespace VsDbgMcp.Shim
 {
     static class Program
     {
-        const string Instructions =
+        static string Instructions(ShimOptions options) =>
             "Drives the Visual Studio debugger. Call 'status' first to see where things stand.\n" +
             "\n" +
             "Waiting: after launch, go, or step, call 'wait' to find out where the program stopped and why. " +
@@ -21,6 +21,16 @@ namespace VsDbgMcp.Shim
             "Never poll 'status' in a loop; 'wait' blocks on the debugger's own events and cannot miss a stop. " +
             "Call it after resuming, not instead of resuming: where the program has not run since it last " +
             "stopped, 'wait' says so rather than waiting for a stop that cannot come.\n" +
+            "\n" +
+            "Events: when something happened in Visual Studio since your previous call - a stop, an exit, a " +
+            "build finishing, someone starting or ending debugging - the reply begins with \"Since your last " +
+            "call:\" and one line per event. Nothing is added when nothing happened, so there is no block to " +
+            "look for and none to skip. 'wait' with for='any' blocks for the next such event, " +
+            "for='output:REGEX' for a Debug pane line. 'status' lists what happened recently in one window.\n" +
+            "\n" +
+            "While the program runs and you have other work, run " + FollowCommand(options) + " under a " +
+            "background monitor if your client has one; it prints one line per stop, exit, build completion " +
+            "or session change until stopped.\n" +
             "\n" +
             "Instances: several Visual Studio windows can be open at once. Calls go to the one whose solution " +
             "matches the working directory. If that is ambiguous the reply lists the candidates and the exact " +
@@ -32,6 +42,24 @@ namespace VsDbgMcp.Shim
             "assembling the picture by hand, and 'bp_set' with dataExpression to catch memory being overwritten.\n" +
             "\n" +
             "'eval' will not call functions unless allowSideEffects is set, because doing so really runs them.";
+
+        /// <summary>
+        /// The exact command to start the event stream, so nothing has to be guessed
+        /// from a name. Started through the runtime rather than the executable, this
+        /// process is dotnet, and the assembly has to be named as well.
+        /// </summary>
+        static string FollowCommand(ShimOptions options)
+        {
+            var exe = Environment.ProcessPath;
+            var self = typeof(Program).Assembly.Location;
+            var command = exe != null &&
+                string.Equals(Path.GetFileNameWithoutExtension(exe), "dotnet", StringComparison.OrdinalIgnoreCase)
+                    ? "\"" + exe + "\" \"" + self + "\""
+                    : "\"" + (exe ?? Names.ShimExe) + "\"";
+
+            return command + " --follow --cwd \"" + options.Cwd + "\"" +
+                (string.IsNullOrEmpty(options.Instance) ? "" : " --instance " + options.Instance);
+        }
 
         static async Task<int> Main(string[] args)
         {
@@ -46,6 +74,8 @@ namespace VsDbgMcp.Shim
             // as well covers the ways that do not close it: being killed outright, or
             // replacing its own image during an update.
             ParentWatch.ExitWhenParentDoes();
+
+            if (options.Follow) return await Follow.RunAsync(options).ConfigureAwait(false);
 
             var sessions = new SessionManager(options.Cwd);
 
@@ -62,10 +92,12 @@ namespace VsDbgMcp.Shim
                 .AddMcpServer(o =>
                 {
                     o.ServerInfo = new Implementation { Name = "vsdbgmcp", Version = ThisVersion() };
-                    o.ServerInstructions = Instructions;
+                    o.ServerInstructions = Instructions(options);
                 })
                 .WithStdioServerTransport()
-                .WithRequestFilters(f => f.AddCallToolFilter(FailuresKeepTheirOwnWords))
+                .WithRequestFilters(f => f
+                    .AddCallToolFilter(EventsSinceTheLastCall(sessions))
+                    .AddCallToolFilter(FailuresKeepTheirOwnWords))
                 .WithTools<SessionTools>()
                 .WithTools<LifecycleTools>()
                 .WithTools<ExecutionTools>()
@@ -117,6 +149,29 @@ namespace VsDbgMcp.Shim
                 }
             };
 
+        /// <summary>
+        /// What happened in Visual Studio since the model's previous call goes at the
+        /// top of this reply.
+        ///
+        /// At the top because a long result is truncated from the bottom by some
+        /// clients, and because "the debuggee exited" changes how everything under it
+        /// should be read. On failures too: eval failing for want of a frame, next to
+        /// the process exiting, is the pairing that explains it.
+        ///
+        /// Nothing is added when nothing happened. A fixed line on every reply is a tax
+        /// on hundreds of calls, and it teaches the model to skip the block.
+        /// </summary>
+        static McpRequestFilter<CallToolRequestParams, CallToolResult> EventsSinceTheLastCall(SessionManager sessions) =>
+            next => async (context, ct) =>
+            {
+                var result = await next(context, ct).ConfigureAwait(false);
+
+                var digest = EventLines.Digest(sessions.Log.TakeUnseen(), sessions.ConnectedCount > 1, DateTime.UtcNow);
+                if (digest != null) result.Content.Insert(0, new TextContentBlock { Text = digest });
+
+                return result;
+            };
+
         static string ThisVersion() =>
             typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "0.1.0";
     }
@@ -127,16 +182,22 @@ namespace VsDbgMcp.Shim
             "vsdbgmcp - Visual Studio debugger over MCP\n" +
             "\n" +
             "  vsdbgmcp [--cwd DIR] [--instance ID] [-v]\n" +
+            "  vsdbgmcp --follow [--cwd DIR] [--instance ID|any] [--match REGEX] [-v]\n" +
             "\n" +
             "Speaks MCP over stdio. Launched by an MCP client, not by hand.\n" +
             "\n" +
             "  --cwd DIR        Route as if started in DIR. Defaults to the current directory.\n" +
             "  --instance ID    Pin to one Visual Studio instance instead of routing by directory.\n" +
+            "  --follow         Print one line per debugger event to stdout instead of serving MCP.\n" +
+            "                   Ends when stdin closes. Use --instance any to watch every window.\n" +
+            "  --match REGEX    With --follow, also print Debug pane lines matching REGEX.\n" +
             "  -v, --verbose    Log to stderr.\n" +
             "  -h, --help       This text.\n";
 
         public string Cwd { get; private set; }
         public string Instance { get; private set; }
+        public string Match { get; private set; }
+        public bool Follow { get; private set; }
         public bool Verbose { get; private set; }
         public bool ShowHelp { get; private set; }
 
@@ -153,6 +214,12 @@ namespace VsDbgMcp.Shim
                         break;
                     case "--instance" when i + 1 < args.Length:
                         options.Instance = args[++i];
+                        break;
+                    case "--follow":
+                        options.Follow = true;
+                        break;
+                    case "--match" when i + 1 < args.Length:
+                        options.Match = args[++i];
                         break;
                     case "-v":
                     case "--verbose":

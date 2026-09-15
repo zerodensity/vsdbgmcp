@@ -33,6 +33,11 @@ so this is the check list for whether it still tells the truth.
 - **The setup command changed.** It appears in `overview.md`, in `README.md`, and in the
   panel, which builds it from the real path at run time. The panel is the one that
   cannot be wrong; the other two are copies of it.
+- **A capability was added that is not a new tool.** Events reaching the model without
+  it asking — the digest atop a reply, `status`'s recent list, `vsdbgmcp --follow` —
+  changed none of the counts above, but it is exactly what the *Tools* section's short
+  list is for: a reader would not guess a debugger server tells an agent things without
+  being asked.
 
 ## Publishing it
 

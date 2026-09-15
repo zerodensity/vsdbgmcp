@@ -16,14 +16,17 @@ namespace VsDbgMcp.Shim.Session
     public sealed class HostLink : IShimEvents, IDisposable
     {
         readonly EventBus _bus;
+        readonly EventLog _log;
         NamedPipeClientStream _pipe;
         JsonRpc _rpc;
         bool _disposed;
+        bool _gone;
 
-        public HostLink(InstanceRecord record, EventBus bus)
+        public HostLink(InstanceRecord record, EventBus bus, EventLog log)
         {
             Record = record;
             _bus = bus;
+            _log = log;
         }
 
         public InstanceRecord Record { get; private set; }
@@ -71,6 +74,11 @@ namespace VsDbgMcp.Shim.Session
                 // Seed before callbacks can arrive. Reconnecting invalidates observations
                 // from the gap, even if the instance record still names the same PID.
                 _bus.InitializeMode(Id, Record.DebugMode);
+                _log.InitializeMode(Id, Record.DebugMode);
+
+                // Visual Studio closing is the one event it cannot send.
+                _gone = false;
+                _rpc.Disconnected += (s, e) => { if (!_disposed) ReportGone(); };
                 _rpc.StartListening();
 
                 HostVersion = await Debug.HandshakeAsync(Names.ContractVersion, Record.Token).ConfigureAwait(false);
@@ -99,6 +107,17 @@ namespace VsDbgMcp.Shim.Session
             Project = null;
         }
 
+        /// <summary>
+        /// This window is gone. Both the dropped connection and the vanished discovery
+        /// record lead here, and whichever arrives first is the one that is reported.
+        /// </summary>
+        internal void ReportGone()
+        {
+            if (_gone) return;
+            _gone = true;
+            _log.InstanceGone(Id);
+        }
+
         // ---- pushed from Visual Studio ----
 
         public Task OnStopAsync(StopEvent stop)
@@ -107,6 +126,10 @@ namespace VsDbgMcp.Shim.Session
             {
                 stop.InstanceId = Id;
                 _bus.ObserveStopMode(Id, stop.Mode);
+
+                // Logged before the bus, because publishing wakes a waiter that can
+                // return this stop and hide it before the entry to hide exists.
+                _log.Stopped(stop);
                 _bus.Publish(stop);
                 if (!string.IsNullOrEmpty(stop.Mode)) Record.DebugMode = stop.Mode;
             }
@@ -123,18 +146,41 @@ namespace VsDbgMcp.Shim.Session
             return Task.CompletedTask;
         }
 
-        public Task OnOutputAsync(OutputEvent output) => Task.CompletedTask;
+        public Task OnOutputAsync(OutputEvent output)
+        {
+            if (output != null)
+            {
+                output.InstanceId = Id;
+                _bus.PublishOutput(output);
+            }
+            return Task.CompletedTask;
+        }
 
         public Task OnModeChangedAsync(string instanceId, string mode)
         {
             // Every way into a debug session passes through here, whether an agent asked
             // for it or someone pressed F5, so this is where the bus is told.
             _bus.ModeChanged(Id, mode);
+            _log.ModeChanged(Id, mode);
             Record.DebugMode = mode;
             return Task.CompletedTask;
         }
 
-        public Task OnWorkspaceChangedAsync(string instanceId) => Task.CompletedTask;
+        public Task OnWorkspaceChangedAsync(string instanceId)
+        {
+            _log.SolutionChanged(Id);
+            return Task.CompletedTask;
+        }
+
+        public Task OnOperationChangedAsync(OperationInfo operation)
+        {
+            if (operation != null)
+            {
+                operation.InstanceId = Id;
+                _log.OperationDone(operation);
+            }
+            return Task.CompletedTask;
+        }
 
         public void Dispose()
         {

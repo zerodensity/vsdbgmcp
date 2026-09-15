@@ -23,7 +23,9 @@ namespace VsDbgMcp.Shim.Tools
             [Description("Include internal dispatch state, timestamps and evidence. Usually unnecessary; the default gives the outcome and next action.")] bool details = false)
         {
             var link = await Sessions.ResolveAsync(instance, ct).ConfigureAwait(false);
-            return OperationResponse.From(await link.Operations.OperationStatusAsync(operationId, waitSeconds, ct).ConfigureAwait(false), link.Id, details);
+            var operation = await link.Operations.OperationStatusAsync(operationId, waitSeconds, ct).ConfigureAwait(false);
+            if (operation != null && operation.Terminal) Sessions.Log.OperationReported(operation.OperationId);
+            return OperationResponse.From(operation, link.Id, details);
         }
 
         [McpServerTool(Name = "operations", ReadOnly = true, UseStructuredContent = true)]
@@ -31,7 +33,10 @@ namespace VsDbgMcp.Shim.Tools
         public async Task<List<OperationResponse>> List(string instance = null, CancellationToken ct = default)
         {
             var link = await Sessions.ResolveAsync(instance, ct).ConfigureAwait(false);
-            return (await link.Operations.OperationsAsync(ct).ConfigureAwait(false)).Select(o => { var response = OperationResponse.From(o, link.Id); response.Result = null; return response; }).ToList();
+            var operations = await link.Operations.OperationsAsync(ct).ConfigureAwait(false);
+            foreach (var operation in operations.Where(o => o.Terminal))
+                Sessions.Log.OperationReported(operation.OperationId);
+            return operations.Select(o => { var response = OperationResponse.From(o, link.Id); response.Result = null; return response; }).ToList();
         }
 
         [McpServerTool(Name = "debug_state", ReadOnly = true, UseStructuredContent = true)]

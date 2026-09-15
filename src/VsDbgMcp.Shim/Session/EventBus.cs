@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using VsDbgMcp.Contracts;
@@ -125,7 +126,7 @@ namespace VsDbgMcp.Shim.Session
                 _waiters.Add(waiter);
             }
 
-            return await AwaitAsync(
+            return await Waiting.ForAsync(
                 waiter.Completion,
                 () => { lock (_gate) _waiters.Remove(waiter); },
                 timeout, ct).ConfigureAwait(false);
@@ -197,38 +198,160 @@ namespace VsDbgMcp.Shim.Session
                 _moduleWaiters.Add(waiter);
             }
 
-            return await AwaitAsync(
+            return await Waiting.ForAsync(
                 waiter.Completion,
                 () => { lock (_gate) _moduleWaiters.Remove(waiter); },
                 timeout, ct).ConfigureAwait(false);
         }
 
         /// <summary>
-        /// Waits for whatever the publisher sets, giving up after the timeout. Returns
-        /// null when the time runs out, and throws when the call itself was cancelled.
+        /// Debug pane lines kept for a wait to match against. Deeper than the stop
+        /// buffer because a program prints far more than it stops.
         /// </summary>
-        static async Task<T> AwaitAsync<T>(TaskCompletionSource<T> completion, Action stopWaiting, TimeSpan timeout, CancellationToken ct)
-            where T : class
+        const int OutputBufferSize = 2000;
+
+        readonly LinkedList<OutputLine> _output = new LinkedList<OutputLine>();
+        readonly List<OutputWaiter> _outputWaiters = new List<OutputWaiter>();
+        readonly List<Action<string, string>> _outputSubscribers = new List<Action<string, string>>();
+
+        sealed class OutputLine
         {
-            using (var cts = CancellationTokenSource.CreateLinkedTokenSource(ct))
-            using (ct.Register(() => completion.TrySetCanceled(ct)))
+            public string InstanceId;
+            public string Text;
+            public bool Reported;
+        }
+
+        sealed class OutputWaiter
+        {
+            public string InstanceId;
+            public Regex Pattern;
+            public TaskCompletionSource<string> Completion;
+        }
+
+        /// <summary>
+        /// Lines the debuggee and the engine printed to the Debug pane, split as they
+        /// arrive. Nobody waiting for a stop hears about them: a program that prints is
+        /// not a program that stopped, and in C++ it prints a line per module load.
+        /// </summary>
+        public void PublishOutput(OutputEvent output)
+        {
+            if (output == null || string.IsNullOrEmpty(output.Text)) return;
+
+            List<KeyValuePair<OutputWaiter, string>> toSignal = null;
+            List<Action<string, string>> toNotify = null;
+            var delivered = new List<string>();
+
+            lock (_gate)
             {
-                var delay = Task.Delay(timeout, cts.Token);
-                var completed = await Task.WhenAny(completion.Task, delay).ConfigureAwait(false);
-
-                if (completed == completion.Task)
+                foreach (var raw in output.Text.Split('\n'))
                 {
-                    cts.Cancel();
-                    stopWaiting();
+                    var text = raw.TrimEnd('\r');
+                    if (text.Length == 0) continue;
 
-                    // Throws if the call was cancelled rather than satisfied.
-                    return await completion.Task.ConfigureAwait(false);
+                    var line = new OutputLine { InstanceId = output.InstanceId, Text = text };
+                    _output.AddLast(line);
+                    while (_output.Count > OutputBufferSize) _output.RemoveFirst();
+
+                    delivered.Add(text);
+
+                    for (var i = _outputWaiters.Count - 1; i >= 0; i--)
+                    {
+                        var w = _outputWaiters[i];
+                        if (!Matches(w.InstanceId, line.InstanceId)) continue;
+                        if (!IsMatch(w.Pattern, text)) continue;
+
+                        _outputWaiters.RemoveAt(i);
+                        (toSignal ??= new List<KeyValuePair<OutputWaiter, string>>())
+                            .Add(new KeyValuePair<OutputWaiter, string>(w, text));
+                        line.Reported = true;
+                    }
                 }
+
+                if (_outputSubscribers.Count > 0) toNotify = new List<Action<string, string>>(_outputSubscribers);
             }
 
-            stopWaiting();
-            ct.ThrowIfCancellationRequested();
-            return null;
+            if (toSignal != null)
+                foreach (var pair in toSignal) pair.Key.Completion.TrySetResult(pair.Value);
+
+            if (toNotify != null)
+                foreach (var subscriber in toNotify)
+                    foreach (var text in delivered)
+                    {
+                        try { subscriber(output.InstanceId, text); } catch { }
+                    }
+        }
+
+        /// <summary>
+        /// The first line matching that nobody has been given yet, out of the buffer or
+        /// the next one to arrive. Null on timeout. A line is answered with once,
+        /// whatever pattern matched it, the same rule the module stream uses.
+        /// </summary>
+        public async Task<string> WaitForOutputAsync(string instanceId, Regex pattern, TimeSpan timeout, CancellationToken ct)
+        {
+            OutputWaiter waiter;
+
+            lock (_gate)
+            {
+                var already = _output.FirstOrDefault(l =>
+                    !l.Reported && Matches(instanceId, l.InstanceId) && IsMatch(pattern, l.Text));
+                if (already != null)
+                {
+                    already.Reported = true;
+                    return already.Text;
+                }
+
+                waiter = new OutputWaiter
+                {
+                    InstanceId = instanceId,
+                    Pattern = pattern,
+                    Completion = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously)
+                };
+                _outputWaiters.Add(waiter);
+            }
+
+            return await Waiting.ForAsync(
+                waiter.Completion,
+                () => { lock (_gate) _outputWaiters.Remove(waiter); },
+                timeout, ct).ConfigureAwait(false);
+        }
+
+        /// <summary>Every line as it arrives. --follow prints from here.</summary>
+        public void SubscribeOutput(Action<string, string> handler)
+        {
+            if (handler == null) return;
+            lock (_gate) _outputSubscribers.Add(handler);
+        }
+
+        /// <summary>Where this instance's debugger was last seen. Empty when it is unknown.</summary>
+        public string ModeOf(string instanceId)
+        {
+            lock (_gate) return _modes.TryGetValue(instanceId ?? "", out var mode) ? mode : null;
+        }
+
+        /// <summary>
+        /// A pattern the caller wrote, on a line the debuggee wrote. The timeout is on
+        /// the expression itself; a pattern that cannot finish counts as no match.
+        /// </summary>
+        static bool IsMatch(Regex pattern, string text)
+        {
+            if (pattern == null) return true;
+            try { return pattern.IsMatch(text); }
+            catch (RegexMatchTimeoutException) { return false; }
+        }
+
+        /// <summary>
+        /// Lines belong to a debug session. Cleared where a run begins, so "Server
+        /// listening" from the run before this one can never answer a wait on this one.
+        /// Called with the lock held.
+        /// </summary>
+        void ClearOutput(string instanceId)
+        {
+            for (var node = _output.First; node != null;)
+            {
+                var next = node.Next;
+                if (Matches(instanceId, node.Value.InstanceId)) _output.Remove(node);
+                node = next;
+            }
         }
 
         /// <summary>
@@ -314,7 +437,15 @@ namespace VsDbgMcp.Shim.Session
                 var wasIdle = _modes.TryGetValue(instanceId, out var previous) && IsDesign(previous);
                 _modes[instanceId] = mode;
 
-                if (wasIdle && !IsDesign(mode)) _sessionStart[instanceId] = _seq;
+                if (wasIdle && !IsDesign(mode))
+                {
+                    _sessionStart[instanceId] = _seq;
+
+                    // A run this session started has already cleared these. One started
+                    // from the IDE is announced late, so its first lines can be lost;
+                    // that is cheaper than answering with the previous run's.
+                    ClearOutput(instanceId);
+                }
 
                 // Leaving design mode is the debugger's own account of a run beginning.
                 // When a tool already said one was starting, this is that same run
@@ -356,6 +487,7 @@ namespace VsDbgMcp.Shim.Session
                 _generations[instanceId] = GenerationOf(instanceId) + 1;
                 _startingRun.Add(instanceId);
                 _stoppedAt.Remove(instanceId);
+                ClearOutput(instanceId);
             }
         }
 

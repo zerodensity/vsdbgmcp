@@ -31,6 +31,30 @@ restarts; `profile_export` writes reports, JSON and optionally retained raw trac
 samples landed on, which binary the time went to, or what moved since the last
 capture.
 
+## Events
+
+A reply already carries what changed. When something happened since the agent's previous
+call — a stop, an exit, a build finishing, debugging starting or ending, a window closing
+— the next reply opens with `Since your last call:` and one line per event. Nothing is
+added when nothing happened, so there is no block to skip on the calls in between.
+`status` carries the same lines for its own window, the last five, under `Recent:`.
+
+An agent that starts a build or a long run and then goes off to edit files has nothing
+watching in the meantime. `vsdbgmcp --follow` is a second process for a client that can
+watch one:
+
+```powershell
+vsdbgmcp.exe --follow --cwd "D:\repo" --instance any
+```
+
+```
+14:03:11 stopped at breakpoint 3, main.cpp:42 in Mesh::Upload (thread 15224)
+```
+
+One line per stop, exit, build completion or session change on stdout, until stdin
+closes. `--instance any` watches every window and prefixes each line with its id;
+`--match REGEX` also prints Debug-pane lines that match it.
+
 ## Install
 
 Install the extension and restart Visual Studio. It carries the shim and copies it to
@@ -168,12 +192,17 @@ Notes on a few:
   model directly. Failures return text with `isError: true`.
 
 - **`wait`** — `instance: "any"` returns as soon as any connected window stops, which is
-  how to debug a client and a server at once. `for: "module:NAME"` waits for a module to
-  load instead of for a stop, which is how to arm breakpoints in a plugin before its host
-  loads it without polling. Where the debuggee has not run since it last stopped it says
-  so at once instead of sitting out the timeout, because a stop cannot arrive from a
-  program that is not running and reading that timeout as "this line is never reached" is
-  a wrong answer the tool used to hand over.
+  how to debug a client and a server at once. `for:` widens what it waits for beyond a
+  stop: `module:NAME` for a module loading, which is how to arm breakpoints in a plugin
+  before its host loads it without polling; `output:REGEX` for the first Debug-pane line
+  matching it in this run; `operation:ID` for a build or launch to finish; `any` for the
+  next notable event of any kind — a stop, an exit, debugging starting or ending, an
+  operation finishing, a window closing. Where the debuggee has not run since it last
+  stopped it says so at once instead of sitting out the timeout, because a stop cannot
+  arrive from a program that is not running and reading that timeout as "this line is
+  never reached" is a wrong answer the tool used to hand over. Debugging ending before any
+  stop, or the window closing, end the wait the same way instead of sitting out a timeout
+  that cannot end any other way.
 - **`frame`** — the whole picture of where you are, in one call: the source around the
   line you stopped on, which binary that code came from and whether the file on disk
   still matches it, the arguments and locals, `this` expanded one level, and last the

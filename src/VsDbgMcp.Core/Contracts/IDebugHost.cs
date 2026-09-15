@@ -107,5 +107,11 @@ namespace VsDbgMcp.Contracts
         Task OnOutputAsync(OutputEvent output);
         Task OnModeChangedAsync(string instanceId, string mode);
         Task OnWorkspaceChangedAsync(string instanceId);
+
+        /// <summary>
+        /// An operation has reached its end. Sent once. A build that outlived the wait
+        /// its tool call could give it is otherwise only findable by asking.
+        /// </summary>
+        Task OnOperationChangedAsync(OperationInfo operation);
     }
 }

@@ -50,6 +50,7 @@ namespace VsDbgMcp.Shim.Tools
         async Task<Reply> StartRun(HostLink link, Func<Task<OpResult>> call, string success, string note)
         {
             Sessions.Events.StartingRun(link.Id);
+            Sessions.Log.Expect(link.Id, Expected.RunStart);
 
             OpResult result;
             try
@@ -59,18 +60,25 @@ namespace VsDbgMcp.Shim.Tools
             catch
             {
                 Sessions.Events.RunNotStarted(link.Id);
+                Sessions.Log.Unexpect(link.Id, Expected.RunStart);
                 throw;
             }
 
             var reply = Render.Op(result, success);
-            if (!reply.Failed) return result.Pending ? reply.Text : reply.Text + "\n" + note;
+            if (!reply.Failed)
+            {
+                if (result.Pending) Sessions.Log.Expect(link.Id, Expected.RunStart, result.OperationId);
+                else Sessions.Log.OperationReported(result.OperationId);
+                return result.Pending ? reply.Text : reply.Text + "\n" + note;
+            }
 
             Sessions.Events.RunNotStarted(link.Id);
+            Sessions.Log.Unexpect(link.Id, Expected.RunStart);
             return reply;
         }
 
         [McpServerTool(Name = "status", ReadOnly = true)]
-        [Description("Where the debugger is right now: solution, debugger mode (design, run, break), current thread and frame, the top of the call stack, any pending exception, debugged processes, and the pinned watch values. Call this first when you do not know the state; it is cheap and always works.")]
+        [Description("Where the debugger is right now: solution, debugger mode (design, run, break), current thread and frame, the top of the call stack, any pending exception, debugged processes, and the pinned watch values. Call this first when you do not know the state; it is cheap and always works. It also lists what has happened recently in this window - stops, exits, builds finishing, debugging starting or ending.")]
         public Task<string> Status(
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
             CancellationToken ct = default)
@@ -86,6 +94,14 @@ namespace VsDbgMcp.Shim.Tools
                     text += "\nActive CPU capture: " + (observed.ActiveProfile == null ? "none" : observed.ActiveProfile.CaptureId + " PID " + observed.ActiveProfile.Pid + " " + observed.ActiveProfile.Status);
                     if (observed.LastProfile != null) text += "\nLatest retained capture: " + observed.LastProfile.CaptureId + " PID " + observed.LastProfile.Pid + " generation " + observed.LastProfile.SessionGeneration;
                 }
+
+                // status answers for one window, so it accounts for that window only.
+                // A stop in another one still reaches the digest, where the instance
+                // prefix says which window it was.
+                var recent = EventLines.Recent(Sessions.Log.Recent(link.Id, 5), Sessions.ConnectedCount > 1, DateTime.UtcNow);
+                if (recent != null) text += "\n" + recent;
+                Sessions.Log.MarkSeen(link.Id);
+
                 return text;
             });
 
@@ -116,11 +132,24 @@ namespace VsDbgMcp.Shim.Tools
                 if (noDebug)
                     return Render.Op(await link.Debug.LaunchAsync(request, ct).ConfigureAwait(false), "Launched.");
 
+                Sessions.Log.Expect(link.Id, Expected.RunStart);
+
                 // A retry can return a previous operation, even after reconnecting.
                 // Only actual debugger events establish a new launch session.
                 var result = await link.Debug.LaunchAsync(request, ct).ConfigureAwait(false);
                 var reply = Render.Op(result, "Launched.");
-                return !reply.Failed && !result.Pending ? reply.Text + "\nIdentities from before this operation's run belong to a different run. " +
+                if (reply.Failed)
+                {
+                    Sessions.Log.Unexpect(link.Id, Expected.RunStart);
+                    return reply;
+                }
+
+                // The build in front of it can run for minutes, so the expectation lives
+                // as long as the operation does rather than fifteen seconds.
+                if (result.Pending) Sessions.Log.Expect(link.Id, Expected.RunStart, result.OperationId);
+                else Sessions.Log.OperationReported(result.OperationId);
+
+                return !result.Pending ? reply.Text + "\nIdentities from before this operation's run belong to a different run. " +
                     "A requestId retry returns that same operation; compare the generation number before reusing identities." : reply;
             }, args ?? project);
 
@@ -149,8 +178,11 @@ namespace VsDbgMcp.Shim.Tools
                 // is. Without this, wait would answer with that frame and tell the caller
                 // to resume something the debugger no longer holds.
                 Sessions.Events.MarkSeen(link.Id);
+                Sessions.Log.Expect(link.Id, Expected.End);
                 var result = await link.Debug.DetachAsync(pid, ct).ConfigureAwait(false);
-                return Render.Op(result, "Detached.");
+                var reply = Render.Op(result, "Detached.");
+                if (reply.Failed) Sessions.Log.Unexpect(link.Id, Expected.End);
+                return reply;
             });
 
         [McpServerTool(Name = "stop", Destructive = true)]
@@ -162,8 +194,11 @@ namespace VsDbgMcp.Shim.Tools
             => On(instance, ct, async link =>
             {
                 Sessions.Events.MarkSeen(link.Id);
+                Sessions.Log.Expect(link.Id, Expected.End);
                 var result = await link.Debug.StopAsync(pid, ct).ConfigureAwait(false);
-                return Render.Op(result, "Stopped.");
+                var reply = Render.Op(result, "Stopped.");
+                if (reply.Failed) Sessions.Log.Unexpect(link.Id, Expected.End);
+                return reply;
             });
 
         [McpServerTool(Name = "restart", Destructive = true)]
@@ -174,6 +209,7 @@ namespace VsDbgMcp.Shim.Tools
             => On(instance, ct, link =>
             {
                 Sessions.Events.MarkSeen(link.Id);
+                Sessions.Log.Expect(link.Id, Expected.End);
                 return StartRun(link, () => link.Debug.RestartAsync(ct), "Restarted.", NewRun);
             });
 

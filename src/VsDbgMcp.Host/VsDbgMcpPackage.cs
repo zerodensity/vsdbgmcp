@@ -85,6 +85,7 @@ namespace VsDbgMcp.Host
             _eventSink.StopOccurred += OnStopOccurred;
             _eventSink.OutputOccurred += OnOutputOccurred;
             _eventSink.ModuleLoaded += OnModuleLoaded;
+            HostOperations.Store.Completed += OnOperationCompleted;
 
             _server.Start();
 
@@ -265,6 +266,15 @@ namespace VsDbgMcp.Host
             _server?.Broadcast(events => events.OnOutputAsync(output));
         }
 
+        void OnOperationCompleted(Contracts.OperationInfo operation)
+        {
+            _server?.Broadcast(events => events.OnOperationChangedAsync(operation));
+        }
+
+        // The record is rewritten on a background thread and carries no name with it,
+        // so the push says only that this window's solution is not what it was.
+        void WorkspaceChanged() => _server?.Broadcast(events => events.OnWorkspaceChangedAsync(null));
+
         // ---- IVsDebuggerEvents ----
 
         public int OnModeChange(DBGMODE dbgmodeNew)
@@ -289,8 +299,8 @@ namespace VsDbgMcp.Host
 
         // ---- IVsSolutionEvents ----
 
-        public int OnAfterOpenSolution(object pUnkReserved, int fNewSolution) { PublishRecord(); return Microsoft.VisualStudio.VSConstants.S_OK; }
-        public int OnAfterCloseSolution(object pUnkReserved) { PublishRecord(); return Microsoft.VisualStudio.VSConstants.S_OK; }
+        public int OnAfterOpenSolution(object pUnkReserved, int fNewSolution) { PublishRecord(); WorkspaceChanged(); return Microsoft.VisualStudio.VSConstants.S_OK; }
+        public int OnAfterCloseSolution(object pUnkReserved) { PublishRecord(); WorkspaceChanged(); return Microsoft.VisualStudio.VSConstants.S_OK; }
         public int OnAfterOpenProject(IVsHierarchy pHierarchy, int fAdded) { PublishRecord(); return Microsoft.VisualStudio.VSConstants.S_OK; }
         public int OnBeforeCloseProject(IVsHierarchy pHierarchy, int fRemoved) { return Microsoft.VisualStudio.VSConstants.S_OK; }
         public int OnAfterLoadProject(IVsHierarchy pStubHierarchy, IVsHierarchy pRealHierarchy) { PublishRecord(); return Microsoft.VisualStudio.VSConstants.S_OK; }
@@ -318,6 +328,7 @@ namespace VsDbgMcp.Host
                         if (_solutionCookie != 0) _solution?.UnadviseSolutionEvents(_solutionCookie);
                     });
 
+                    HostOperations.Store.Completed -= OnOperationCompleted;
                     _server?.Dispose();
                 }
                 catch

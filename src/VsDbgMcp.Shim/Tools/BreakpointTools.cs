@@ -65,6 +65,7 @@ namespace VsDbgMcp.Shim.Tools
                     return "Give hitCount to fire once on hit N, or everyNthHit to fire one hit in N. Not both.";
 
                 var info = await link.Debug.BreakpointSetAsync(request, ct).ConfigureAwait(false);
+                if (!info.Pending) Sessions.Log.OperationReported(info.OperationId);
                 return Render.Breakpoint(info);
             }, dataExpression ?? function ?? (file == null ? null : System.IO.Path.GetFileName(file) + ":" + line));
 

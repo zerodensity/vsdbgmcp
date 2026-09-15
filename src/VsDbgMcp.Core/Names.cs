@@ -24,8 +24,9 @@ namespace VsDbgMcp
         /// 6: a debuggee can be profiled, with the extension collecting and the shim
         ///    reading what it collected.
         /// 9: compact capture IDs; older shims require GUID-shaped capture IDs.
+        /// 10: operations completing and the solution changing are pushed to the shim.
         /// </summary>
-        public const int ContractVersion = 9;
+        public const int ContractVersion = 10;
 
         public const string InstanceFilePrefix = "inst-";
         public const string InstanceFileSuffix = ".json";

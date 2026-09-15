@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Replies open with what happened in Visual Studio since the previous call: stops,
+  exits, builds finishing, debugging starting or ending, a window closing.
+- `wait` accepts `for='output:REGEX'` and `for='any'`, and ends as soon as a stop
+  has become impossible rather than sitting out its timeout.
+- `status` lists recent events for its window.
+- `vsdbgmcp --follow` prints one line per event for a client that can watch a
+  process.
+
+### Changed
+- Host contract 10: the extension pushes operations completing and the solution
+  changing. An older extension keeps working without those two.
+
 ## 0.9.3
 
 - After successfully staging an extension update, stop previous shim processes from

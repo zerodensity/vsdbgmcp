@@ -355,5 +355,90 @@ namespace VsDbgMcp.Tests
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await waiting);
             }
         }
+
+        static System.Text.RegularExpressions.Regex Pattern(string text) =>
+            new System.Text.RegularExpressions.Regex(text,
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+                TimeSpan.FromSeconds(1));
+
+        static OutputEvent Output(string instance, string text) =>
+            new OutputEvent { InstanceId = instance, Pane = "Debug", Text = text };
+
+        [Fact]
+        public async Task A_line_that_already_arrived_still_answers()
+        {
+            var bus = new EventBus();
+            bus.PublishOutput(Output("Engine#1", "Server listening on 8080\r\n"));
+
+            var line = await bus.WaitForOutputAsync("Engine#1", Pattern("listening"), TimeSpan.FromMilliseconds(50), CancellationToken.None);
+
+            Assert.Equal("Server listening on 8080", line);
+        }
+
+        [Fact]
+        public async Task A_waiter_is_woken_by_a_line_that_arrives_later()
+        {
+            var bus = new EventBus();
+            var waiting = bus.WaitForOutputAsync(null, Pattern("ERROR"), TimeSpan.FromSeconds(5), CancellationToken.None);
+
+            bus.PublishOutput(Output("Engine#1", "ERROR: device lost"));
+
+            Assert.Equal("ERROR: device lost", await waiting);
+        }
+
+        [Fact]
+        public async Task One_push_of_many_lines_becomes_many_lines()
+        {
+            var bus = new EventBus();
+            bus.PublishOutput(Output("Engine#1", "first\r\n\r\nsecond\r\n"));
+
+            Assert.Equal("first", await bus.WaitForOutputAsync(null, Pattern("first"), TimeSpan.FromMilliseconds(50), CancellationToken.None));
+            Assert.Equal("second", await bus.WaitForOutputAsync(null, Pattern("second"), TimeSpan.FromMilliseconds(50), CancellationToken.None));
+        }
+
+        [Fact]
+        public async Task A_line_is_answered_with_once()
+        {
+            var bus = new EventBus();
+            bus.PublishOutput(Output("Engine#1", "ready"));
+
+            Assert.NotNull(await bus.WaitForOutputAsync(null, Pattern("ready"), TimeSpan.FromMilliseconds(50), CancellationToken.None));
+            Assert.Null(await bus.WaitForOutputAsync(null, Pattern("ready"), TimeSpan.FromMilliseconds(50), CancellationToken.None));
+        }
+
+        [Fact]
+        public async Task A_line_from_the_previous_run_cannot_answer_a_wait_on_this_one()
+        {
+            var bus = new EventBus();
+            bus.PublishOutput(Output("Engine#1", "Server listening on 8080"));
+
+            bus.StartingRun("Engine#1");
+
+            Assert.Null(await bus.WaitForOutputAsync("Engine#1", Pattern("listening"), TimeSpan.FromMilliseconds(50), CancellationToken.None));
+        }
+
+        [Fact]
+        public async Task A_run_somebody_started_from_the_IDE_also_clears_what_came_before()
+        {
+            var bus = new EventBus();
+            bus.InitializeMode("Engine#1", DebugModes.Design);
+            bus.PublishOutput(Output("Engine#1", "Server listening on 8080"));
+
+            bus.ModeChanged("Engine#1", DebugModes.Run);
+
+            Assert.Null(await bus.WaitForOutputAsync("Engine#1", Pattern("listening"), TimeSpan.FromMilliseconds(50), CancellationToken.None));
+        }
+
+        [Fact]
+        public async Task Waiting_for_a_stop_is_never_woken_by_output()
+        {
+            var bus = new EventBus();
+            var waiting = bus.WaitAsync(null, TimeSpan.FromMilliseconds(200), CancellationToken.None);
+
+            bus.PublishOutput(Output("Engine#1", "ERROR: device lost"));
+
+            Assert.Null(await waiting);
+        }
     }
 }
