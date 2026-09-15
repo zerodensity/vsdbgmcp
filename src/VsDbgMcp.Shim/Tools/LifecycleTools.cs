@@ -77,6 +77,40 @@ namespace VsDbgMcp.Shim.Tools
             return reply;
         }
 
+        /// <summary>
+        /// Runs a call that ends the debug session, and owns the ending it causes.
+        ///
+        /// What the expectation buys is silence: the →design transition this call brings
+        /// about is not news to whoever asked for it. What it costs while it is open is
+        /// every Exited stop of that window, hidden outright — not just kept out of the
+        /// digest but out of status and the recent list too. So it is registered only
+        /// when the session really is ending, and withdrawn the moment nothing is coming
+        /// to consume it, whether the call came back refusing or never came back at all.
+        ///
+        /// <paramref name="wholeSession"/> is false for a stop or detach aimed at one
+        /// pid: those normally leave the session running, and for fifteen seconds any
+        /// other process exiting would vanish.
+        /// </summary>
+        async Task<Reply> Ending(HostLink link, bool wholeSession, Func<Task<OpResult>> call, string success)
+        {
+            if (wholeSession) Sessions.Log.Expect(link.Id, Expected.End);
+
+            OpResult result;
+            try
+            {
+                result = await call().ConfigureAwait(false);
+            }
+            catch
+            {
+                if (wholeSession) Sessions.Log.Unexpect(link.Id, Expected.End);
+                throw;
+            }
+
+            var reply = Render.Op(result, success);
+            if (reply.Failed && wholeSession) Sessions.Log.Unexpect(link.Id, Expected.End);
+            return reply;
+        }
+
         [McpServerTool(Name = "status", ReadOnly = true)]
         [Description("Where the debugger is right now: solution, debugger mode (design, run, break), current thread and frame, the top of the call stack, any pending exception, debugged processes, and the pinned watch values. Call this first when you do not know the state; it is cheap and always works. It also lists what has happened recently in this window - stops, exits, builds finishing, debugging starting or ending.")]
         public Task<string> Status(
@@ -136,7 +170,19 @@ namespace VsDbgMcp.Shim.Tools
 
                 // A retry can return a previous operation, even after reconnecting.
                 // Only actual debugger events establish a new launch session.
-                var result = await link.Debug.LaunchAsync(request, ct).ConfigureAwait(false);
+                OpResult result;
+                try
+                {
+                    result = await link.Debug.LaunchAsync(request, ct).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // The call never landed, so no run is coming to answer for this.
+                    // Left standing, the expectation swallows whoever presses F5 next.
+                    Sessions.Log.Unexpect(link.Id, Expected.RunStart);
+                    throw;
+                }
+
                 var reply = Render.Op(result, "Launched.");
                 if (reply.Failed)
                 {
@@ -178,11 +224,8 @@ namespace VsDbgMcp.Shim.Tools
                 // is. Without this, wait would answer with that frame and tell the caller
                 // to resume something the debugger no longer holds.
                 Sessions.Events.MarkSeen(link.Id);
-                Sessions.Log.Expect(link.Id, Expected.End);
-                var result = await link.Debug.DetachAsync(pid, ct).ConfigureAwait(false);
-                var reply = Render.Op(result, "Detached.");
-                if (reply.Failed) Sessions.Log.Unexpect(link.Id, Expected.End);
-                return reply;
+                return await Ending(link, pid == null,
+                    () => link.Debug.DetachAsync(pid, ct), "Detached.").ConfigureAwait(false);
             });
 
         [McpServerTool(Name = "stop", Destructive = true)]
@@ -194,11 +237,8 @@ namespace VsDbgMcp.Shim.Tools
             => On(instance, ct, async link =>
             {
                 Sessions.Events.MarkSeen(link.Id);
-                Sessions.Log.Expect(link.Id, Expected.End);
-                var result = await link.Debug.StopAsync(pid, ct).ConfigureAwait(false);
-                var reply = Render.Op(result, "Stopped.");
-                if (reply.Failed) Sessions.Log.Unexpect(link.Id, Expected.End);
-                return reply;
+                return await Ending(link, pid == null,
+                    () => link.Debug.StopAsync(pid, ct), "Stopped.").ConfigureAwait(false);
             });
 
         [McpServerTool(Name = "restart", Destructive = true)]
@@ -206,11 +246,28 @@ namespace VsDbgMcp.Shim.Tools
         public Task<string> Restart(
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
             CancellationToken ct = default)
-            => On(instance, ct, link =>
+            => On(instance, ct, async link =>
             {
                 Sessions.Events.MarkSeen(link.Id);
                 Sessions.Log.Expect(link.Id, Expected.End);
-                return StartRun(link, () => link.Debug.RestartAsync(ct), "Restarted.", NewRun);
+
+                // StartRun withdraws the run it expected when the call fails, but the
+                // ending is this tool's own. Left standing after a restart that never
+                // happened, it spends fifteen seconds swallowing a real Shift+F5 and
+                // every process that exits in that window.
+                Reply reply;
+                try
+                {
+                    reply = await StartRun(link, () => link.Debug.RestartAsync(ct), "Restarted.", NewRun).ConfigureAwait(false);
+                }
+                catch
+                {
+                    Sessions.Log.Unexpect(link.Id, Expected.End);
+                    throw;
+                }
+
+                if (reply.Failed) Sessions.Log.Unexpect(link.Id, Expected.End);
+                return reply;
             });
 
         [McpServerTool(Name = "processes", ReadOnly = true)]

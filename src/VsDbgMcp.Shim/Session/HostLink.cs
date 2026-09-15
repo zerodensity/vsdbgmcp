@@ -22,6 +22,14 @@ namespace VsDbgMcp.Shim.Session
         bool _disposed;
         bool _gone;
 
+        /// <summary>
+        /// Whether this ever finished connecting. A handshake that fails tears the pipe
+        /// down, which raises Disconnected — and a window that never answered is not a
+        /// window that closed. Reporting it as one told the model its window had gone
+        /// while it sat there, open, still loading.
+        /// </summary>
+        bool _connected;
+
         public HostLink(InstanceRecord record, EventBus bus, EventLog log)
         {
             Record = record;
@@ -76,12 +84,15 @@ namespace VsDbgMcp.Shim.Session
                 _bus.InitializeMode(Id, Record.DebugMode);
                 _log.InitializeMode(Id, Record.DebugMode);
 
-                // Visual Studio closing is the one event it cannot send.
+                // Visual Studio closing is the one event it cannot send. Subscribed here,
+                // before listening starts, so no drop can slip past; only a link that got
+                // through its handshake is allowed to report one.
                 _gone = false;
-                _rpc.Disconnected += (s, e) => { if (!_disposed) ReportGone(); };
+                _rpc.Disconnected += (s, e) => { if (!_disposed && _connected) ReportGone(); };
                 _rpc.StartListening();
 
                 HostVersion = await Debug.HandshakeAsync(Names.ContractVersion, Record.Token).ConfigureAwait(false);
+                _connected = true;
                 LastError = null;
                 return true;
             }
@@ -95,6 +106,10 @@ namespace VsDbgMcp.Shim.Session
 
         void Teardown()
         {
+            // Cleared first, so the Disconnected this dispose raises is recognised as
+            // this shim letting go rather than the window going away.
+            _connected = false;
+
             // Disposing a connection whose far end has already gone throws from the
             // pipe. There is nothing left to salvage either way.
             try { _rpc?.Dispose(); } catch (IOException) { } catch (ObjectDisposedException) { }

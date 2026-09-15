@@ -36,6 +36,10 @@ namespace VsDbgMcp.Tests
         public List<string> Calls { get; } = new List<string>();
         public bool FailNextCall { get; set; }
 
+        /// <summary>A window that answers the pipe but refuses the handshake: a token
+        /// mismatch, or Visual Studio still loading.</summary>
+        public bool FailHandshake { get; set; }
+
         public void Start()
         {
             _listener = Task.Run(() => ListenAsync(_cts.Token));
@@ -135,6 +139,7 @@ namespace VsDbgMcp.Tests
         {
             LastToken = token;
             HandshakeCount++;
+            if (FailHandshake) throw new InvalidOperationException("token does not match");
             return Task.FromResult(Names.ContractVersion.ToString());
         }
 
@@ -315,8 +320,8 @@ namespace VsDbgMcp.Tests
 
         public Task<OpResult> LaunchAsync(LaunchRequest request, CancellationToken ct = default) { Record(nameof(LaunchAsync)); return Ok(); }
         public Task<OpResult> AttachAsync(AttachRequest request, CancellationToken ct = default) { Record(nameof(AttachAsync)); return Ok(); }
-        public Task<OpResult> DetachAsync(int? pid, CancellationToken ct = default) => Ok();
-        public Task<OpResult> StopAsync(int? pid, CancellationToken ct = default) => Ok();
+        public Task<OpResult> DetachAsync(int? pid, CancellationToken ct = default) { Record(nameof(DetachAsync)); return Ok(); }
+        public Task<OpResult> StopAsync(int? pid, CancellationToken ct = default) { Record(nameof(StopAsync)); return Ok(); }
         public Task<OpResult> RestartAsync(CancellationToken ct = default) => Ok();
         public Task<List<ProcessInfo>> ProcessesAsync(bool includeLocal, CancellationToken ct = default) =>
             Task.FromResult(new List<ProcessInfo> { new ProcessInfo { Pid = 900, Name = "engine.exe", IsDebugged = true } });

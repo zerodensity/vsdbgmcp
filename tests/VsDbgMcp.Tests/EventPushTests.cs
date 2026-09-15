@@ -1,9 +1,11 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using VsDbgMcp.Contracts;
+using VsDbgMcp.Shim;
 using VsDbgMcp.Shim.Discovery;
 using VsDbgMcp.Shim.Session;
 using VsDbgMcp.Shim.Tools;
@@ -266,6 +268,147 @@ namespace VsDbgMcp.Tests
             _host.Drop();
 
             Assert.Contains("closed", await waiting);
+        }
+
+        /// <summary>
+        /// Both waits inside the stop wait consume what they find, so whichever loses the
+        /// race still has to be collected. The stop is the answer; the ending that landed
+        /// beside it belongs to the next reply rather than to nobody.
+        /// </summary>
+        [Fact]
+        public async Task A_stop_and_a_session_ending_together_answer_with_the_stop()
+        {
+            var link = await Connected();
+            _host.RaiseModeChange(DebugModes.Run);
+            await Task.Delay(100);
+            _sessions.Log.MarkSeen();
+
+            // Both have landed before the wait starts, so both of its races are answered
+            // out of what is already buffered and neither can be the one that got there
+            // first by chance.
+            _host.RaiseStop(new StopEvent { Reason = StopReason.Breakpoint, BreakpointId = 3 });
+            _host.RaiseModeChange(DebugModes.Design);
+            await Eventually(() => _sessions.Log.Recent(link.Id, 5),
+                e => e.Any(x => x.Kind == EventKind.Stopped) && e.Any(x => x.Kind == EventKind.DebuggingEnded));
+
+            var reply = await new ExecutionTools(_sessions).Wait(5, null, null, CancellationToken.None);
+
+            Assert.Contains("stopped: breakpoint", reply);
+            Assert.DoesNotContain("Debugging ended", reply);
+
+            // The ending was consumed by the race it lost. This reply did not mention it,
+            // so it is still there for the next one to carry.
+            Assert.Contains(_sessions.Log.Recent(link.Id, 5),
+                e => e.Kind == EventKind.DebuggingEnded && !e.Seen);
+        }
+
+        /// <summary>
+        /// Giving up must not eat what the race already handed over. The log marks an
+        /// entry shown as it hands it to a waiter, so a wait cancelled after that point
+        /// holds the only copy: reported by nobody, it would never reach a digest,
+        /// for='any' or status again.
+        ///
+        /// The cancel is fired from a log subscriber, which the log calls as it adds the
+        /// entry, immediately after handing it over — so it lands in or around the window
+        /// rather than anywhere. Which side of the window it lands on is not something
+        /// this can pin down, so the check is the invariant that holds on every side: a
+        /// reply carried the ending, or the ending is still there to be carried. Consumed
+        /// and reported by nobody is the failure, and it is what this used to do.
+        /// </summary>
+        [Fact]
+        public async Task A_wait_the_caller_cancelled_hands_back_the_ending_it_was_given()
+        {
+            var link = await Connected();
+            CancellationTokenSource cancelling = null;
+            _sessions.Log.Subscribe(e => { if (e.Kind == EventKind.DebuggingEnded) cancelling?.Cancel(); });
+
+            for (var attempt = 0; attempt < 12; attempt++)
+            {
+                _host.RaiseModeChange(DebugModes.Run);
+                await Task.Delay(40);
+                _sessions.Log.MarkSeen();
+
+                cancelling = new CancellationTokenSource();
+                var waiting = new ExecutionTools(_sessions).Wait(20, null, null, cancelling.Token);
+                await Task.Delay(40);
+                _host.RaiseModeChange(DebugModes.Design);
+
+                string reply = null;
+                try { reply = await waiting; } catch (OperationCanceledException) { }
+
+                var entries = await Eventually(() => _sessions.Log.Recent(link.Id, 5),
+                    e => e.Any(x => x.Kind == EventKind.DebuggingEnded));
+                var ending = entries.Last(e => e.Kind == EventKind.DebuggingEnded);
+
+                Assert.True(reply != null || !ending.Seen,
+                    "attempt " + attempt + ": the ending was taken by a call that reported nothing");
+
+                _sessions.Log.MarkSeen();
+            }
+        }
+
+        [Fact]
+        public async Task A_wait_the_caller_gave_up_on_is_a_cancellation_and_not_a_fault()
+        {
+            await Connected();
+            using var cancelling = new CancellationTokenSource();
+
+            var waiting = new ExecutionTools(_sessions).Wait(20, null, null, cancelling.Token);
+            await Task.Delay(100);
+            cancelling.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting);
+        }
+
+        [Fact]
+        public async Task A_window_that_refuses_the_handshake_is_not_a_window_that_closed()
+        {
+            _host.FailHandshake = true;
+
+            await Assert.ThrowsAsync<RoutingException>(() => _sessions.ResolveAsync(null, CancellationToken.None));
+            await Task.Delay(200);
+
+            Assert.DoesNotContain(_sessions.Log.Recent(null, 20), e => e.Kind == EventKind.InstanceGone);
+        }
+
+        [Fact]
+        public async Task A_stop_that_threw_does_not_swallow_the_session_ending()
+        {
+            var link = await Connected();
+            _host.RaiseModeChange(DebugModes.Run);
+            await Task.Delay(100);
+            _sessions.Log.MarkSeen();
+
+            _host.FailNextCall = true;
+            await Failure.Text(new LifecycleTools(_sessions).Stop(null, null, CancellationToken.None));
+
+            _host.RaiseModeChange(DebugModes.Design);
+
+            var entries = await Eventually(() => _sessions.Log.Recent(link.Id, 5),
+                e => e.Any(x => x.Kind == EventKind.DebuggingEnded));
+            Assert.Contains(entries, e => e.Kind == EventKind.DebuggingEnded);
+        }
+
+        /// <summary>
+        /// Terminating one process of a multi-process session leaves the session running,
+        /// so it must not claim the session's ending - which would also hide every other
+        /// process exiting for the next fifteen seconds, from status as well as the digest.
+        /// </summary>
+        [Fact]
+        public async Task Stopping_one_process_leaves_another_one_exiting_reported()
+        {
+            var link = await Connected();
+            _host.RaiseModeChange(DebugModes.Run);
+            await Task.Delay(100);
+            _sessions.Log.MarkSeen();
+
+            await new LifecycleTools(_sessions).Stop(1234, null, CancellationToken.None);
+
+            _host.RaiseStop(new StopEvent { Reason = StopReason.Exited, ExitCode = 0, ProcessName = "worker.exe" });
+
+            var entries = await Eventually(() => _sessions.Log.Recent(link.Id, 5),
+                e => e.Any(x => x.Kind == EventKind.Exited));
+            Assert.Contains(entries, e => e.Kind == EventKind.Exited);
         }
 
         [Fact]

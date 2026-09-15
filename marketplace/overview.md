@@ -9,10 +9,20 @@ Studio windows can be driven from one agent session.
 ## What it is for
 
 **Waiting works.** `wait` blocks on the debugger's own events and reports *why* execution
-stopped — which breakpoint, which exception, a step completing, the process exiting.
-A timeout reports that no event arrived, alongside a timestamped state observation;
-it does not claim the program is running or making progress. Structured responses
-also distinguish a new stop from one the debugger is still sitting at.
+stopped — which breakpoint, which exception, a step completing, the process exiting. It
+can also wait for a module to load, for a Debug-pane line matching a pattern, or for the
+next notable event of any kind. A stop that times out reports that no event arrived
+alongside a timestamped state observation; the other forms say what did not match and
+name `status` as what reads the debugger's mode live. None of them claims the program is
+running or making progress. Structured responses also distinguish a new stop from one
+the debugger is still sitting at.
+
+**It says what happened while you were not asking.** When something moved in Visual
+Studio since the agent's previous call — a stop, an exit, a build finishing, someone
+pressing F5 or Shift+F5, a window closing — the next reply opens with one line per
+event, and nothing is added when nothing happened. `status` lists the recent ones for
+its window, and `vsdbgmcp --follow` prints the same lines to stdout for a client that
+can watch a process while the agent works on something else.
 
 **Long operations keep their identity.** `build`, `launch`, and `bp_set` return a result
 or a pending operation ID after a bounded wait. `operation_status` can read or wait for
@@ -30,7 +40,10 @@ the candidates and the exact value to pass, so the next call succeeds.
 **Compact IDs.** Operation, capture, and host-session handles use 12
 lowercase alphanumeric characters. Instance selectors use VS process numbers.
 Existing retained IDs and legacy instance selectors remain accepted; collector GUIDs
-stay internal. Update both host and shim together for contract 9.
+stay internal. Update both host and shim together for contract 9, which older shims
+cannot read. Contract 10 only adds the pushes behind the events above — an operation
+finishing, the solution changing — and needs no pairing: either end can be older, and
+everything except those two pushes works as it did.
 
 **C++ gets real tools.** A breakpoint that will never bind says so and says why. `triage`
 answers a crash in one call. `bp_set` can watch an address for writes. `console_read`

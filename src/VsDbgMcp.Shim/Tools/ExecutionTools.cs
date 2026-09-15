@@ -103,7 +103,7 @@ namespace VsDbgMcp.Shim.Tools
             // code is never reached", which is what it cost twice in one session. The
             // debugger says when the stop became impossible, so say that instead.
             StopEvent stop;
-            LogEntry ended = null;
+            LogEntry ended;
 
             using (var racing = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
@@ -112,27 +112,49 @@ namespace VsDbgMcp.Shim.Tools
                     new[] { EventKind.DebuggingEnded, EventKind.InstanceGone },
                     TimeSpan.FromSeconds(seconds), racing.Token, StopBecameImpossible(instances));
 
-                var first = await Task.WhenAny(stopping, ending).ConfigureAwait(false);
+                await Task.WhenAny(stopping, ending).ConfigureAwait(false);
+                racing.Cancel();
 
-                if (first == ending && ending.Result != null)
-                {
-                    ended = ending.Result;
-                    racing.Cancel();
-                    try { await stopping.ConfigureAwait(false); } catch (OperationCanceledException) { }
-                    stop = null;
-                }
-                else
-                {
-                    stop = await stopping.ConfigureAwait(false);
-                    racing.Cancel();
-                    try { await ending.ConfigureAwait(false); } catch (OperationCanceledException) { }
-                }
+                // Both of these spend what they find: the bus moves its cursor past the
+                // stop, the log marks the entry shown. So both are collected, whichever
+                // won. Awaiting the loser and dropping its value is how an ending went
+                // missing from every later reply, and how a stop turned into "nothing is
+                // running to stop" with the stop itself sitting in the digest above it.
+                stop = await Collected(stopping).ConfigureAwait(false);
+                ended = await Collected(ending).ConfigureAwait(false);
+            }
+
+            // The caller gave up. That is not the debugger saying anything, and this
+            // reply will carry nothing - so anything the race had already handed over is
+            // handed straight back. An ending left marked shown here would be shown to
+            // nobody: no digest, no for='any', gone.
+            //
+            // The stop is the one thing that cannot be handed back. The bus has a single
+            // cursor for every window, so winding it past this stop is not reversible
+            // without re-delivering everything behind it. It is not lost either: the log
+            // holds its own entry for the same stop, Delivered was never called on it,
+            // and the next reply's digest carries it.
+            if (ct.IsCancellationRequested)
+            {
+                Sessions.Log.PutBack(ended);
+                ct.ThrowIfCancellationRequested();
+            }
+
+            // A stop is the more specific answer and the one that was asked for. An
+            // ending that arrived beside it is handed back unshown, so it reaches the
+            // digest instead of disappearing into a reply that did not mention it.
+            if (stop != null)
+            {
+                Sessions.Log.PutBack(ended);
+                Sessions.Log.Delivered(stop);
+                return structured ? Newtonsoft.Json.JsonConvert.SerializeObject(new { eventReceived = true, outcome = "event", stop }) : Render.Stop(stop);
             }
 
             if (ended != null)
             {
                 var text = ended.Kind == EventKind.InstanceGone
-                    ? "Visual Studio " + ended.InstanceId + " closed."
+                    ? "Visual Studio " + ended.InstanceId + " closed. This session is still pointed at it; " +
+                      "instances lists the windows still running."
                     : "Debugging ended in Visual Studio before any stop; nothing is running to stop.";
                 return structured
                     ? Newtonsoft.Json.JsonConvert.SerializeObject(new
@@ -140,11 +162,6 @@ namespace VsDbgMcp.Shim.Tools
                     : text;
             }
 
-            if (stop != null)
-            {
-                Sessions.Log.Delivered(stop);
-                return structured ? Newtonsoft.Json.JsonConvert.SerializeObject(new { eventReceived = true, outcome = "event", stop }) : Render.Stop(stop);
-            }
             var states = new List<object>();
             foreach (var id in instances)
             {
@@ -287,7 +304,8 @@ namespace VsDbgMcp.Shim.Tools
 
             return line != null
                 ? "output matched: " + line
-                : "timeout: no Debug-pane line matched /" + expression + "/ in " + seconds + " s.";
+                : "timeout: no Debug-pane line matched /" + expression + "/ in " + seconds + " s. Nothing " +
+                  "here checked whether the debuggee is running; status reads the mode live.";
         }
 
         /// <summary>
@@ -320,8 +338,23 @@ namespace VsDbgMcp.Shim.Tools
                 });
 
             return entries.Count == 0
-                ? "timeout: nothing notable happened in " + seconds + " s."
+                ? "timeout: nothing notable happened in " + seconds + " s. Nothing here checked whether the " +
+                  "debuggee is running; status reads the mode live."
                 : string.Join("\n", entries.Select(e => EventLines.Line(e, many, now)));
+        }
+
+        /// <summary>
+        /// What a wait produced, including when the other one won and this was cancelled
+        /// out from under it.
+        ///
+        /// Reading .Result instead throws an AggregateException on a cancelled task,
+        /// which leaves this method as a fault about the server rather than an answer
+        /// about the program being debugged.
+        /// </summary>
+        static async Task<T> Collected<T>(Task<T> wait) where T : class
+        {
+            try { return await wait.ConfigureAwait(false); }
+            catch (OperationCanceledException) { return null; }
         }
 
         /// <summary>

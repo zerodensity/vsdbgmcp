@@ -73,7 +73,10 @@ namespace VsDbgMcp.Tests
             var first = carried.GetProperty("content")[0].GetProperty("text").GetString();
             Assert.StartsWith("Since your last call:", first);
             Assert.Contains("build done: 2 errors (operation ab12)", first);
-            Assert.EndsWith("\n", first);
+
+            // A blank line closes the block, so the tool's own first line cannot be read
+            // as one more event however the client joins the content blocks.
+            Assert.EndsWith("\n\n", first);
 
             var next = await server.CallAsync("bp_list", new { });
             Assert.DoesNotContain("Since your last call",

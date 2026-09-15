@@ -200,7 +200,6 @@ namespace VsDbgMcp.Shim.Session
         {
             var entry = new LogEntry { InstanceId = instanceId, Kind = kind, Stop = stop, Operation = operation, Hidden = hidden };
 
-            List<Waiter> toSignal = null;
             List<Action<LogEntry>> toNotify = null;
 
             lock (_gate)
@@ -220,18 +219,17 @@ namespace VsDbgMcp.Shim.Session
                         if (w.Accept != null && !w.Accept(entry)) continue;
 
                         _waiters.RemoveAt(i);
-                        (toSignal ??= new List<Waiter>()).Add(w);
 
-                        // Whoever waited for it is being shown it.
-                        entry.Seen = true;
+                        // Handing it over and marking it shown are one step, still under
+                        // the lock. A waiter that gave up at this instant never receives
+                        // it, and an entry marked shown to nobody is gone from the digest
+                        // too. Continuations here are queued, never run on this thread.
+                        if (w.Completion.TrySetResult(entry)) entry.Seen = true;
                     }
 
                     if (_subscribers.Count > 0) toNotify = new List<Action<LogEntry>>(_subscribers);
                 }
             }
-
-            if (toSignal != null)
-                foreach (var w in toSignal) w.Completion.TrySetResult(entry);
 
             if (toNotify != null)
                 foreach (var subscriber in toNotify)
@@ -283,7 +281,11 @@ namespace VsDbgMcp.Shim.Session
         /// The first unshown entry of these kinds, or the next one to arrive. Null on
         /// timeout, and null kinds means any. What it returns is marked shown, because
         /// every caller reports it — so an entry the accept predicate turns down is
-        /// left alone for the digest to carry.
+        /// left alone for the digest to carry. A caller that ends up not reporting what
+        /// it was given hands it back with <see cref="PutBack"/>.
+        ///
+        /// The accept predicate runs under this log's lock. Keep it short, and never let
+        /// it call back into anything that takes this lock.
         /// </summary>
         public async Task<LogEntry> WaitForAsync(string instanceId, EventKind[] kinds, TimeSpan timeout,
             CancellationToken ct, Func<LogEntry, bool> accept = null)
@@ -315,6 +317,18 @@ namespace VsDbgMcp.Shim.Session
                 waiter.Completion,
                 () => { lock (_gate) _waiters.Remove(waiter); },
                 timeout, ct).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// A reader took this and did not report it after all, so it is news again.
+        ///
+        /// A wait that raced something else and lost is the caller: what it consumed
+        /// would otherwise stand marked shown to nobody and never reach the digest.
+        /// </summary>
+        public void PutBack(LogEntry entry)
+        {
+            if (entry == null) return;
+            lock (_gate) { if (!entry.Hidden) entry.Seen = false; }
         }
 
         /// <summary>
@@ -380,7 +394,7 @@ namespace VsDbgMcp.Shim.Session
 
                 foreach (var expectation in _expectations.Where(e => e.OperationId == operation.OperationId).ToList())
                 {
-                    if (OperationFailed(operation)) _expectations.Remove(expectation);
+                    if (OperationOutcome.Failing(operation)) _expectations.Remove(expectation);
                     else expectation.Deadline = _now() + ExpectationLife;
                 }
             }
@@ -428,14 +442,6 @@ namespace VsDbgMcp.Shim.Session
                 while (_reported.Count > ReportedKept) _reported.RemoveFirst();
             }
         }
-
-        /// <summary>
-        /// Whether an operation ended badly. One definition, because the log decides
-        /// whether an expectation survives on it and the renderer decides its wording.
-        /// </summary>
-        internal static bool OperationFailed(OperationInfo operation) =>
-            operation != null &&
-            (operation.State == "failed" || operation.State == "rejected" || operation.Result?.Ok == false);
 
         static bool Same(Expectation expectation, string instanceId, Expected kind) =>
             expectation.Kind == kind &&

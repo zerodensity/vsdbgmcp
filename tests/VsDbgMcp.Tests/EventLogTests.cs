@@ -117,6 +117,61 @@ namespace VsDbgMcp.Tests
             Assert.Empty(log.TakeUnseen());
         }
 
+        /// <summary>
+        /// The publisher takes the waiter off the list, hands the entry over and marks it
+        /// shown, all under one lock. A wait whose clock ran out takes that same lock on
+        /// its way out, so it arrives strictly after and finds the entry already spent on
+        /// it. Returning null there would leave the entry marked shown to nobody.
+        ///
+        /// The clock is the hook: it is read under the lock while the entry is added, so
+        /// holding it there holds the lock, and the wait's deadline passes meanwhile.
+        /// </summary>
+        [Fact]
+        public async Task An_entry_handed_over_as_the_wait_gives_up_is_still_returned()
+        {
+            var holdOnce = 1;
+            var log = new EventLog(() =>
+            {
+                if (Interlocked.Exchange(ref holdOnce, 0) == 1) Thread.Sleep(500);
+                return _now;
+            });
+
+            var waiting = log.WaitForAsync("App#1", null, TimeSpan.FromMilliseconds(50), CancellationToken.None);
+            var publishing = Task.Run(() => log.Stopped(Stop("App#1")));
+
+            var entry = await waiting;
+            await publishing;
+
+            Assert.NotNull(entry);
+            Assert.Empty(log.TakeUnseen());
+        }
+
+        [Fact]
+        public void An_entry_a_reader_did_not_report_after_all_is_news_again()
+        {
+            var log = NewLog();
+            log.InstanceGone("App#1");
+
+            var entry = Assert.Single(log.TakeUnseen());
+            log.PutBack(entry);
+
+            Assert.Same(entry, Assert.Single(log.TakeUnseen()));
+        }
+
+        [Fact]
+        public void Something_the_model_already_has_stays_hidden_when_it_is_put_back()
+        {
+            var log = NewLog();
+            var stop = Stop("App#1");
+            log.Stopped(stop);
+            var entry = Assert.Single(log.TakeUnseen());
+
+            log.Delivered(stop);
+            log.PutBack(entry);
+
+            Assert.Empty(log.TakeUnseen());
+        }
+
         [Fact]
         public void Leaving_design_mode_is_debugging_starting()
         {

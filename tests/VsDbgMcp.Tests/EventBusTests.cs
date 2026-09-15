@@ -430,6 +430,60 @@ namespace VsDbgMcp.Tests
             Assert.Null(await bus.WaitForOutputAsync("Engine#1", Pattern("listening"), TimeSpan.FromMilliseconds(50), CancellationToken.None));
         }
 
+        /// <summary>
+        /// A line the pattern below cannot finish on. Matching it runs until the match
+        /// timeout gives up, which is what holds a reader inside its match phase for a
+        /// known length of time rather than a hoped-for one.
+        /// </summary>
+        static readonly string Unfinishable = new string('a', 40) + "!";
+
+        /// <summary>Matches the line that matters at once, and never finishes the other.</summary>
+        static System.Text.RegularExpressions.Regex SlowPattern() =>
+            new System.Text.RegularExpressions.Regex(@"^(a+)+$|Server listening",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+                TimeSpan.FromMilliseconds(250));
+
+        /// <summary>
+        /// Matching runs outside the lock, so a run can end while a reader is still
+        /// working through its snapshot of the buffer. What it holds then are lines from
+        /// a session that is over, and "not answered with yet" no longer tells them from
+        /// live ones: "Server listening" from the last run must not answer this one.
+        /// </summary>
+        [Fact]
+        public async Task A_line_cleared_while_a_wait_was_matching_cannot_answer_it()
+        {
+            var bus = new EventBus();
+            bus.PublishOutput(Output("Engine#1", Unfinishable + "\nServer listening on 8080"));
+
+            var waiting = Task.Run(() => bus.WaitForOutputAsync("Engine#1", SlowPattern(),
+                TimeSpan.FromMilliseconds(100), CancellationToken.None));
+
+            // Inside the first line's match, which runs for the whole 250 ms.
+            await Task.Delay(50);
+            bus.StartingRun("Engine#1");
+
+            Assert.Null(await waiting);
+        }
+
+        /// <summary>The publisher matches outside the lock too, and holds the same stale list.</summary>
+        [Fact]
+        public async Task A_line_cleared_while_a_publish_was_matching_cannot_answer_a_waiter()
+        {
+            var bus = new EventBus();
+            var waiting = bus.WaitForOutputAsync("Engine#1", SlowPattern(),
+                TimeSpan.FromMilliseconds(500), CancellationToken.None);
+
+            var publishing = Task.Run(() =>
+                bus.PublishOutput(Output("Engine#1", Unfinishable + "\nServer listening on 8080")));
+
+            await Task.Delay(50);
+            bus.StartingRun("Engine#1");
+
+            Assert.Null(await waiting);
+            await publishing;
+        }
+
         [Fact]
         public async Task Waiting_for_a_stop_is_never_woken_by_output()
         {

@@ -68,8 +68,6 @@ namespace VsDbgMcp.Shim.Session
         {
             if (stop == null) return;
 
-            List<Waiter> toSignal = null;
-
             lock (_gate)
             {
                 stop.Seq = ++_seq;
@@ -90,14 +88,15 @@ namespace VsDbgMcp.Shim.Session
                     if (!Matches(w.InstanceId, stop.InstanceId)) continue;
 
                     _waiters.RemoveAt(i);
-                    (toSignal ??= new List<Waiter>()).Add(w);
-                    _cursor = stop.Seq;
+
+                    // Handing the stop over and moving the cursor past it are one step,
+                    // still under the lock. A waiter that gave up at this instant never
+                    // receives it, and a cursor moved for a waiter that got nothing hides
+                    // the stop from every later wait. Continuations here are queued,
+                    // never run on this thread.
+                    if (w.Completion.TrySetResult(stop)) _cursor = stop.Seq;
                 }
             }
-
-            if (toSignal == null) return;
-            foreach (var w in toSignal)
-                w.Completion.TrySetResult(stop);
         }
 
         /// <summary>
@@ -140,8 +139,6 @@ namespace VsDbgMcp.Shim.Session
         {
             if (module == null || string.IsNullOrEmpty(module.Name)) return;
 
-            List<ModuleWaiter> toSignal = null;
-
             lock (_gate)
             {
                 var entry = new LoadedModule { Load = module };
@@ -155,14 +152,13 @@ namespace VsDbgMcp.Shim.Session
                     if (!NameContains(module.Name, w.Pattern)) continue;
 
                     _moduleWaiters.RemoveAt(i);
-                    (toSignal ??= new List<ModuleWaiter>()).Add(w);
-                    entry.Reported = true;
+
+                    // Handing it over and marking it reported are one step, the same rule
+                    // the stop stream follows: a load marked reported for a waiter that
+                    // gave up is one nobody can wait for any more.
+                    if (w.Completion.TrySetResult(module)) entry.Reported = true;
                 }
             }
-
-            if (toSignal == null) return;
-            foreach (var w in toSignal)
-                w.Completion.TrySetResult(module);
         }
 
         /// <summary>
@@ -218,8 +214,28 @@ namespace VsDbgMcp.Shim.Session
         {
             public string InstanceId;
             public string Text;
+
+            /// <summary>A wait has been answered with this line. One line, one answer.</summary>
             public bool Reported;
+
+            /// <summary>
+            /// No longer in the buffer, because the run it belonged to is over.
+            ///
+            /// Matching happens outside the lock, so a reader is holding this object for
+            /// as long as a match takes and ClearOutput can drop it from the buffer
+            /// meanwhile. The reader has only what is on the object to go by, so the
+            /// removal is recorded here rather than left implicit in the list.
+            /// </summary>
+            public bool Cleared;
         }
+
+        /// <summary>
+        /// Whether this line is still there to be answered with. Both flags matter and
+        /// neither is enough alone: between a reader's snapshot and its claim the line
+        /// may have answered somebody else, or the run it belonged to may have ended and
+        /// taken it out of the buffer. Read with the lock held.
+        /// </summary>
+        static bool Available(OutputLine line) => !line.Reported && !line.Cleared;
 
         sealed class OutputWaiter
         {
@@ -232,14 +248,19 @@ namespace VsDbgMcp.Shim.Session
         /// Lines the debuggee and the engine printed to the Debug pane, split as they
         /// arrive. Nobody waiting for a stop hears about them: a program that prints is
         /// not a program that stopped, and in C++ it prints a line per module load.
+        ///
+        /// Matching runs outside the lock. The pattern is the caller's and each match is
+        /// allowed a second, while the lock is held by every stop, every other line and -
+        /// through the predicate the log's own wait passes in - the digest on every tool
+        /// call. One pattern that backtracks would otherwise stall the whole shim.
         /// </summary>
         public void PublishOutput(OutputEvent output)
         {
             if (output == null || string.IsNullOrEmpty(output.Text)) return;
 
-            List<KeyValuePair<OutputWaiter, string>> toSignal = null;
+            var added = new List<OutputLine>();
+            List<OutputWaiter> waiting;
             List<Action<string, string>> toNotify = null;
-            var delivered = new List<string>();
 
             lock (_gate)
             {
@@ -251,33 +272,43 @@ namespace VsDbgMcp.Shim.Session
                     var line = new OutputLine { InstanceId = output.InstanceId, Text = text };
                     _output.AddLast(line);
                     while (_output.Count > OutputBufferSize) _output.RemoveFirst();
-
-                    delivered.Add(text);
-
-                    for (var i = _outputWaiters.Count - 1; i >= 0; i--)
-                    {
-                        var w = _outputWaiters[i];
-                        if (!Matches(w.InstanceId, line.InstanceId)) continue;
-                        if (!IsMatch(w.Pattern, text)) continue;
-
-                        _outputWaiters.RemoveAt(i);
-                        (toSignal ??= new List<KeyValuePair<OutputWaiter, string>>())
-                            .Add(new KeyValuePair<OutputWaiter, string>(w, text));
-                        line.Reported = true;
-                    }
+                    added.Add(line);
                 }
 
+                waiting = new List<OutputWaiter>(_outputWaiters);
                 if (_outputSubscribers.Count > 0) toNotify = new List<Action<string, string>>(_outputSubscribers);
             }
 
-            if (toSignal != null)
-                foreach (var pair in toSignal) pair.Key.Completion.TrySetResult(pair.Value);
+            foreach (var waiter in waiting)
+            {
+                foreach (var line in added)
+                {
+                    if (!Matches(waiter.InstanceId, line.InstanceId)) continue;
+                    if (!IsMatch(waiter.Pattern, line.Text)) continue;
+
+                    lock (_gate)
+                    {
+                        // Everything is read again here, because all of it can have moved
+                        // while the match ran: the line may have answered somebody else or
+                        // gone with the run that ended, and this waiter may have been
+                        // answered or have given up.
+                        if (!Available(line)) continue;
+                        if (!_outputWaiters.Remove(waiter)) break;
+
+                        // Handing the line over and marking it answered are one step. A
+                        // waiter cancelled at this instant never receives it, and a line
+                        // marked answered for nobody is lost to every other waiter.
+                        if (waiter.Completion.TrySetResult(line.Text)) line.Reported = true;
+                    }
+                    break;
+                }
+            }
 
             if (toNotify != null)
                 foreach (var subscriber in toNotify)
-                    foreach (var text in delivered)
+                    foreach (var line in added)
                     {
-                        try { subscriber(output.InstanceId, text); } catch { }
+                        try { subscriber(output.InstanceId, line.Text); } catch { }
                     }
         }
 
@@ -285,21 +316,19 @@ namespace VsDbgMcp.Shim.Session
         /// The first line matching that nobody has been given yet, out of the buffer or
         /// the next one to arrive. Null on timeout. A line is answered with once,
         /// whatever pattern matched it, the same rule the module stream uses.
+        ///
+        /// The waiter is registered before the buffer is searched, because the search
+        /// runs outside the lock - up to a second of matching, which nothing else here
+        /// can afford to queue behind. Registering first means a line arriving during the
+        /// search is caught by the publisher instead of falling between the two.
         /// </summary>
         public async Task<string> WaitForOutputAsync(string instanceId, Regex pattern, TimeSpan timeout, CancellationToken ct)
         {
             OutputWaiter waiter;
+            List<OutputLine> buffered;
 
             lock (_gate)
             {
-                var already = _output.FirstOrDefault(l =>
-                    !l.Reported && Matches(instanceId, l.InstanceId) && IsMatch(pattern, l.Text));
-                if (already != null)
-                {
-                    already.Reported = true;
-                    return already.Text;
-                }
-
                 waiter = new OutputWaiter
                 {
                     InstanceId = instanceId,
@@ -307,6 +336,24 @@ namespace VsDbgMcp.Shim.Session
                     Completion = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously)
                 };
                 _outputWaiters.Add(waiter);
+                buffered = _output.Where(l => Available(l) && Matches(instanceId, l.InstanceId)).ToList();
+            }
+
+            foreach (var line in buffered)
+            {
+                if (!IsMatch(pattern, line.Text)) continue;
+
+                lock (_gate)
+                {
+                    // While this was matching, the line may have answered somebody else or
+                    // gone with the run that ended, and a publisher may already have
+                    // answered this waiter. Only the reader that takes the waiter out of
+                    // the list owns the line, and only a line still in the buffer counts.
+                    if (!Available(line)) continue;
+                    if (!_outputWaiters.Remove(waiter)) break;
+                    line.Reported = true;
+                }
+                return line.Text;
             }
 
             return await Waiting.ForAsync(
@@ -349,7 +396,14 @@ namespace VsDbgMcp.Shim.Session
             for (var node = _output.First; node != null;)
             {
                 var next = node.Next;
-                if (Matches(instanceId, node.Value.InstanceId)) _output.Remove(node);
+                if (Matches(instanceId, node.Value.InstanceId))
+                {
+                    // Stamped as it goes. A reader matching outside the lock is holding
+                    // this line and would otherwise still see something unreported and
+                    // answer this run's wait with the last run's output.
+                    node.Value.Cleared = true;
+                    _output.Remove(node);
+                }
                 node = next;
             }
         }

@@ -53,14 +53,10 @@ namespace VsDbgMcp.Shim.Tools
         public static OperationResponse From(OperationInfo operation, string instance, bool details = false)
         {
             if (operation == null) throw new ArgumentException("Operation was not returned by the host.");
-            var state = operation.State ?? "unknown";
-            var success = new[] { "succeeded", "running", "stopped", "bound", "pending-symbols", "collecting", "collected", "interrupted", "aggregated" }.Contains(state);
-            var failure = state == "failed" || state == "rejected" || operation.Result?.Ok == false;
-            var unknown = state.Contains("unknown") || state == "issued" || (operation.Historical && !operation.Terminal) ||
-                (operation.Terminal && !success && !failure && state != "cancelled");
+            var outcome = OperationOutcome.Of(operation);
+            var unknown = outcome == OperationOutcome.Unknown;
             var response = new OperationResponse { OperationId = operation.OperationId, Kind = operation.Kind,
-                State = unknown ? "unknown" : !operation.Terminal ? "pending" :
-                    state == "cancelled" ? "cancelled" : failure ? "failed" : "succeeded",
+                State = outcome,
                 Details = details ? new OperationDetails { RequestId = operation.RequestId, Historical = operation.Historical,
                     ExecutionPhase = operation.ExecutionPhase, CommandInFlight = operation.CommandInFlight,
                     BlocksNewRequests = operation.BlocksNewRequests, StartedUtc = operation.StartedUtc, UpdatedUtc = operation.UpdatedUtc,

@@ -127,6 +127,70 @@ namespace VsDbgMcp.Tests
         }
 
         [Fact]
+        public void A_cancelled_launch_is_not_a_launch_that_worked()
+        {
+            var line = Line(Entry(EventKind.OperationDone, operation: new OperationInfo
+            {
+                OperationId = "ab12", Kind = "launch", State = "cancelled", Terminal = true, Executable = "myapp.exe"
+            }));
+
+            Assert.Equal("launch cancelled (operation ab12)", line);
+        }
+
+        [Fact]
+        public void A_cancelled_breakpoint_says_it_was_cancelled()
+        {
+            var line = Line(Entry(EventKind.OperationDone, operation: new OperationInfo
+            {
+                OperationId = "ab12", Kind = "breakpoint", State = "cancelled", Terminal = true,
+                Breakpoint = new BreakpointInfo { Id = 3, Bound = false }
+            }));
+
+            Assert.Equal("breakpoint cancelled (operation ab12)", line);
+        }
+
+        [Fact]
+        public void A_build_nobody_established_the_outcome_of_says_so()
+        {
+            var line = Line(Entry(EventKind.OperationDone, operation: new OperationInfo
+            {
+                OperationId = "ab12", Kind = "build", State = "unknown", Terminal = true,
+                Message = "VS was observed idle"
+            }));
+
+            Assert.Equal("build outcome unknown: VS was observed idle (operation ab12)", line);
+        }
+
+        /// <summary>
+        /// The one that reads wrong most expensively: a launch retired on idle evidence
+        /// used to say it succeeded while its own message said the outcome was unknown.
+        /// </summary>
+        [Fact]
+        public void A_launch_nobody_established_the_outcome_of_is_not_a_launch_that_worked()
+        {
+            var line = Line(Entry(EventKind.OperationDone, operation: new OperationInfo
+            {
+                OperationId = "ab12", Kind = "launch", State = "unknown", Terminal = true, Executable = "myapp.exe",
+                Message = "The command returned and VS was observed idle."
+            }));
+
+            Assert.StartsWith("launch outcome unknown: The command returned and VS was observed idle.", line);
+            Assert.DoesNotContain("succeeded", line);
+        }
+
+        [Fact]
+        public void A_reason_too_long_for_a_line_is_cut_short()
+        {
+            var line = Line(Entry(EventKind.OperationDone, operation: new OperationInfo
+            {
+                OperationId = "ab12", Kind = "launch", State = "unknown", Terminal = true,
+                Message = new string('x', 300)
+            }));
+
+            Assert.Equal("launch outcome unknown: " + new string('x', 97) + "... (operation ab12)", line);
+        }
+
+        [Fact]
         public void A_launch_names_what_it_started()
         {
             var line = Line(Entry(EventKind.OperationDone, operation: new OperationInfo
@@ -213,7 +277,9 @@ namespace VsDbgMcp.Tests
                 Entry(EventKind.Stopped, new StopEvent { Reason = StopReason.Step })
             }, false, Now);
 
-            Assert.Equal("Since your last call, state changed:\n- stopped after step\n", text);
+            // The blank line is the block's own. Content blocks arrive joined, so without
+            // it the tool's first line reads as one more event.
+            Assert.Equal("Since your last call, state changed:\n- stopped after step\n\n", text);
         }
 
         [Fact]

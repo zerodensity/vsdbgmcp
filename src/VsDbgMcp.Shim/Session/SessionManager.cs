@@ -63,8 +63,12 @@ namespace VsDbgMcp.Shim.Session
             await _refreshGate.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                if (!force && DateTime.UtcNow - _lastRefresh < RefreshInterval && _links.Count > 0)
-                    return _links.Values.ToList();
+                // Every read of the map takes the lock, not only the writes. Dispose at
+                // shutdown is not held off by the refresh gate, so an unlocked
+                // enumeration here throws the moment a session is torn down mid-refresh.
+                var current = Links();
+                if (!force && DateTime.UtcNow - _lastRefresh < RefreshInterval && current.Count > 0)
+                    return current;
 
                 _lastRefresh = DateTime.UtcNow;
                 var records = _store.Discover();
@@ -73,7 +77,10 @@ namespace VsDbgMcp.Shim.Session
                 foreach (var record in records)
                 {
                     seen.Add(record.Pid);
-                    if (_links.TryGetValue(record.Pid, out var existing))
+
+                    HostLink existing;
+                    lock (_links) _links.TryGetValue(record.Pid, out existing);
+                    if (existing != null)
                     {
                         existing.UpdateRecord(record);
                         if (!existing.IsConnected) await existing.ConnectAsync(ct).ConfigureAwait(false);
@@ -85,19 +92,34 @@ namespace VsDbgMcp.Shim.Session
                     lock (_links) _links[record.Pid] = link;
                 }
 
-                foreach (var pid in _links.Keys.Where(p => !seen.Contains(p)).ToList())
+                List<int> vanished;
+                lock (_links) vanished = _links.Keys.Where(p => !seen.Contains(p)).ToList();
+
+                foreach (var pid in vanished)
                 {
-                    _links[pid].ReportGone();
-                    _links[pid].Dispose();
-                    lock (_links) _links.Remove(pid);
+                    HostLink link;
+                    lock (_links)
+                    {
+                        if (!_links.TryGetValue(pid, out link)) continue;
+                        _links.Remove(pid);
+                    }
+
+                    link.ReportGone();
+                    link.Dispose();
                 }
 
-                return _links.Values.ToList();
+                return Links();
             }
             finally
             {
                 _refreshGate.Release();
             }
+        }
+
+        /// <summary>Every link there is, as a list nothing else can change underneath.</summary>
+        List<HostLink> Links()
+        {
+            lock (_links) return _links.Values.ToList();
         }
 
         public async Task<IReadOnlyList<HostLink>> AllAsync(CancellationToken ct) =>

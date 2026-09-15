@@ -61,9 +61,10 @@ namespace VsDbgMcp.Shim
                 sb.Append("- and ").Append(entries.Count - DigestLines)
                   .Append(" more; call status for the current state").Append('\n');
 
-            // Content blocks arrive joined. Without this the first line of the tool's
-            // own answer reads as one more event.
-            return sb.ToString();
+            // A blank line to close the block. Content blocks arrive joined, and how a
+            // client joins them is not this server's to rely on; without the break the
+            // first line of the tool's own answer reads as one more event.
+            return sb.Append('\n').ToString();
         }
 
         /// <summary>The same lines under status, where they are history rather than news.</summary>
@@ -148,17 +149,31 @@ namespace VsDbgMcp.Shim
             return sb.ToString();
         }
 
+        /// <summary>
+        /// What an operation came to, in the same five words operation_status uses -
+        /// they are read side by side, so one classifier decides both. Only a real
+        /// success is worded as one: an outcome nobody established says so instead of
+        /// reading as a launch that worked.
+        /// </summary>
         static string Operation(OperationInfo operation)
         {
             if (operation == null) return "an operation finished";
 
             var tail = " (operation " + operation.OperationId + ")";
-            var failed = EventLog.OperationFailed(operation);
+            var kind = operation.Kind ?? "operation";
+            var outcome = OperationOutcome.Of(operation);
+
+            // These three read the same whatever was asked for, and none of them may be
+            // worded as the work having happened.
+            if (outcome == OperationOutcome.Cancelled) return kind + " cancelled" + tail;
+            if (outcome == OperationOutcome.Unknown) return kind + " outcome unknown" + Because(operation) + tail;
+            if (outcome == OperationOutcome.Pending) return kind + " still running" + tail;
+
+            var failed = outcome == OperationOutcome.Failed;
 
             switch (operation.Kind)
             {
                 case "build":
-                    if (operation.State == "cancelled") return "build cancelled" + tail;
                     var build = operation.Build;
                     if (build == null) return (failed ? "build failed" : "build done") + Because(operation) + tail;
                     if (build.TotalErrors == 0 && build.TotalWarnings == 0) return "build succeeded" + tail;
@@ -180,12 +195,31 @@ namespace VsDbgMcp.Shim
                         (string.IsNullOrEmpty(bp.BindState) ? "" : ": " + bp.BindState) + tail;
 
                 default:
-                    return (operation.Kind ?? "operation") + " done: " + (operation.State ?? "unknown") + tail;
+                    // State cannot be null here: a null one classifies as unknown and was
+                    // answered three lines up.
+                    return kind + " done: " + operation.State + tail;
             }
         }
 
-        static string Because(OperationInfo operation) =>
-            string.IsNullOrEmpty(operation.Message) ? "" : ": " + operation.Message;
+        /// <summary>How long a reason gets before it stops being one line.</summary>
+        const int ReasonLength = 100;
+
+        /// <summary>
+        /// Why, in the room one line has. A host message runs to a paragraph — the one
+        /// that retires unresolved work is about 110 characters on its own — and this
+        /// goes at the top of a reply beside everything else that happened. The whole
+        /// text is in operation_status.
+        /// </summary>
+        static string Because(OperationInfo operation)
+        {
+            var message = operation.Message;
+            if (string.IsNullOrEmpty(message)) return "";
+
+            message = message.Replace('\r', ' ').Replace('\n', ' ').Trim();
+            if (message.Length == 0) return "";
+            if (message.Length > ReasonLength) message = message.Substring(0, ReasonLength - 3).TrimEnd() + "...";
+            return ": " + message;
+        }
 
         static string Count(int n, string noun) =>
             n.ToString(CultureInfo.InvariantCulture) + " " + noun + (n == 1 ? "" : "s");
