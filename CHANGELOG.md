@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.10.1
 
 - Operation, capture, and host-session IDs are 6 characters instead of 12. IDs
   issued by earlier releases still work.
