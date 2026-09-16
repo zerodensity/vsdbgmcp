@@ -37,7 +37,7 @@ directory; the shim finds the Visual Studio that has the matching solution open 
 connects. No ports, no per-project setup. When the choice is ambiguous the error names
 the candidates and the exact value to pass, so the next call succeeds.
 
-**Compact IDs.** Operation, capture, and host-session handles use 12
+**Compact IDs.** Operation, capture, and host-session handles use 6
 lowercase alphanumeric characters. Instance selectors use VS process numbers.
 Existing retained IDs and legacy instance selectors remain accepted; collector GUIDs
 stay internal. Update both host and shim together for contract 9, which older shims

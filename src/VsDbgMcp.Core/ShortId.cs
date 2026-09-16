@@ -7,11 +7,12 @@ namespace VsDbgMcp
     public static class ShortId
     {
         const string Alphabet = "0123456789abcdefghjkmnpqrstvwxyz";
-        public const int Length = 12;
+        public const int Length = 6;
+        const int LegacyLength = 12;
 
         public static string New(Func<string, bool> inUse = null)
         {
-            // 60 random bits, lowercase only so Windows paths cannot alias by case.
+            // 30 random bits, lowercase only so Windows paths cannot alias by case.
             // Owners reject collisions with retained identities before issuing a handle.
             using (var random = RandomNumberGenerator.Create())
             {
@@ -30,7 +31,7 @@ namespace VsDbgMcp
 
         public static bool IsValid(string id)
         {
-            if (id == null || id.Length != Length) return false;
+            if (id == null || (id.Length != Length && id.Length != LegacyLength)) return false;
             foreach (var c in id) if (Alphabet.IndexOf(c) < 0) return false;
             return true;
         }

@@ -25,7 +25,7 @@ namespace VsDbgMcp.Tests
             Assert.True(ShortId.IsValid(registry.Epoch));
             var first = registry.Begin("build", "build1", "Debug|x64", true, out var created);
             Assert.True(created);
-            Assert.Matches("^[0-9a-z]{12}$", first.OperationId);
+            Assert.Matches("^[0-9a-hj-kmnp-tv-z]{6}$", first.OperationId);
             Assert.DoesNotContain(first.OperationId, rejected);
             var retry = registry.Begin("build", "build1", "Debug|x64", true, out created);
             Assert.False(created);
@@ -37,6 +37,21 @@ namespace VsDbgMcp.Tests
             var second = registry.Begin("build", "build2", "Debug|x64", true, out _);
             Assert.NotEqual(first.OperationId, second.OperationId);
             Assert.Equal(first.OperationId, registry.Read(first.OperationId).OperationId);
+        }
+
+        [Fact]
+        public void Epochs_skip_ids_the_owner_reports_in_use()
+        {
+            var rejected = new System.Collections.Generic.List<string>();
+            var registry = new OperationRegistry(x => x, epochInUse: id =>
+            {
+                if (rejected.Count == 2) return false;
+                rejected.Add(id);
+                return true;
+            });
+            Assert.Equal(2, rejected.Count);
+            Assert.True(ShortId.IsValid(registry.Epoch));
+            Assert.DoesNotContain(registry.Epoch, rejected);
         }
 
         [Fact]
@@ -73,6 +88,7 @@ namespace VsDbgMcp.Tests
         }
 
         [Theory]
+        [InlineData("7b4n9x", true)]
         [InlineData("7b4n9x2m6k8q", true)]
         [InlineData("0123456789abcdef0123456789abcdef", true)]
         [InlineData("0123456789ABCDEF0123456789ABCDEF", true)]
@@ -83,8 +99,12 @@ namespace VsDbgMcp.Tests
         [InlineData("7b4n9x2m6k8q.json", false)]
         [InlineData("7b4n9x2m6k8q:ads", false)]
         [InlineData("7B4N9X2M6K8Q", false)]
+        [InlineData("7b4n9", false)]
+        [InlineData("7b4n9x2", false)]
         [InlineData("7b4n9x2m6k8", false)]
         [InlineData("7b4n9x2m6k8q0", false)]
+        [InlineData("7b4n9i", false)]
+        [InlineData("7B4N9X", false)]
         public void Capture_ids_accept_legacy_records_and_reject_paths(string id, bool valid)
         {
             Assert.Equal(valid, ShortId.IsCaptureId(id));

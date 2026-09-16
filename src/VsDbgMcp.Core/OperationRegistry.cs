@@ -20,7 +20,7 @@ namespace VsDbgMcp
         readonly Action<OperationInfo> _save;
         readonly string _instanceId;
         readonly Func<string, bool> _idInUse;
-        public string Epoch { get; } = ShortId.New();
+        public string Epoch { get; }
 
         /// <summary>
         /// An operation has reached its end. Raised once, after the locks are released, so
@@ -29,8 +29,8 @@ namespace VsDbgMcp
         public event Action<OperationInfo> Completed;
 
         public OperationRegistry(Func<OperationInfo, OperationInfo> copy, Action<OperationInfo> save = null, string instanceId = null,
-            Func<string, bool> idInUse = null)
-        { _copy = copy; _save = save; _instanceId = instanceId; _idInUse = idInUse; }
+            Func<string, bool> idInUse = null, Func<string, bool> epochInUse = null)
+        { _copy = copy; _save = save; _instanceId = instanceId; _idInUse = idInUse; Epoch = ShortId.New(epochInUse); }
 
         public OperationInfo Begin(string kind, string requestId, string request, bool exclusive, out bool created)
         {

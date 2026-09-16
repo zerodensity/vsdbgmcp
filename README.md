@@ -179,7 +179,7 @@ connections, and anything that went wrong inside the extension.
 Notes on a few:
 
 - **Compact IDs** — new operation, capture, and host-session IDs use
-  12 lowercase alphanumeric characters, such as `7b4n9x2m6k8q`. Copy the complete
+  6 lowercase alphanumeric characters, such as `7b4n9x`. Copy the complete
   returned ID into follow-up calls; retries and reconnects keep the same identity.
   Existing retained IDs still work. Instance IDs are VS process numbers such as
   `42696`; legacy `Name#PID` selectors and unique solution-name prefixes also work.

@@ -12,8 +12,10 @@ namespace VsDbgMcp.Host
     static class HostOperations
     {
         static readonly object DiskGate = new object();
-        public static readonly OperationRegistry Store = new OperationRegistry(Copy, Save, Process.GetCurrentProcess().Id.ToString(), HasHistory);
-        public static readonly string DirectoryPath = Path.Combine(Names.InstanceDir, "operations", Store.Epoch);
+        static readonly string Root = Path.Combine(Names.InstanceDir, "operations");
+        public static readonly OperationRegistry Store = new OperationRegistry(Copy, Save, Process.GetCurrentProcess().Id.ToString(), HasHistory,
+            epoch => Directory.Exists(Path.Combine(Root, epoch)));
+        public static readonly string DirectoryPath = Path.Combine(Root, Store.Epoch);
         public static T Copy<T>(T value) => JsonConvert.DeserializeObject<T>(JsonConvert.SerializeObject(value));
         public static void Run(string id, Func<Task> work)
         {
@@ -49,9 +51,8 @@ namespace VsDbgMcp.Host
         public static OperationInfo Historical(string id)
         {
             if (id == null || id.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || id.Contains("..")) return null;
-            var root = Path.GetDirectoryName(DirectoryPath);
-            if (!Directory.Exists(root)) return null;
-            foreach (var dir in Directory.EnumerateDirectories(root))
+            if (!Directory.Exists(Root)) return null;
+            foreach (var dir in Directory.EnumerateDirectories(Root))
             {
                 var path = Path.Combine(dir, id + ".json");
                 if (!File.Exists(path)) continue;
@@ -69,8 +70,7 @@ namespace VsDbgMcp.Host
 
         static bool HasHistory(string id)
         {
-            var root = Path.GetDirectoryName(DirectoryPath);
-            return Directory.Exists(root) && Directory.EnumerateDirectories(root).Any(dir => File.Exists(Path.Combine(dir, id + ".json")));
+            return Directory.Exists(Root) && Directory.EnumerateDirectories(Root).Any(dir => File.Exists(Path.Combine(dir, id + ".json")));
         }
     }
 }

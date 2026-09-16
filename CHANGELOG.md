@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Operation, capture, and host-session IDs are 6 characters instead of 12. IDs
+  issued by earlier releases still work.
+
 ## 0.10.0
 
 - Replies open with what happened in Visual Studio since the previous call: stops,

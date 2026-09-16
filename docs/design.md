@@ -9,7 +9,7 @@ Status: built and working. Sections 1 to 13 are the design as intended; section
 has not been exercised against a live debuggee.
 
 The tool catalog below reflects 0.9.2. Operation, capture, and host-session
-IDs are 12 lowercase alphanumeric characters; instance IDs are VS process numbers.
+IDs are 6 lowercase alphanumeric characters; instance IDs are VS process numbers.
 Collector session GUIDs remain internal to collection and persistence. Legacy IDs
 remain accepted, and host/shim contract 9 prevents older shims rejecting new captures.
 Operation and capture workflows are documented in [Recoverable operations and captures](iteration_4.md) and

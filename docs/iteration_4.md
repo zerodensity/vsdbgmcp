@@ -87,9 +87,9 @@ A mode snapshot is not a measurement of useful application progress.
 
 ## Profiles and reports
 
-A capture gets a stable ID when start is requested. Originally a GUID, new IDs are
-12 lowercase alphanumeric characters in 0.9.2 (contract 9);
-existing GUID IDs remain valid. Collector session GUIDs stay internal to persistence.
+A capture gets a stable ID when start is requested. Originally a GUID, IDs became
+12 lowercase alphanumeric characters in 0.9.2 (contract 9) and 6 after 0.10.0;
+existing GUID and 12-character IDs remain valid. Collector session GUIDs stay internal to persistence.
 Metadata records collector
 session ID, owner PID and process start time when readable, executable,
 configuration, instance, host epoch/generation, UTC start/end times, module/symbol
