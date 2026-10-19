@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.3
+
+- Each `vsdbgmcp.exe` no longer loads every saved profile into memory at startup.
+  With 510 MB of saved captures, each process held about 1.5 GB, once per MCP
+  client; it now starts at about 70 MB. Startup reads only the capture list;
+  `profile_report` and `profile_export` load a capture from disk when asked and
+  keep the two most recently used. A saved capture that can no longer be read is
+  reported with its file instead of being skipped silently at startup.
+
 ## 0.10.2
 
 - The extension serves nothing on a pipe connection until the client has sent the

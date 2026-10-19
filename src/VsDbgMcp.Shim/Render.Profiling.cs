@@ -29,7 +29,7 @@ namespace VsDbgMcp.Shim
         const int HotPathDepth = 10;
 
         public static string Profile(Capture capture, ProfileQuery query, Capture against,
-            IReadOnlyList<Capture> taken)
+            IReadOnlyList<Captures.Entry> taken)
         {
             if (capture == null) return "No profile has been taken. Call profile_start, let the program work, then profile_stop.";
 
@@ -457,7 +457,7 @@ namespace VsDbgMcp.Shim
             foreach (var note in notes) sb.Append("note: ").AppendLine(note);
         }
 
-        static void Footer(StringBuilder sb, Capture capture, IReadOnlyList<Capture> taken)
+        static void Footer(StringBuilder sb, Capture capture, IReadOnlyList<Captures.Entry> taken)
         {
             if (taken == null || taken.Count == 0) return;
 

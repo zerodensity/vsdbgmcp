@@ -42,7 +42,11 @@ namespace VsDbgMcp.Shim.Tools
 
         string Aggregate(VsDbgMcp.Contracts.ProfileCollection collection, bool recoverClosedTrace = false)
         {
-            var existing = Sessions.Captures.FindStable(collection.CaptureId);
+            // A saved aggregate that cannot be read is rebuilt from the raw trace when it is still there.
+            Capture existing = null;
+            string unreadable = null;
+            try { existing = Sessions.Captures.FindStable(collection.CaptureId); }
+            catch (UnreadableCaptureException ex) { unreadable = ex.Message + " "; }
             if (existing != null) return Render.Profile(existing, new ProfileQuery(), null, Sessions.Captures.All);
             if (recoverClosedTrace && ProfileArtifacts.ReconcileClosedTrace(collection))
             {
@@ -51,9 +55,9 @@ namespace VsDbgMcp.Shim.Tools
                 collection.RetainRaw = true;
             }
             if (collection.Status != "collected" && collection.Status != "interrupted" && collection.Status != "aggregated")
-                return "Capture " + collection.CaptureId + ": " + collection.Status + ". " + collection.Error;
+                return unreadable + "Capture " + collection.CaptureId + ": " + collection.Status + ". " + collection.Error;
             var capture = TraceReader.Read(collection, collection.Modules ?? new System.Collections.Generic.List<VsDbgMcp.Contracts.ModuleInfo>(), out var failure);
-            if (capture == null) return failure + " Raw trace retained: " + collection.Path;
+            if (capture == null) return unreadable + failure + " Raw trace retained: " + collection.Path;
             capture.CaptureId = collection.CaptureId;
             capture.Metadata = collection;
             Sessions.Captures.Keep(capture); // May fail; preserve raw evidence if it does.

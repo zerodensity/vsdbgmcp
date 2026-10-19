@@ -193,10 +193,99 @@ namespace VsDbgMcp.Tests
         }
 
         [Fact]
+        public void A_new_store_lists_saved_captures_without_loading_them()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "vsdbgmcp-test-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var store = new Captures(root);
+                var first = Example();
+                first.Seconds = 4.25;
+                first.Stacked = 17;
+                store.Keep(first);
+                var second = store.Keep(Example());
+
+                var reconnected = new Captures(root);
+                Assert.Equal(0, reconnected.LoadedCount);
+                Assert.Equal(2, reconnected.All.Count);
+                var listed = reconnected.All.Single(e => e.CaptureId == first.CaptureId);
+                Assert.Equal(4.25, listed.Seconds);
+                Assert.Equal(17, listed.Stacked);
+
+                var report = Render.Profile(reconnected.FindStable(second.CaptureId), new ProfileQuery { Details = true }, null, reconnected.All);
+                Assert.Contains("#" + listed.Id + " 4s 17 samples", report);
+                Assert.Equal(1, reconnected.LoadedCount);
+            }
+            finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        }
+
+        [Fact]
+        public void Only_the_most_recently_used_saved_captures_stay_in_memory()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "vsdbgmcp-test-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var store = new Captures(root);
+                var kept = Enumerable.Range(0, Captures.LoadedLimit + 2).Select(_ => store.Keep(Example())).ToList();
+                Assert.Equal(Captures.LoadedLimit, store.LoadedCount);
+
+                var reconnected = new Captures(root);
+                foreach (var one in kept) Assert.Equal(one.CaptureId, reconnected.FindStable(one.CaptureId).CaptureId);
+                Assert.Equal(Captures.LoadedLimit, reconnected.LoadedCount);
+
+                var recent = reconnected.Find(kept.Count);
+                Assert.Same(recent, reconnected.Find(kept.Count));
+                var reloaded = reconnected.Find(1);
+                Assert.Equal(1, reloaded.Id);
+                Assert.Equal(2, reloaded.Stacks.Count);
+            }
+            finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        }
+
+        [Fact]
+        public void A_store_without_a_directory_keeps_every_capture()
+        {
+            var store = new Captures();
+            var kept = Enumerable.Range(0, Captures.LoadedLimit + 2).Select(_ => store.Keep(Example())).ToList();
+            foreach (var one in kept) Assert.Same(one, store.FindStable(one.CaptureId));
+        }
+
+        [Fact]
+        public void A_saved_capture_that_cannot_be_read_is_reported_with_its_file()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "vsdbgmcp-test-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var store = new Captures(root);
+                var damaged = store.Keep(Example());
+                var removed = store.Keep(Example());
+                var path = Path.Combine(root, damaged.CaptureId + ".json");
+                var text = File.ReadAllText(path);
+                File.WriteAllText(path, text.Substring(0, text.IndexOf("\"Frames\"", StringComparison.Ordinal) + 12));
+
+                var reconnected = new Captures(root);
+                Assert.Equal(2, reconnected.All.Count);
+                var error = Assert.Throws<UnreadableCaptureException>(() => reconnected.FindStable(damaged.CaptureId));
+                Assert.Contains(damaged.CaptureId, error.Message);
+                Assert.Contains(path, error.Message);
+
+                var rebuilt = Example();
+                rebuilt.CaptureId = damaged.CaptureId;
+                Assert.Same(rebuilt, reconnected.Keep(rebuilt));
+                Assert.Equal(2, new Captures(root).FindStable(damaged.CaptureId).Stacks.Count);
+
+                File.Delete(Path.Combine(root, removed.CaptureId + ".json"));
+                error = Assert.Throws<UnreadableCaptureException>(() => reconnected.FindStable(removed.CaptureId));
+                Assert.Contains(removed.CaptureId, error.Message);
+            }
+            finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        }
+
+        [Fact]
         public void Module_thread_and_tree_filters_preserve_the_thread_denominator()
         {
             var capture = Example();
-            var report = Render.Profile(capture, new ProfileQuery { Module = "plugin", Thread = 7, Sort = "inclusive", Details = false, RawTree = true }, null, new[] { capture });
+            var report = Render.Profile(capture, new ProfileQuery { Module = "plugin", Thread = 7, Sort = "inclusive", Details = false, RawTree = true }, null, Listed(capture));
             Assert.Contains("10 stacked samples in selected thread", report);
             Assert.Contains("plugin!Work", report);
             Assert.DoesNotContain("OtherThread", report);
@@ -208,7 +297,7 @@ namespace VsDbgMcp.Tests
         {
             var capture = Example();
             capture.Stacks[1].Samples = 100000;
-            var report = Render.Profile(capture, new ProfileQuery { Details = false }, null, new[] { capture });
+            var report = Render.Profile(capture, new ProfileQuery { Details = false }, null, Listed(capture));
             Assert.Contains("generation 2", report);
             Assert.Contains("<0.1%", report);
             Assert.DoesNotContain("captures:", report);
@@ -237,6 +326,13 @@ namespace VsDbgMcp.Tests
             capture.Stacks.Add(new Capture.Stack { Frames = new[] { 0, 1 }, Samples = 10, ThreadId = 7 });
             capture.Stacks.Add(new Capture.Stack { Frames = new[] { 0, 2 }, Samples = 10, ThreadId = 8 });
             return capture;
+        }
+
+        static System.Collections.Generic.IReadOnlyList<Captures.Entry> Listed(Capture capture)
+        {
+            var store = new Captures();
+            store.Keep(capture);
+            return store.All;
         }
     }
 }

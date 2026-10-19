@@ -113,7 +113,9 @@ modification time. Offline recovery preserves raw evidence for later host
 reconciliation. Concurrent stop requests share one capture-specific operation, whose
 retained result cannot be replaced by a later capture.
 
-Aggregates persist below `profiles\aggregates` and are loaded by a new shim. Integer
+Aggregates persist below `profiles\aggregates` and are listed by a new shim, which reads
+only each file's captureId, duration and sample count at startup. A report or export
+loads the whole aggregate from disk; the two most recently used stay in memory. Integer
 capture numbers are convenient aliases local to that shim; `captureId` is stable.
 `profile_export(directory, captureId, includeRaw)` writes JSON and a readable report,
 plus the original collector package when retained. Existing exports are not overwritten.
