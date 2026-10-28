@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.10.4
+
+- A saved profile that cannot be read is named instead of hidden or fatal. One damaged
+  file used to stop `vsdbgmcp.exe` from starting at all, for that Visual Studio instance,
+  until someone deleted the file by hand; one whose header had lost its numbers was
+  reported as a capture that ran for no time and sampled nothing, and one that could not
+  be opened at the moment another process was pruning the directory was not listed at all.
+  Every saved capture is now listed, the unreadable ones with the reason and the
+  `captureId` to hand `profile_recover`, which can rebuild them while the raw trace is
+  still retained. `profile_status` says which need recovery.
+- `profile_report` with no capture asked for answers about the newest capture that can be
+  read when the newest cannot, and says in the same reply which it skipped. A capture
+  named by number or `captureId` is never answered with a neighbouring one.
+- Asking what has been collected no longer waits behind another capture coming off disk: the
+  list answers in well under a millisecond while a capture is read, where it used to wait out
+  the whole deserialize. A 26 MB capture reads in about 0.3 seconds. Saving a capture
+  allocates about two thirds less than it did, and whole captures held in memory are bounded
+  in bytes as well as by count (`VSDBGMCP_LOADED_BUDGET_MB`, 256 by default).
+- A capture write interrupted by the process dying leaves nothing behind, instead of a
+  temporary file that no listing and no retention budget ever saw, and an export that
+  cannot finish takes its own partial files with it and clears any left by an earlier one.
+
 ## 0.10.3
 
 - Each `vsdbgmcp.exe` no longer loads every saved profile into memory at startup.
