@@ -27,6 +27,13 @@ namespace VsDbgMcp.Shim.Profiling
         /// <summary>How many rows before the rest is folded into one line.</summary>
         public int Top { get; set; } = 12;
         public bool Details { get; set; } = true;
+
+        /// <summary>
+        /// Set when the reply carrying this report already names the call that can rebuild a
+        /// capture it cannot read. The footer then says which captures are unreadable without
+        /// saying twice in one reply what to do about it.
+        /// </summary>
+        public bool RecoveryAlreadySaid { get; set; }
         public string Focus { get; set; }
         public bool RawTree { get; set; }
 

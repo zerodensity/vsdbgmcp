@@ -318,7 +318,7 @@ Version 0.9.2 uses host/shim contract 9; update both together.
 
 ## Status
 
-585 automated tests cover routing, discovery, the event bus, and the whole shim path —
+829 automated tests cover routing, discovery, the event bus, and the whole shim path —
 discovery file, named pipe, JSON-RPC, rendering — against a stand-in for the extension,
 plus the pure decisions: which expression forms to try against a module, which values are
 allocator fill, whether a source file outran its binary, whether a module was deployed

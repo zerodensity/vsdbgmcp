@@ -114,15 +114,37 @@ reconciliation. Concurrent stop requests share one capture-specific operation, w
 retained result cannot be replaced by a later capture.
 
 Aggregates persist below `profiles\aggregates` and are listed by a new shim, which reads
-only each file's captureId, duration and sample count at startup. A report or export
-loads the whole aggregate from disk; the two most recently used stay in memory. Integer
-capture numbers are convenient aliases local to that shim; `captureId` is stable.
-`profile_export(directory, captureId, includeRaw)` writes JSON and a readable report,
-plus the original collector package when retained. Existing exports are not overwritten.
+only each file's captureId, duration and sample count at startup. Every saved file is
+listed, readable or not: one whose header is damaged, mistyped, unreadable or claiming
+another file's identity is kept in the list as needing recovery rather than skipped or
+fatal, because a file that stops the shim starting costs the session every tool, and a
+capture reported as running for no time and sampling nothing sends the model looking for
+an idle program. A file whose header reads but whose body does not is marked the same way
+the first time a call loads it, and a capture judged unreadable is read again once its
+file changes, so a rebuild by another shim is seen without a restart. A file that is only
+held open by another process is reported as not openable just now, not as needing
+recovery. `profile_status` carries `needsRecovery` per capture. A report or export
+loads the whole aggregate from disk, outside the lock that guards the list, so a call that
+only asks what was collected does not wait behind a large read. Whole captures stay in
+memory two at a time and no more than a byte budget, and the file's own length is what is
+measured. `profile_report` without a capture asks for the most recent one and, when that
+file cannot be read, reports the next most recent readable capture and names both; a
+capture named by number or `captureId` is never substituted for. Integer
+capture numbers are convenient aliases local to that shim; `captureId` is stable, is the
+file's own name, and rebuilding a capture over a damaged file keeps the number its report
+printed. `profile_export(directory, captureId, includeRaw)` writes JSON and a readable
+report, plus the original collector package when retained. Existing exports are not
+overwritten, and an export that cannot finish leaves no partial files behind. An aggregate
+written by a process that died mid-write leaves nothing behind: the write goes to a
+temporary name carrying that process's id and is moved into place, and a temporary whose
+owner is gone is swept when the store opens. An export sweeps its destination the same way
+before it writes, but only names in the exact shape an export writes, because that
+directory holds the user's own files.
 Raw evidence is deleted only after successful durable aggregation unless
 `profile_start(retainRaw=true)` was requested. Parsing failures preserve the package.
 
-Retention is configurable with positive integer environment variables:
+Retention and the shim's own memory are configurable with positive integer environment
+variables:
 
 | Setting | Default |
 |---|---:|
@@ -130,6 +152,13 @@ Retention is configurable with positive integer environment variables:
 | `VSDBGMCP_RAW_BUDGET_MB` | 2048 |
 | `VSDBGMCP_AGGREGATE_RETENTION_DAYS` | 30 |
 | `VSDBGMCP_AGGREGATE_BUDGET_MB` | 512 |
+| `VSDBGMCP_LOADED_BUDGET_MB` | 256 |
+
+The last is not retention: it bounds the saved bytes of whole aggregates held in memory at
+once, beside the limit of two. What is counted is the file's length, which is measured
+rather than estimated; heap costs about three and a half times that. A capture larger than
+the budget is still held, because a report that evicted its own subject would read the
+file again to answer.
 
 Completed raw packages are pruned oldest-first before starting another collection;
 active/unknown collections are protected. If protected packages exhaust the budget,

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using VsDbgMcp.Contracts;
+using VsDbgMcp.Shim.Profiling;
 
 namespace VsDbgMcp.Shim.Tools
 {
@@ -29,7 +31,24 @@ namespace VsDbgMcp.Shim.Tools
         public double Seconds { get; set; }
         public string Error { get; set; }
 
-        public static ProfileResponse From(ProfileCollection profile)
+        /// <summary>
+        /// True when the saved aggregate for this capture is there but cannot be read, so a
+        /// report or an export of it is refused and the captureId here is what profile_recover
+        /// needs; false when it reads; null when the caller had no capture store to ask. Status
+        /// says what the collector recorded when the capture ended, which is not the same thing
+        /// as what still survives on disk: a capture can be aggregated and unreadable.
+        /// </summary>
+        public bool? NeedsRecovery { get; set; }
+
+        public static ProfileResponse From(ProfileCollection profile) => From(profile, null);
+
+        /// <summary>
+        /// The metadata as the collector left it, checked against the captures the store cannot
+        /// read. A status of aggregated over a file that cannot be parsed is the one state a
+        /// model has to be able to see before it spends a call on it. The list is read once by
+        /// the caller, because reading it checks every unreadable file on disk.
+        /// </summary>
+        public static ProfileResponse From(ProfileCollection profile, IReadOnlyList<Captures.Entry> needsRecovery)
         {
             if (profile == null) return null;
             var instance = profile.InstanceId;
@@ -44,9 +63,18 @@ namespace VsDbgMcp.Shim.Tools
                 Configuration = profile.Configuration, Executable = profile.Executable, Status = profile.Status,
                 RetainRaw = profile.RetainRaw, Modules = profile.Modules, Interventions = profile.Interventions,
                 MetadataPath = profile.MetadataPath, Path = profile.Path, ProcessName = profile.ProcessName,
-                Pid = profile.Pid, Seconds = profile.Seconds, Error = profile.Error
+                Pid = profile.Pid, Seconds = profile.Seconds, Error = profile.Error,
+                NeedsRecovery = needsRecovery == null
+                    ? (bool?) null
+                    : needsRecovery.Any(e => string.Equals(IdOf(e), profile.CaptureId, StringComparison.OrdinalIgnoreCase))
             };
         }
+
+        /// <summary>The identity a capture is listed and recovered under.</summary>
+        static string IdOf(Captures.Entry entry) =>
+            string.IsNullOrEmpty(entry.CaptureId)
+                ? (entry.Path == null ? null : System.IO.Path.GetFileNameWithoutExtension(entry.Path))
+                : entry.CaptureId;
     }
 
     public sealed class DebugStateResponse

@@ -65,7 +65,7 @@ namespace VsDbgMcp.Shim
             else if (query.Thread != null && query.Module == null) OneThread(sb, selected, query, total);
             else Summary(sb, selected, query, total);
 
-            if (query.Details) { Notes(sb, capture); Footer(sb, capture, taken); }
+            if (query.Details) { Notes(sb, capture); Footer(sb, capture, taken, query.RecoveryAlreadySaid); }
             else
             {
                 if (capture.Stacked < capture.Samples) sb.AppendLine("Quality: some samples have no stacks; details=true shows coverage.");
@@ -457,20 +457,62 @@ namespace VsDbgMcp.Shim
             foreach (var note in notes) sb.Append("note: ").AppendLine(note);
         }
 
-        static void Footer(StringBuilder sb, Capture capture, IReadOnlyList<Captures.Entry> taken)
+        static void Footer(StringBuilder sb, Capture capture, IReadOnlyList<Captures.Entry> taken, bool recoverySaid = false)
         {
             if (taken == null || taken.Count == 0) return;
 
             sb.AppendLine();
             sb.Append("captures:");
+            var lost = 0;
+            Captures.Entry subject = null;
             foreach (var other in taken)
             {
-                sb.Append("  #").Append(other.Id).Append(" ")
-                  .Append(other.Seconds.ToString("F0", CultureInfo.InvariantCulture)).Append("s ")
-                  .Append(Samples(other.Stacked));
+                sb.Append("  #").Append(other.Id);
+                // A capture whose file could not be read has no seconds and no samples, and
+                // printing zeros would claim the program ran and sampled nothing. The number
+                // is still listed, because it is the number a recovery call has to be made for.
+                switch (other.Contents)
+                {
+                    case Captures.Contents.Unreadable unreadable:
+                        if (other.Id != capture.Id && Captures.CanRecover(other.CaptureId)) lost++;
+                        sb.Append(" unreadable");
+                        // Named here rather than left for profile_status, because the number is
+                        // local to this process and recovery is asked for by the stable id. The
+                        // reason travels with it as one bounded clause, because whether to retry the
+                        // file, recover it, or stop asking about it depends on what stopped it.
+                        sb.Append(" (");
+                        if (other.CaptureId != null) sb.Append("captureId ").Append(other.CaptureId).Append(", ");
+                        sb.Append(unreadable.Reason).Append(')');
+                        if (other.Id == capture.Id) subject = other;
+                        break;
+                    case Captures.Contents.Readable readable:
+                        sb.Append(" ").Append(readable.Seconds.ToString("F0", CultureInfo.InvariantCulture)).Append("s ")
+                          .Append(Samples(readable.Stacked));
+                        break;
+                }
                 if (other.Id == capture.Id) sb.Append(" (this)");
             }
             sb.AppendLine();
+
+            // A report of a capture the store cannot read is not a report of a damaged capture:
+            // something readable answered it. Saying so once, here, keeps "#1 unreadable (this)"
+            // from being read as a verdict on the answer above it, and says which file the
+            // recovery call would be fixing.
+            if (subject != null)
+                sb.AppendLine("note: #" + subject.Id + " is what this report is of, and its saved file could not be read"
+                    + (string.IsNullOrEmpty(subject.Reason) ? "" : ": " + subject.Reason)
+                    + "; the copy already in this shim answered"
+                    + (string.IsNullOrEmpty(subject.CaptureId)
+                        ? "; it has no captureId, so profile_recover cannot name it."
+                        : "; profile_recover(captureId: \"" + subject.CaptureId + "\") rebuilds that file."));
+
+            // Said once. The line above covers the subject of the report, and a reply that already
+            // names the call to make does not need this one naming it a second time. Only files
+            // named by a captureId are counted, because profile_recover refuses any other name.
+            if (lost > 0 && !recoverySaid)
+                sb.AppendLine(lost == 1
+                    ? "note: 1 listed capture could not be read; profile_recover with its captureId rebuilds it while its raw trace is retained."
+                    : "note: " + lost + " listed captures could not be read; profile_recover with a captureId rebuilds each while its raw trace is retained.");
         }
 
         static List<Capture.Row> InThread(Capture capture, int threadId)
