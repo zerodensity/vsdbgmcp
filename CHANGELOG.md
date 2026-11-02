@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.10.5
+
+- Visual Studio no longer freezes after an agent pauses or steps a program whose window
+  was in front. With **Don't steal focus** on, the extension handed the foreground back
+  to that window from Visual Studio's UI thread; the debugger had just suspended the
+  window's thread, so Visual Studio waited on it forever at 0 % CPU and had to be killed,
+  taking the debuggee with it. A debugged program's window now gets the focus back only
+  while the program runs, and never from the UI thread.
+- Reading the debuggee no longer holds Visual Studio's UI thread. Stacks, threads,
+  evaluation, variables, memory, registers, disassembly, modules, symbol loads, scratch
+  memory, triage, `select`, `freeze`, `processes`, why a breakpoint did not bind, console
+  I/O and `capture` run on a thread of their own. Only the automation commands that work
+  nowhere else (break, go, step, attach, creating breakpoints, builds) still run on the UI
+  thread, and briefly. A `threads` call on two busy processes used to hold Visual Studio
+  for up to 0.9 s at a time; with these reads running, the window now answers within
+  0.8 s throughout, the longest pause being Visual Studio's own work on breaking.
+- A read during which the program started running again, for example because someone
+  pressed F5, now fails and says so instead of answering with values that may be from
+  after the program moved. A thread or frame chosen with `select` across such a change is
+  not kept.
+- Watch values still ride along with a stop, and the stop still goes out the moment it
+  happens; the watches of one stop now get one second in all, and any not read in that
+  time say so.
+- `capture` of a program stopped in the debugger, which often cannot draw its window,
+  returns an error after 10 seconds instead of waiting for it indefinitely. The tool's
+  description no longer claims it works while the program is stopped.
+- `output` and `build_output` read the last 20,000 lines of a pane and say so when the
+  pane is longer, so a search that finds nothing there does not read as a line never
+  printed. Neither moves the selection in the Output window any more. `trace_read` reads
+  the whole Debug pane only where its records cannot be collected as they arrive.
+- Visual Studio's memory no longer grows with every read. A `threads` call on 84 threads
+  left about 11 MB that Visual Studio's garbage collector seldom reclaimed: 60 calls took
+  it from 630 MB to 1.3 GB. Replies are now written straight to the pipe instead of being
+  built as a tree of JSON objects first, and the debugger objects each read creates are
+  released when it finishes; 60 calls on 40 threads now level off about 130 MB above the
+  start. The JSON on the wire is unchanged, so running shims keep working; a Visual
+  Studio 2022 too old for the new writer uses the old one.
+- The extension no longer replaces Visual Studio's own COM message filter on its UI
+  thread. Its reads carry a filter of their own instead, on their own thread, so a call
+  the busy shell turns away is retried rather than read as an empty answer; a read the
+  shell turns away for 30 seconds fails and says so.
+
 ## 0.10.4
 
 - A saved profile that cannot be read is named instead of hidden or fatal. One damaged
