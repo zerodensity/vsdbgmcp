@@ -91,7 +91,6 @@ namespace VsDbgMcp.Host
             if (Activity.Paused) throw new InvalidOperationException(Activity.PausedMessage);
 
             await _jtf.SwitchToMainThreadAsync();
-            MessageFilter.EnsureInstalled();
 
             // Not recorded here, for the same reason as the debug host: the shim reports
             // the call once it has the reply. Recording here too listed every build tool
@@ -347,11 +346,8 @@ namespace VsDbgMcp.Host
                     return result;
                 }
 
-                var selection = pane.TextDocument.Selection;
-                selection.StartOfDocument(false);
-                selection.EndOfDocument(true);
-                var lines = (selection.Text ?? "").Replace("\r\n", "\n").Split('\n').ToList();
-                selection.StartOfDocument(false);
+                var lines = PaneTail.Read(pane, out var firstLine).Replace("\r\n", "\n").Split('\n').ToList();
+                result.SearchedFromLine = firstLine;
 
                 if (!string.IsNullOrWhiteSpace(pattern))
                 {

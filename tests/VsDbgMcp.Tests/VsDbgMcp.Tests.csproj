@@ -35,6 +35,7 @@
     <Compile Include="..\..\src\VsDbgMcp.Host\ShimStaging.cs" Link="Host\ShimStaging.cs" />
     <Compile Include="..\..\src\VsDbgMcp.Host\ShimProcesses.cs" Link="Host\ShimProcesses.cs" />
     <Compile Include="..\..\src\VsDbgMcp.Host\Activity.cs" Link="Host\Activity.cs" />
+    <Compile Include="..\..\src\VsDbgMcp.Host\FocusGuard.cs" Link="Host\FocusGuard.cs" />
     <Compile Include="..\..\src\VsDbgMcp.Host\PipeServer.cs" Link="Host\PipeServer.cs" />
     <Compile Include="..\..\src\VsDbgMcp.Host\SecurePipe.cs" Link="Host\SecurePipe.cs" />
   </ItemGroup>

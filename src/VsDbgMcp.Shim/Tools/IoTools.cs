@@ -51,11 +51,7 @@ namespace VsDbgMcp.Shim.Tools
             => On(instance, ct, async link =>
             {
                 var result = await link.Debug.OutputReadAsync(pane, pattern, tail, ct).ConfigureAwait(false);
-                if (result == null) return "No output.";
-                if (string.IsNullOrWhiteSpace(result.Text)) return "Pane '" + pane + "' has no matching output.";
-
-                var header = result.Truncated ? "(showing last " + result.Lines + " lines)\n" : "";
-                return header + result.Text;
+                return Render.Pane(result, pane);
             }, pattern == null ? pane : pane + " ~ " + pattern);
     }
 }

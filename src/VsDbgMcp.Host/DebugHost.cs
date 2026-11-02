@@ -45,6 +45,33 @@ namespace VsDbgMcp.Host
         TaskCompletionSource<string> _modeWaiter;
         string _reportedMode = DebugModes.Design;
 
+        /// <summary>
+        /// One tool call at a time. Every call used to run on the UI thread, which put
+        /// them in order as a side effect; reads now run on a pool thread, and a read
+        /// interleaved with a go or a select would answer about a program that had
+        /// already moved. Taken before anything else, never while on the UI thread.
+        /// </summary>
+        readonly SemaphoreSlim _calls = new SemaphoreSlim(1, 1);
+
+        /// <summary>
+        /// The shell's mode as read on the UI thread at the start of the read running on
+        /// this flow. Off the UI thread the shell cannot be asked, and the notification
+        /// alone arrives seconds late.
+        /// </summary>
+        readonly System.Threading.AsyncLocal<string> _callMode = new System.Threading.AsyncLocal<string>();
+
+        /// <summary>Where every read of the debuggee runs.</summary>
+        readonly DebuggeeThread _reader = new DebuggeeThread();
+
+        /// <summary>
+        /// Counts the debugger's mode changes. A read compares it before and after, and a
+        /// selection is only kept if no change came between: a person can now press F5
+        /// while a read runs, which the UI thread used to make impossible.
+        /// </summary>
+        int _modeEpoch;
+        readonly object _selectionGate = new object();
+        readonly System.Threading.AsyncLocal<int> _callEpoch = new System.Threading.AsyncLocal<int>();
+
         public DebugHost(VsDbgMcpPackage package, DTE2 dte, IVsSolution solution, IVsDebugger vsDebugger,
             DebugEventSink sink, JoinableTaskFactory jtf, Action<string> log)
         {
@@ -74,10 +101,10 @@ namespace VsDbgMcp.Host
         /// read issued straight after go was served out of the frame where the program
         /// last stopped, and pause was refused for nothing running while the program ran.
         /// The automation model's own mode is right at the moment it is asked, so it is
-        /// asked. Off the UI thread it cannot be, and there the notification is all there
-        /// is.
+        /// asked. Off the UI thread it cannot be: a read there uses what was asked when
+        /// the read began, and anything else gets the notification.
         /// </summary>
-        public string CurrentMode => ThreadHelper.CheckAccess() ? ShellMode() : _reportedMode;
+        public string CurrentMode => ThreadHelper.CheckAccess() ? ShellMode() : _callMode.Value ?? _reportedMode;
 
         string ShellMode()
         {
@@ -102,7 +129,6 @@ namespace VsDbgMcp.Host
 
         List<ModuleInfo> ProfileModules(int pid)
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
             return _sink.Programs.Where(p => ProcessIdentity.Of(p).Pid == pid)
                 .SelectMany(NativeReader.ReadModules).ToList();
         }
@@ -112,11 +138,15 @@ namespace VsDbgMcp.Host
             // A frame does not survive its thread resuming, so neither should a pinned
             // selection. Leaving it in place would quietly evaluate later expressions in
             // a process the caller stopped meaning to look at.
-            if (mode != DebugModes.Break)
+            lock (_selectionGate)
             {
-                _selectedThreadId = 0;
-                _selectedFrame = 0;
-                _framePinned = false;
+                _modeEpoch++;
+                if (mode != DebugModes.Break)
+                {
+                    _selectedThreadId = 0;
+                    _selectedFrame = 0;
+                    _framePinned = false;
+                }
             }
 
             // Scratch blocks are addresses in the debuggee, and the debuggee is what has
@@ -124,7 +154,7 @@ namespace VsDbgMcp.Host
             // exists, and freeing it later would free somebody else's.
             if (mode == DebugModes.Design)
             {
-                _scratch.Clear();
+                lock (_scratch) _scratch.Clear();
 
                 // The process being sampled has gone, so whatever was gathered describes
                 // something that no longer exists and nobody is going to ask for.
@@ -159,36 +189,108 @@ namespace VsDbgMcp.Host
         }
 
         /// <summary>
-        /// Runs on the UI thread with the message filter installed, which is what keeps
-        /// calls made during break mode from failing with an RPC rejection.
+        /// Runs a shell command on the UI thread: the automation model's commands, which
+        /// work nowhere else. Bodies here are short and never read the debuggee; those
+        /// reads go through <see cref="DebuggeeAsync{T}(Func{T}, string)"/>.
         ///
-        /// Every tool passes through here, which makes it the one place that can record
-        /// what the agent did and the one place that can refuse to let it.
+        /// Every tool passes through here or there, which makes them the place that can
+        /// record what the agent did and the place that can refuse to let it.
         /// </summary>
         async Task<T> UIAsync<T>(Func<T> body, [CallerMemberName] string caller = null)
         {
             if (Activity.Paused) throw new InvalidOperationException(Activity.PausedMessage);
 
+            await _calls.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await _jtf.SwitchToMainThreadAsync();
+                Begin(caller);
+                return body();
+            }
+            finally
+            {
+                _calls.Release();
+            }
+        }
+
+        Task<OpResult> UIOpAsync(Func<OpResult> body, [CallerMemberName] string caller = null) =>
+            UIAsync(body, caller);
+
+        /// <summary>
+        /// Reads the debuggee on a pool thread, so that walking stacks, evaluating and
+        /// loading symbols cannot stop Visual Studio from responding however long they
+        /// take. The engine carries each of these calls out on the UI thread in a short
+        /// slice of its own, between the shell's messages.
+        ///
+        /// The UI thread is visited once first, briefly, to read the debugger's mode as
+        /// it is now: a read issued straight after go must not be served from the frame
+        /// the program last stopped in.
+        /// </summary>
+        Task<T> DebuggeeAsync<T>(Func<T> body, [CallerMemberName] string caller = null) =>
+            DebuggeeAsync<object, T>(() => null, _ => body(), caller);
+
+        const string ResumedDuringRead =
+            "The program started running while this was being read, so what was read may be from after it " +
+            "moved. Call wait to see where it stops, then read again.";
+
+        /// <summary>
+        /// The same, for a read that also needs something only the shell can say - which
+        /// project a file belongs to, which files hold breakpoints. That part runs on
+        /// the UI thread and must stay as short as the commands do.
+        /// </summary>
+        /// <param name="resumeFails">Whether a read that saw the program start running fails, rather than answering.</param>
+        async Task<T> DebuggeeAsync<TShell, T>(Func<TShell> fromShell, Func<TShell, T> body, string caller, bool resumeFails = true)
+        {
+            if (Activity.Paused) throw new InvalidOperationException(Activity.PausedMessage);
+
+            await _calls.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await _jtf.SwitchToMainThreadAsync();
+                Begin(caller);
+                _callMode.Value = ShellMode();
+                var epoch = _modeEpoch;
+                _callEpoch.Value = epoch;
+                var shell = fromShell();
+
+                var result = await _reader.RunAsync(() => body(shell)).ConfigureAwait(false);
+                if (resumeFails && _callMode.Value == DebugModes.Break && _modeEpoch != epoch)
+                    throw new InvalidOperationException(ResumedDuringRead);
+                return result;
+            }
+            finally
+            {
+                _calls.Release();
+            }
+        }
+
+        /// <summary>
+        /// Visits the UI thread for the shell's own state, without waiting behind a tool
+        /// call. For observations that must stay answerable while a long read runs.
+        /// </summary>
+        async Task<T> ShellAsync<T>(Func<T> body)
+        {
             await _jtf.SwitchToMainThreadAsync();
-            MessageFilter.EnsureInstalled();
+            return body();
+        }
+
+        void Begin(string caller)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
 
             // Only the commands that resume execution make Visual Studio come forward,
             // and only those should hand the foreground back afterwards. Arming on every
             // call would leave the guard primed to fire on a stop the person at the
             // keyboard caused, taking focus away from them mid-step.
-            if (ResumesExecution.Contains(Name(caller))) FocusGuard.Arm();
+            var tool = Name(caller);
+            if (ResumesExecution.Contains(tool)) FocusGuard.Arm();
 
             // Not recorded here: the shim reports the call once it has the reply, which is
             // the only place the text the agent was given exists. Recording here as well
             // would list everything twice, once without its result.
-            var tool = Name(caller);
             if (new[] { "attach", "detach", "pause", "go", "step", "stop", "restart", "freeze", "bp_remove", "bp_enable", "set_next", "run_to" }.Contains(tool))
                 Mark(tool + "-requested");
-            return body();
         }
-
-        Task<OpResult> UIOpAsync(Func<OpResult> body, [CallerMemberName] string caller = null) =>
-            UIAsync(body, caller);
 
         /// <summary>
         /// The tool name the agent used, worked out from the method serving it. The panel
@@ -297,22 +399,28 @@ namespace VsDbgMcp.Host
 
         // ---------------------------------------------------------------- status
 
-        public Task<HostStatus> GetStatusAsync(CancellationToken ct = default) => UIAsync(() =>
+        /// <summary>
+        /// What the shell knows is read on the UI thread; the watches and frames are
+        /// read from the debuggee, off it.
+        /// </summary>
+        public Task<HostStatus> GetStatusAsync(CancellationToken ct = default) => DebuggeeAsync(() =>
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-
-            var status = new HostStatus
+            return new HostStatus
             {
                 Observation = LiveObservation(),
                 InstanceId = InstanceId(),
                 Workspace = WorkspaceProbe.Read(_solution),
                 Mode = CurrentMode,
-                Watches = EvaluateWatches(),
                 Processes = DebuggedProcesses(),
                 BreakpointCount = BreakpointCount(),
                 ActiveConfiguration = ActiveConfiguration(),
                 StartupProject = StartupProjectName()
             };
+        }, status =>
+        {
+            MarkRemoteTargets(status.Processes);
+            status.Watches = EvaluateWatches(WatchBudget);
 
             var thread = CurrentThreadObject();
             if (thread != null)
@@ -338,7 +446,7 @@ namespace VsDbgMcp.Host
 
             if (CurrentMode == DebugModes.Break) status.PendingException = _sink.LastException;
             return status;
-        });
+        }, "GetStatusAsync", resumeFails: false);
 
         string InstanceId()
         {
@@ -376,11 +484,15 @@ namespace VsDbgMcp.Host
                 : null, null, "the startup project");
         }
 
+        /// <summary>
+        /// The processes the shell is debugging. Which of them run on another machine is
+        /// the engine's to say, and is marked off the UI thread by the reads that report it.
+        /// </summary>
         List<ProcessInfo> DebuggedProcesses()
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            var list = Read(() =>
+            return Read(() =>
             {
                 var processes = new List<ProcessInfo>();
                 foreach (EnvDTE.Process process in _dte.Debugger.DebuggedProcesses)
@@ -395,9 +507,6 @@ namespace VsDbgMcp.Host
                 }
                 return processes;
             }, new List<ProcessInfo>(), "the debugged processes");
-
-            MarkRemoteTargets(list);
-            return list;
         }
 
         /// <summary>
@@ -408,8 +517,7 @@ namespace VsDbgMcp.Host
         /// </summary>
         void MarkRemoteTargets(List<ProcessInfo> processes)
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-            if (processes.Count == 0) return;
+            if (processes == null || processes.Count == 0) return;
 
             Read<object>(() =>
             {
@@ -567,7 +675,7 @@ namespace VsDbgMcp.Host
             return Try(() => _dte.ExecuteCommand("Debug.Restart"), "Restarted.");
         });
 
-        public Task<List<ProcessInfo>> ProcessesAsync(bool includeLocal, CancellationToken ct = default) => UIAsync(() =>
+        public Task<List<ProcessInfo>> ProcessesAsync(bool includeLocal, CancellationToken ct = default) => DebuggeeAsync(() =>
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             var list = DebuggedProcesses();
@@ -589,7 +697,11 @@ namespace VsDbgMcp.Host
                 }
                 return list;
             }, list, "the local processes");
-        });
+        }, processes =>
+        {
+            MarkRemoteTargets(processes);
+            return processes;
+        }, "ProcessesAsync", resumeFails: false);
 
         public Task<OpResult> OpenDumpAsync(string path, CancellationToken ct = default) => UIOpAsync(() =>
         {
@@ -771,9 +883,11 @@ namespace VsDbgMcp.Host
             return Task.FromResult(OpResult.Good(null));
         }
 
-        Dictionary<string, string> EvaluateWatches()
+        /// <summary>How long the watches of one stop or one status may take altogether.</summary>
+        static readonly TimeSpan WatchBudget = TimeSpan.FromSeconds(1);
+
+        Dictionary<string, string> EvaluateWatches(TimeSpan budget)
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
             if (_watches.Length == 0 || CurrentMode != DebugModes.Break) return null;
 
             var values = new Dictionary<string, string>();
@@ -790,26 +904,35 @@ namespace VsDbgMcp.Host
                 return values;
             }
 
+            var clock = Stopwatch.StartNew();
             foreach (var expression in _watches)
             {
-                var result = ExpressionEval.Evaluate(chosen.Frame, new EvalOptions { Expression = expression, TimeoutMs = 1000 });
+                var left = (int)(budget - clock.Elapsed).TotalMilliseconds;
+                if (left < 200)
+                {
+                    values[expression] = "<not read: the watches of one stop get " + (int)budget.TotalSeconds +
+                                         " s altogether; read this one with eval>";
+                    continue;
+                }
+
+                var result = ExpressionEval.Evaluate(chosen.Frame, new EvalOptions { Expression = expression, TimeoutMs = left });
                 values[expression] = result.IsValid ? result.Value : "<" + (result.Error ?? "error") + ">";
             }
             return values;
         }
 
-        /// <summary>Called before a stop is broadcast, so watches ride along with it.</summary>
+        /// <summary>
+        /// Called in the stop event, on the UI thread, before the stop is broadcast, so
+        /// watches ride along with it and the stop goes out the moment it happens. A stop
+        /// sent late can reach the agent after the go that ended it, and read as a new
+        /// one. The watches are read here for that reason, and given one second in all.
+        /// </summary>
         public void FillWatches(StopEvent stop)
         {
             if (stop == null) return;
 
-            _jtf.Run(async () =>
-            {
-                await _jtf.SwitchToMainThreadAsync();
-                MessageFilter.EnsureInstalled();
-                stop.BreakpointId = _breakpoints.MatchLocation(stop.Frame);
-                if (_watches.Length > 0) stop.Watches = EvaluateWatches();
-            });
+            stop.BreakpointId = _breakpoints.MatchLocation(stop.Frame);
+            if (_watches.Length > 0 && ThreadHelper.CheckAccess()) stop.Watches = EvaluateWatches(WatchBudget);
         }
 
         /// <summary>
@@ -897,26 +1020,35 @@ namespace VsDbgMcp.Host
             // Only once the obvious frame has failed is walking the stack worth what it
             // costs the engine.
             var frames = FrameReader.FrameObjects(thread, Math.Max(from + 1, FrameSearchDepth));
-            if (from >= frames.Count)
+            try
             {
-                chosen.Refusal = FrameChoice.NoSuchFrame(from, frames.Count);
+                if (from >= frames.Count)
+                {
+                    chosen.Refusal = FrameChoice.NoSuchFrame(from, frames.Count);
+                    return chosen;
+                }
+
+                var nearest = FrameChoice.Nearest(from, frames.Count,
+                    i => FrameReader.CanEvaluate(frames[i]), i => FrameReader.HasSource(frames[i]));
+                var name = nearest == null ? null : FrameReader.NameOf(frames[nearest.Value]);
+
+                if (pinned.HasValue || nearest == null)
+                {
+                    chosen.Refusal = FrameChoice.CannotEvaluate(nearest, name, frames.Count);
+                    return chosen;
+                }
+
+                ComRelease.Release(chosen.Frame);
+                chosen.Index = nearest.Value;
+                chosen.Frame = frames[nearest.Value];
+                frames[nearest.Value] = null;
+                chosen.Note = FrameChoice.Moved(from, nearest.Value, name);
                 return chosen;
             }
-
-            var nearest = FrameChoice.Nearest(from, frames.Count,
-                i => FrameReader.CanEvaluate(frames[i]), i => FrameReader.HasSource(frames[i]));
-            var name = nearest == null ? null : FrameReader.NameOf(frames[nearest.Value]);
-
-            if (pinned.HasValue || nearest == null)
+            finally
             {
-                chosen.Refusal = FrameChoice.CannotEvaluate(nearest, name, frames.Count);
-                return chosen;
+                foreach (var frame in frames) ComRelease.Release(frame);
             }
-
-            chosen.Index = nearest.Value;
-            chosen.Frame = frames[nearest.Value];
-            chosen.Note = FrameChoice.Moved(from, nearest.Value, name);
-            return chosen;
         }
 
         /// <summary>

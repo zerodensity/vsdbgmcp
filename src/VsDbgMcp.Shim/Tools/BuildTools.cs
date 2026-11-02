@@ -70,8 +70,8 @@ namespace VsDbgMcp.Shim.Tools
             => On(instance, ct, async link =>
             {
                 var result = await link.Project.BuildOutputAsync(pattern, Math.Max(1, tail), ct).ConfigureAwait(false);
-                if (result == null || string.IsNullOrWhiteSpace(result.Text)) return "No build output.";
-                return result.Text;
+                if (result == null || (string.IsNullOrWhiteSpace(result.Text) && result.SearchedFromLine == null)) return "No build output.";
+                return Render.Pane(result, "Build");
             });
 
         [McpServerTool(Name = "config")]

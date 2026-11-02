@@ -49,7 +49,7 @@ namespace VsDbgMcp.Host
                             SessionGeneration = _sessionGeneration, StartedUtc = DateTime.UtcNow, ProcessName = target.Name, Pid = target.Pid,
                             Configuration = ActiveConfiguration(), Status = "starting", RetainRaw = retainRaw,
                             Path = Path.Combine(ProfileDirectory, id + ".diagsession"), MetadataPath = Path.Combine(ProfileDirectory, id + ".json"),
-                            Modules = ProfileModules(target.Pid) };
+                            Modules = new List<ModuleInfo>() };
                         try
                         {
                             using (var process = Process.GetProcessById(target.Pid))
@@ -62,6 +62,8 @@ namespace VsDbgMcp.Host
                         HostOperations.Store.Update(operation.OperationId, o => { o.State = "starting"; o.Message = "Capture " + id; });
                         return profile;
                     }).ConfigureAwait(false);
+                    var modules = await DebuggeeAsync(() => ProfileModules(collection.Pid), "ProfileBeginAsync").ConfigureAwait(false);
+                    lock (collection) collection.Modules = ProfileArtifacts.MergeModules(collection.Modules, modules);
                     // Starting/stopping a collector must never block the VS UI thread.
                     var failure = await _profiler.StartAsync(collection.Pid, collection.Path, collection.CollectorSessionId).ConfigureAwait(false);
                     collection.Status = failure == null ? "collecting" : "start-unknown";
@@ -226,14 +228,13 @@ namespace VsDbgMcp.Host
         {
             try
             {
-                var modules = await UIAsync(() =>
+                var modules = await DebuggeeAsync(() =>
                 {
-                    ThreadHelper.ThrowIfNotOnUIThread();
                     if (_activeProfile != collection || collection.HostEpoch != HostOperations.Store.Epoch ||
                         collection.SessionGeneration != _sessionGeneration || CurrentMode == DebugModes.Design)
                         return null;
                     return ProfileModules(collection.Pid);
-                }).ConfigureAwait(false);
+                }, "ReadProfileModulesAsync").ConfigureAwait(false);
                 if (modules == null) return;
                 lock (collection)
                 {

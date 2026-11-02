@@ -63,7 +63,7 @@ namespace VsDbgMcp.Host
             {
                 if (_pendingObservation == null || _pendingObservation.IsCompleted)
                 {
-                    _pendingObservation = Task.Run(() => UIAsync(LiveObservation));
+                    _pendingObservation = Task.Run(() => ShellAsync(LiveObservation));
                     // A timed-out observer must not leave an unobserved fault, or enqueue
                     // another UI walk while the original request is still blocked.
                     _ = _pendingObservation.ContinueWith(t => { var ignored = t.Exception; },
@@ -166,6 +166,43 @@ namespace VsDbgMcp.Host
             catch (Exception) { /* Startup information depends on project type; do not guess. */ }
         }
 
+        /// <summary>
+        /// What the debuggee says about a breakpoint the shell has just made: why it did not
+        /// bind, and what its message would print. Read off the UI thread. The breakpoint
+        /// exists whatever happens here, so a failure is reported on it rather than
+        /// failing the request.
+        /// </summary>
+        async Task ReadBackAsync(BreakpointRequest request, BreakpointInfo info, Unbound unbound)
+        {
+            try
+            {
+                await DebuggeeAsync(() =>
+                {
+                    if (unbound != null)
+                    {
+                        Explain(new List<Unbound> { unbound });
+
+                        // Binding is not settled the instant a breakpoint is created, so do
+                        // not claim it failed to bind when it simply has not bound yet. A
+                        // cause that is already known - no symbols, a source newer than the
+                        // binary - is worth saying now rather than one call later.
+                        if (CurrentMode != DebugModes.Design && info.BindState == BindFailure.NoCodeHere)
+                            info.BindState = "just created; bp_list confirms whether it bound";
+                    }
+
+                    if (!string.IsNullOrEmpty(request.LogMessage)) CheckLogExpressions(request, info);
+                    return info;
+                }, "BreakpointSetAsync").ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                if (unbound != null && info.BindState == null)
+                    info.BindState = "not bound yet; why could not be read: " + ex.Message;
+                if (!string.IsNullOrEmpty(request.LogMessage) && info.LogExpressions == null)
+                    info.LogCheckDeferred = ex.Message;
+            }
+        }
+
         public async Task<BreakpointInfo> BreakpointSetAsync(BreakpointRequest request, CancellationToken ct = default)
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
@@ -175,7 +212,9 @@ namespace VsDbgMcp.Host
             if (created) HostOperations.Run(item.OperationId, async () =>
             {
                 HostOperations.Store.Update(item.OperationId, o => o.State = "installing");
-                var info = await BreakpointCoreAsync(request, item.OperationId).ConfigureAwait(false);
+                var (info, unbound) = await BreakpointCoreAsync(request, item.OperationId).ConfigureAwait(false);
+                if (info.Id != 0 && (unbound != null || !string.IsNullOrEmpty(request.LogMessage)))
+                    await ReadBackAsync(request, info, unbound).ConfigureAwait(false);
                 var early = HostOperations.Store.Read(item.OperationId).Breakpoint;
                 if (info.Id == 0 && early?.Id > 0) info.Id = early.Id;
                 info.OperationId = item.OperationId;

@@ -59,7 +59,6 @@ namespace VsDbgMcp.Host
         protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
         {
             await JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
-            MessageFilter.EnsureInstalled();
 
             _pid = System.Diagnostics.Process.GetCurrentProcess().Id;
             _token = Guid.NewGuid().ToString("N");
@@ -187,6 +186,9 @@ namespace VsDbgMcp.Host
         /// </summary>
         internal void PumpTrace(string paneText) => _traceWatch?.PumpFromText(paneText);
 
+        /// <summary>Whether tracepoint records are being read as they arrive, so the pane need not be read whole.</summary>
+        internal bool TraceWatchAttached => _traceWatch?.Attached == true;
+
         IVsOutputWindowPane CreateOutputPane(IVsOutputWindow window)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
@@ -297,7 +299,7 @@ namespace VsDbgMcp.Host
             // asked for it rather than the person at the keyboard, give the foreground
             // back to whatever had it. The guard knows the difference because only an
             // agent command arms it.
-            FocusGuard.Restore(mode);
+            FocusGuard.Restore(mode, pid => _eventSink?.Debugs(pid) == true);
 
             PublishRecord();
             return Microsoft.VisualStudio.VSConstants.S_OK;

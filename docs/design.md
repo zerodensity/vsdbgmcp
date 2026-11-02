@@ -595,14 +595,37 @@ model is pleasanter to work in but does not expose the debugger.
 
 ## 9. Reliability
 
-- **COM re-entrancy is the main source of flakiness in VS extensions.** While
-  the debuggee is in break mode, DTE calls throw `RPC_E_CALL_REJECTED` and
-  `RPC_E_SERVERCALL_RETRYLATER`. Install an `IOleMessageFilter` and retry with
-  backoff on every hop, from the first commit. This is not a later hardening
-  pass; retrofitting it means touching every call site.
-- The pipe listener runs on a background thread. Only the specific COM call
-  hops to the UI thread, via `JoinableTaskFactory`. No long operation ever
-  occupies the UI thread.
+- **The message filter lives on the reading thread only.** The first versions
+  registered an `IOleMessageFilter` on Visual Studio's main thread, which replaced
+  Visual Studio's own filter for the whole process. Since 0.10.5 it is installed
+  on the thread that reads the debuggee, where it belongs: that thread's calls
+  cross to the UI thread, and the busy shell rejects them with
+  `RPC_E_SERVERCALL_RETRYLATER`. The debug engine interfaces return that as an
+  error code, which a reader takes for an empty stack, so the filter retries
+  instead, and a read rejected for the whole retry window fails rather than
+  answering.
+- **Nothing waits on the debuggee from the UI thread.** The pipe listener runs on
+  a background thread. Automation commands (break, go, step, attach, creating
+  breakpoints, build) run on the UI thread, because they work nowhere else, and
+  do nothing else there. Reads of the debuggee (stacks, evaluation, variables,
+  memory, modules, symbols, why a breakpoint did not bind) run on one
+  single-threaded apartment of their own: the engine carries each of its calls
+  out on the UI thread in a short slice, between the shell's messages. One gate
+  keeps tool calls in order, as running them all on the UI thread used to. No
+  lock is held across a call into the engine, because from the reading thread
+  that call waits for the UI thread. The one read left on the UI thread is a
+  stop's watch values, bounded to one second, because a stop has to go out the
+  moment it happens: sent late, it can reach the agent after the go that ended it.
+- **A person can resume while a read runs.** The UI thread used to make that
+  impossible. A read compares a count of mode changes before and after, and fails
+  when the program started running during it; a selection made across a change
+  is dropped.
+- **Nothing on the UI thread waits on a debuggee's window.** In break mode every
+  thread of the debugged processes is suspended. Activating such a window with
+  attached input queues, or asking it to draw itself, waits forever. Handing the
+  foreground back from the UI thread to a stopped debuggee's window froze Visual
+  Studio at 0 % CPU until it was killed; it now happens from a thread of its own,
+  and never to a stopped debuggee. `capture` waits at most ten seconds.
 - COM event sinks must be rooted in a field. An unrooted `DebuggerEvents` sink
   is collected and the events stop arriving, intermittently and much later.
 - **Focus stealing.** VS takes the foreground on launch and on break, which is
@@ -635,9 +658,9 @@ first time an agent attaches, without taking focus.
 **Pause is a kill switch.** Every tool checks it and refuses with an explanation
 saying a person stopped it, so an agent gets a reason rather than a hang.
 
-The kill switch works because every tool already passes through one helper on its
-way to the UI thread — the same choke point that switches threads and installs
-the message filter, which is why there is one place to refuse.
+The kill switch works because every tool already passes through one of two helpers,
+one for automation commands and one for reads of the debuggee. They are where calls
+are put in order and switch threads, which is why there is one place to refuse.
 
 **The audit trail is reported by the shim, not recorded in the extension.** The
 text an agent was given only exists on the shim side, so anything the extension
@@ -802,9 +825,8 @@ wants.
 **VSTHRD010 is suppressed, with the reason recorded in the project file.** It
 fires on lambdas because it analyses each as its own context and cannot see
 that the enclosing helper already switched threads. Every automation call goes
-through one of two helpers that await `SwitchToMainThreadAsync` and install the
-message filter first; nothing reaches the DTE by another path. The rest of the
-threading rules stay on.
+through a helper that awaits `SwitchToMainThreadAsync` first; nothing reaches the
+DTE by another path. The rest of the threading rules stay on.
 
 **Expression evaluation goes through the debug engine, not the automation
 model.** `EnvDTE.Debugger.GetExpression` always permits function evaluation,

@@ -9,7 +9,8 @@ namespace VsDbgMcp.Host
     /// Reads stack frames out of the debug engine.
     ///
     /// These interfaces report failure through HRESULTs rather than exceptions, so the
-    /// code checks return codes and there is nothing here to catch.
+    /// code checks return codes and there is nothing here to catch. Every engine object
+    /// read only to describe a frame is released as soon as the description is made.
     /// </summary>
     static class FrameReader
     {
@@ -20,6 +21,9 @@ namespace VsDbgMcp.Host
             enum_FRAMEINFO_FLAGS.FIF_FRAME |
             enum_FRAMEINFO_FLAGS.FIF_FUNCNAME_MODULE |
             enum_FRAMEINFO_FLAGS.FIF_FUNCNAME_ARGS;
+
+        /// <summary>The same, for a frame already in hand, which needs no second reference to itself.</summary>
+        const enum_FRAMEINFO_FLAGS NameFlags = Flags & ~enum_FRAMEINFO_FLAGS.FIF_FRAME;
 
         public static Frame TopFrame(IDebugThread2 thread)
         {
@@ -33,6 +37,7 @@ namespace VsDbgMcp.Host
             foreach (var info in Enumerate(thread, count))
             {
                 result.Add(Describe(info, result.Count));
+                ComRelease.Release(info.m_pFrame);
                 if (result.Count >= count) break;
             }
             return result;
@@ -46,6 +51,7 @@ namespace VsDbgMcp.Host
             foreach (var info in Enumerate(thread, index + 1))
             {
                 if (position++ == index) return info.m_pFrame;
+                ComRelease.Release(info.m_pFrame);
             }
             return null;
         }
@@ -67,16 +73,28 @@ namespace VsDbgMcp.Host
         /// top of a paused stack has no expression context, and neither does a frame the
         /// engine has no symbols for.
         /// </summary>
-        public static bool CanEvaluate(IDebugStackFrame2 frame) =>
-            frame != null && frame.GetExpressionContext(out var context) == VSConstants.S_OK && context != null;
+        public static bool CanEvaluate(IDebugStackFrame2 frame)
+        {
+            if (frame == null || frame.GetExpressionContext(out var context) != VSConstants.S_OK || context == null)
+                return false;
+
+            ComRelease.Release(context);
+            return true;
+        }
 
         /// <summary>
         /// Whether this frame has source of its own. What separates a frame of the
         /// program being debugged from the system libraries under it, which have an
         /// expression context and no locals to read in it.
         /// </summary>
-        public static bool HasSource(IDebugStackFrame2 frame) =>
-            frame != null && frame.GetDocumentContext(out var context) == VSConstants.S_OK && context != null;
+        public static bool HasSource(IDebugStackFrame2 frame)
+        {
+            if (frame == null || frame.GetDocumentContext(out var context) != VSConstants.S_OK || context == null)
+                return false;
+
+            ComRelease.Release(context);
+            return true;
+        }
 
         /// <summary>
         /// The frame's function on its own, for a message that has to point at one. No
@@ -87,7 +105,7 @@ namespace VsDbgMcp.Host
             if (frame == null) return null;
 
             var info = new FRAMEINFO[1];
-            if (frame.GetInfo(Flags, 10, info) != VSConstants.S_OK) return null;
+            if (frame.GetInfo(NameFlags, 10, info) != VSConstants.S_OK) return null;
             return info[0].m_bstrFuncName;
         }
 
@@ -98,12 +116,19 @@ namespace VsDbgMcp.Host
             if (thread.EnumFrameInfo(Flags, 10, out var enumerator) != VSConstants.S_OK || enumerator == null)
                 yield break;
 
-            var buffer = new FRAMEINFO[1];
-            for (var produced = 0; produced < count; produced++)
+            try
             {
-                uint fetched = 0;
-                if (enumerator.Next(1, buffer, ref fetched) != VSConstants.S_OK || fetched != 1) yield break;
-                yield return buffer[0];
+                var buffer = new FRAMEINFO[1];
+                for (var produced = 0; produced < count; produced++)
+                {
+                    uint fetched = 0;
+                    if (enumerator.Next(1, buffer, ref fetched) != VSConstants.S_OK || fetched != 1) yield break;
+                    yield return buffer[0];
+                }
+            }
+            finally
+            {
+                ComRelease.Release(enumerator);
             }
         }
 
@@ -132,7 +157,7 @@ namespace VsDbgMcp.Host
             var frame = new Frame { Index = index };
 
             var info = new FRAMEINFO[1];
-            if (stackFrame.GetInfo(Flags, 10, info) == VSConstants.S_OK)
+            if (stackFrame.GetInfo(NameFlags, 10, info) == VSConstants.S_OK)
             {
                 frame.Function = info[0].m_bstrFuncName;
                 frame.Module = info[0].m_bstrModule;
@@ -148,22 +173,36 @@ namespace VsDbgMcp.Host
         {
             if (stackFrame.GetDocumentContext(out var context) != VSConstants.S_OK || context == null) return;
 
-            if (context.GetName(enum_GETNAME_TYPE.GN_FILENAME, out var name) == VSConstants.S_OK)
-                frame.File = name;
+            try
+            {
+                if (context.GetName(enum_GETNAME_TYPE.GN_FILENAME, out var name) == VSConstants.S_OK)
+                    frame.File = name;
 
-            var begin = new TEXT_POSITION[1];
-            var end = new TEXT_POSITION[1];
-            if (context.GetStatementRange(begin, end) == VSConstants.S_OK)
-                frame.Line = (int)begin[0].dwLine + 1; // the engine counts from zero
+                var begin = new TEXT_POSITION[1];
+                var end = new TEXT_POSITION[1];
+                if (context.GetStatementRange(begin, end) == VSConstants.S_OK)
+                    frame.Line = (int)begin[0].dwLine + 1; // the engine counts from zero
+            }
+            finally
+            {
+                ComRelease.Release(context);
+            }
         }
 
         static string ReadAddress(IDebugStackFrame2 stackFrame)
         {
             if (stackFrame.GetCodeContext(out var context) != VSConstants.S_OK || context == null) return null;
 
-            var info = new CONTEXT_INFO[1];
-            if (context.GetInfo(enum_CONTEXT_INFO_FIELDS.CIF_ADDRESS, info) != VSConstants.S_OK) return null;
-            return info[0].bstrAddress;
+            try
+            {
+                var info = new CONTEXT_INFO[1];
+                if (context.GetInfo(enum_CONTEXT_INFO_FIELDS.CIF_ADDRESS, info) != VSConstants.S_OK) return null;
+                return info[0].bstrAddress;
+            }
+            finally
+            {
+                ComRelease.Release(context);
+            }
         }
     }
 }

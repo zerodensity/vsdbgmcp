@@ -12,9 +12,9 @@ namespace VsDbgMcp.Host
     /// Screenshots the debuggee's window.
     ///
     /// Uses PrintWindow with full-content rendering, which asks the window to draw
-    /// itself. That keeps working when the window is behind others and when the
-    /// process is stopped at a breakpoint and cannot paint - which is exactly when
-    /// you want to know what was on screen.
+    /// itself. That keeps working when the window is behind others. It waits on the
+    /// thread that owns the window, which a breakpoint may have suspended, so the
+    /// capture runs on a thread of its own and the caller waits only so long.
     /// </summary>
     static class WindowCapture
     {
@@ -33,7 +33,30 @@ namespace VsDbgMcp.Host
         [StructLayout(LayoutKind.Sequential)]
         struct RECT { public int Left, Top, Right, Bottom; }
 
-        public static CaptureResult Capture(int pid, int[] region)
+        /// <summary>
+        /// Captures on a thread of its own and waits at most <paramref name="limit"/>.
+        /// A window whose thread is suspended keeps that thread waiting until it draws;
+        /// it is left to finish on its own rather than holding the caller.
+        /// </summary>
+        public static CaptureResult Capture(int pid, int[] region, TimeSpan limit)
+        {
+            CaptureResult result = null;
+            var thread = new System.Threading.Thread(() => result = Capture(pid, region))
+            {
+                IsBackground = true,
+                Name = "vsdbgmcp capture"
+            };
+            thread.Start();
+            if (thread.Join(limit)) return result;
+
+            return new CaptureResult
+            {
+                Error = "The window did not draw itself within " + (int)limit.TotalSeconds + " seconds. A program " +
+                        "stopped in the debugger cannot draw; resume it with go and capture while it runs."
+            };
+        }
+
+        static CaptureResult Capture(int pid, int[] region)
         {
             try
             {

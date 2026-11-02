@@ -18,11 +18,16 @@ namespace VsDbgMcp.Host
     {
         // ---------------------------------------------------------------- breakpoints
 
-        Task<BreakpointInfo> BreakpointCoreAsync(BreakpointRequest request, string operationId) => UIAsync(() =>
+        /// <summary>
+        /// Makes the breakpoint, on the UI thread, where the automation model works. Why a
+        /// breakpoint that did not bind failed to is read from the debuggee afterwards,
+        /// off the UI thread, from what this hands back.
+        /// </summary>
+        Task<(BreakpointInfo Info, Unbound Unbound)> BreakpointCoreAsync(BreakpointRequest request, string operationId) => UIAsync<(BreakpointInfo, Unbound)>(() =>
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            if (!HostOperations.Store.TryStartCommand(operationId)) return Failed(request, "Breakpoint record closed before dispatch.");
+            if (!HostOperations.Store.TryStartCommand(operationId)) return (Failed(request, "Breakpoint record closed before dispatch."), null);
             try
             {
                 Breakpoints added;
@@ -57,7 +62,7 @@ namespace VsDbgMcp.Host
                 }
 
                 var created = added != null && added.Count > 0 ? added.Item(1) : NewestMatching(request);
-                if (created == null) return Failed(request, "Visual Studio did not create the breakpoint.");
+                if (created == null) return (Failed(request, "Visual Studio did not create the breakpoint."), null);
                 var earlyId = _breakpoints.IdFor(created);
                 HostOperations.Store.Update(operationId, o => { o.State = "created"; o.Breakpoint = new BreakpointInfo { Id = earlyId, OperationId = operationId, Pending = true }; });
                 Mark(string.IsNullOrEmpty(request.LogMessage) ? "breakpoint-installed" : "tracepoint-installed", request.Function ?? request.File);
@@ -65,7 +70,7 @@ namespace VsDbgMcp.Host
                 if (!string.IsNullOrEmpty(request.LogMessage))
                 {
                     var tracepoint = created as EnvDTE80.Breakpoint2;
-                    if (tracepoint == null) return Failed(request, "This breakpoint cannot be made a tracepoint.");
+                    if (tracepoint == null) return (Failed(request, "This breakpoint cannot be made a tracepoint."), null);
 
                     // The id has to exist before the message does. Every record this
                     // tracepoint writes carries it, and that marker is the only thing
@@ -87,7 +92,8 @@ namespace VsDbgMcp.Host
                     }
                 }
 
-                var info = Describe(created, LoadedModules());
+                var unbound = new List<Unbound>();
+                var info = Describe(created, unbound);
                 info.Kind = request.Kind;
                 if (request.Kind == BreakpointKind.Data)
                 {
@@ -100,20 +106,11 @@ namespace VsDbgMcp.Host
                     info.Module = request.Module;
                 }
 
-                if (!string.IsNullOrEmpty(request.LogMessage)) CheckLogExpressions(request, info);
-
-                // Binding is not settled the instant a breakpoint is created, so do not
-                // claim it failed to bind when it simply has not bound yet. A cause that
-                // is already known - no symbols, a source newer than the binary - is
-                // worth saying now rather than one call later.
-                if (!info.Bound && CurrentMode != DebugModes.Design && info.BindState == BindFailure.NoCodeHere)
-                    info.BindState = "just created; bp_list confirms whether it bound";
-
-                return info;
+                return (info, unbound.FirstOrDefault());
             }
             catch (Exception ex)
             {
-                return Failed(request, ex.Message);
+                return (Failed(request, ex.Message), null);
             }
             finally { HostOperations.Store.CommandReturned(operationId); }
         });
@@ -178,8 +175,6 @@ namespace VsDbgMcp.Host
         /// </summary>
         void CheckLogExpressions(BreakpointRequest request, BreakpointInfo info)
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
             var expressions = TraceMessage.Expressions(request.LogMessage);
             if (expressions.Count == 0) return;
 
@@ -259,7 +254,17 @@ namespace VsDbgMcp.Host
             BindState = reason
         };
 
-        BreakpointInfo Describe(Breakpoint breakpoint, Lazy<List<ModuleInfo>> modules)
+        /// <summary>
+        /// A breakpoint that did not bind, with the project the shell says its file belongs
+        /// to. Why it did not bind needs the loaded modules, read off the UI thread.
+        /// </summary>
+        sealed class Unbound
+        {
+            public BreakpointInfo Info;
+            public string Project;
+        }
+
+        BreakpointInfo Describe(Breakpoint breakpoint, List<Unbound> unbound)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -291,7 +296,7 @@ namespace VsDbgMcp.Host
             // often it has been.
             var bound = Read(() => breakpoint.Children, null, "the bound breakpoints");
             info.HitCount = Read(() => Hits(bound), 0, "the hit count");
-            ReadBindState(bound, info, modules);
+            ReadBindState(bound, info, unbound);
             return info;
         }
 
@@ -321,7 +326,7 @@ namespace VsDbgMcp.Host
         /// failure in native debugging, because everything downstream looks like the
         /// code was not reached.
         /// </summary>
-        void ReadBindState(Breakpoints bound, BreakpointInfo info, Lazy<List<ModuleInfo>> modules)
+        void ReadBindState(Breakpoints bound, BreakpointInfo info, List<Unbound> unbound)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -339,7 +344,23 @@ namespace VsDbgMcp.Host
             }
 
             info.Bound = false;
-            info.BindState = WhyNotBound(info, modules);
+            unbound.Add(new Unbound
+            {
+                Info = info,
+                Project = info.Kind == BreakpointKind.Location ? ProjectOf(info.File) : null
+            });
+        }
+
+        /// <summary>
+        /// Says why each breakpoint did not bind. Reads the debuggee, so off the UI thread;
+        /// the loaded modules are read once however many breakpoints ask.
+        /// </summary>
+        void Explain(List<Unbound> unbound)
+        {
+            if (unbound.Count == 0) return;
+
+            var modules = NativeReader.ReadModules(_sink.CurrentProgram);
+            foreach (var each in unbound) each.Info.BindState = WhyNotBound(each.Info, each.Project, modules);
         }
 
         /// <summary>
@@ -347,50 +368,44 @@ namespace VsDbgMcp.Host
         /// needs the module the file was built into, so a file that belongs to no loaded
         /// module gets the general answer.
         /// </summary>
-        string WhyNotBound(BreakpointInfo info, Lazy<List<ModuleInfo>> modules)
+        static string WhyNotBound(BreakpointInfo info, string project, List<ModuleInfo> modules)
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
             if (info.Kind != BreakpointKind.Location || string.IsNullOrEmpty(info.File))
             {
                 // A function breakpoint in a module the debuggee loaded an older copy of
                 // does not bind either, and it carries no file to look an owner up from.
                 if (info.Kind == BreakpointKind.Function)
-                    info.StaleModules = BindFailure.StaleModules(modules.Value);
+                    info.StaleModules = BindFailure.StaleModules(modules);
 
                 return BindFailure.NoCodeHere;
             }
 
-            var owner = OwningModule(info.File, modules.Value);
+            var owner = OwningModule(project, modules);
             var written = SourceFreshness.LastWritten(info.File);
 
             // A plugin loaded by a host whose solution does not hold the plugin's
             // project has no owner to name, which is exactly the session where a stale
             // deployed binary swallows every breakpoint. Say that the cause is present
             // rather than pinning it on this file.
-            if (owner == null) info.StaleModules = BindFailure.StaleModules(modules.Value);
+            if (owner == null) info.StaleModules = BindFailure.StaleModules(modules);
 
             return BindFailure.Explain(info.File, owner,
                 SourceFreshness.WrittenAfter(written, ModuleIdentity.BinaryBuilt(owner)),
                 SourceFreshness.Show(written));
         }
 
-        /// <summary>
-        /// The loaded modules, read at most once however many breakpoints ask for them.
-        /// Walking the engine's module list and reading every binary's timestamp is not
-        /// free, and a list in which everything bound needs none of it.
-        /// </summary>
-        Lazy<List<ModuleInfo>> LoadedModules() =>
-            new Lazy<List<ModuleInfo>>(() => NativeReader.ReadModules(_sink.CurrentProgram));
-
-        public Task<List<BreakpointInfo>> BreakpointListAsync(CancellationToken ct = default) => UIAsync(() =>
+        public Task<List<BreakpointInfo>> BreakpointListAsync(CancellationToken ct = default) => DebuggeeAsync(() =>
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             var list = new List<BreakpointInfo>();
-            var modules = LoadedModules();
-            foreach (Breakpoint breakpoint in _dte.Debugger.Breakpoints) list.Add(Describe(breakpoint, modules));
-            return list;
-        });
+            var unbound = new List<Unbound>();
+            foreach (Breakpoint breakpoint in _dte.Debugger.Breakpoints) list.Add(Describe(breakpoint, unbound));
+            return (list, unbound);
+        }, described =>
+        {
+            Explain(described.unbound);
+            return described.list;
+        }, "BreakpointListAsync");
 
         public Task<OpResult> BreakpointRemoveAsync(int id, CancellationToken ct = default) => UIOpAsync(() =>
         {
@@ -413,7 +428,7 @@ namespace VsDbgMcp.Host
             // Where the pane cannot be watched as it fills, the records are still in it.
             // Reading them now is what makes this work at all on such a Visual Studio;
             // where the watch did attach this finds nothing new and costs a string.
-            _package.PumpTrace(DebugPaneText());
+            if (!_package.TraceWatchAttached) _package.PumpTrace(DebugPaneText());
 
             // Then try to attach again, because the pane does not exist until something
             // has been debugged and the only other attempt is when a tracepoint is set.
@@ -713,9 +728,8 @@ namespace VsDbgMcp.Host
 
         // ---------------------------------------------------------------- threads
 
-        public Task<List<ThreadSummary>> ThreadsAsync(int frameDepth, string process, CancellationToken ct = default) => UIAsync(() =>
+        public Task<List<ThreadSummary>> ThreadsAsync(int frameDepth, string process, CancellationToken ct = default) => DebuggeeAsync(() =>
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
             var summaries = new List<ThreadSummary>();
             var currentId = ThreadIdOf(CurrentThreadObject());
 
@@ -743,10 +757,8 @@ namespace VsDbgMcp.Host
             return summaries;
         });
 
-        public Task<List<Frame>> StackAsync(int? threadId, int count, CancellationToken ct = default) => UIAsync(() =>
+        public Task<List<Frame>> StackAsync(int? threadId, int count, CancellationToken ct = default) => DebuggeeAsync(() =>
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
             // A running thread has no frames to enumerate, and an empty list reads as a
             // thread that is somehow sitting on nothing rather than a program that is
             // still going.
@@ -763,7 +775,7 @@ namespace VsDbgMcp.Host
         });
 
         public Task<OpResult> SelectAsync(int? threadId, int? frameIndex, string process, CancellationToken ct = default) =>
-            UIOpAsync(() => SelectCore(threadId, frameIndex, process));
+            DebuggeeAsync(() => SelectCore(threadId, frameIndex, process));
 
         /// <summary>
         /// Moving the session's attention, already on the UI thread, so anything running
@@ -772,8 +784,6 @@ namespace VsDbgMcp.Host
         /// </summary>
         OpResult SelectCore(int? threadId, int? frameIndex, string process)
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
             // Naming a process without a thread means "whichever of its threads is
             // current", which is what a caller who has only seen a process list can ask.
             if (!string.IsNullOrWhiteSpace(process) && !threadId.HasValue)
@@ -795,37 +805,22 @@ namespace VsDbgMcp.Host
                                         "Threads in this session:\n" + KnownThreads());
                 }
 
-                _selectedThreadId = threadId.Value;
+                Choose(() => _selectedThreadId = threadId.Value);
 
                 // Keep the Visual Studio UI on the same thread and process, so a person
-                // looking at the window sees what the agent is looking at. Cosmetic, so a
-                // refusal here must not fail the call.
-                Read<object>(() =>
-                {
-                    foreach (EnvDTE.Process p in _dte.Debugger.DebuggedProcesses)
-                    {
-                        foreach (EnvDTE.Program program in p.Programs)
-                        {
-                            foreach (EnvDTE.Thread t in program.Threads)
-                            {
-                                if (t.ID != threadId.Value) continue;
-                                _dte.Debugger.CurrentProcess = p;
-                                _dte.Debugger.CurrentProgram = program;
-                                _dte.Debugger.CurrentThread = t;
-                                return null;
-                            }
-                        }
-                    }
-                    return null;
-                }, null, "the debugged processes");
+                // looking at the window sees what the agent is looking at.
+                ShowInShell(threadId.Value);
             }
 
             // A frame named here is the caller's choice, and no read is allowed to move
             // off it afterwards even when it turns out to be one nothing can be read in.
             if (frameIndex.HasValue)
             {
-                _selectedFrame = Math.Max(0, frameIndex.Value);
-                _framePinned = true;
+                Choose(() =>
+                {
+                    _selectedFrame = Math.Max(0, frameIndex.Value);
+                    _framePinned = true;
+                });
             }
 
             var selected = AllThreads().FirstOrDefault(t => ThreadIdOf(t) == _selectedThreadId);
@@ -835,10 +830,53 @@ namespace VsDbgMcp.Host
                                  " in " + where + ", frame " + _selectedFrame);
         }
 
-        public Task<OpResult> FreezeAsync(int threadId, bool frozen, CancellationToken ct = default) => UIOpAsync(() =>
+        /// <summary>
+        /// Records a choice of thread or frame, unless the debugger changed mode since this
+        /// call read it. The change clears the selection, and a choice landing after it
+        /// would pin a frame of a program that has moved on.
+        /// </summary>
+        void Choose(Action choose)
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
+            lock (_selectionGate)
+            {
+                if (_modeEpoch != _callEpoch.Value)
+                    throw new InvalidOperationException(ResumedDuringRead);
+                choose();
+            }
+        }
 
+        /// <summary>
+        /// Moves the shell's own current thread to the one the agent selected. Cosmetic,
+        /// so it is queued on the UI thread and nothing waits for it or fails with it.
+        /// </summary>
+        void ShowInShell(int threadId)
+        {
+            _jtf.RunAsync(async () =>
+            {
+                await _jtf.SwitchToMainThreadAsync();
+                Read<object>(() =>
+                {
+                    foreach (EnvDTE.Process p in _dte.Debugger.DebuggedProcesses)
+                    {
+                        foreach (EnvDTE.Program program in p.Programs)
+                        {
+                            foreach (EnvDTE.Thread t in program.Threads)
+                            {
+                                if (t.ID != threadId) continue;
+                                _dte.Debugger.CurrentProcess = p;
+                                _dte.Debugger.CurrentProgram = program;
+                                _dte.Debugger.CurrentThread = t;
+                                return null;
+                            }
+                        }
+                    }
+                    return null;
+                }, null, "the debugged processes");
+            }).FileAndForget("vsdbgmcp/select");
+        }
+
+        public Task<OpResult> FreezeAsync(int threadId, bool frozen, CancellationToken ct = default) => DebuggeeAsync(() =>
+        {
             var thread = AllThreads().FirstOrDefault(t => ThreadIdOf(t) == threadId);
             if (thread == null)
             {
@@ -863,9 +901,8 @@ namespace VsDbgMcp.Host
 
         // ---------------------------------------------------------------- evaluation
 
-        public Task<List<EvalResult>> EvalAsync(EvalOptions options, CancellationToken ct = default) => UIAsync(() =>
+        public Task<List<EvalResult>> EvalAsync(EvalOptions options, CancellationToken ct = default) => DebuggeeAsync(() =>
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
             var results = new List<EvalResult>();
 
             // Before anything about the expression, because a debuggee that is running is
@@ -975,7 +1012,6 @@ namespace VsDbgMcp.Host
         /// </summary>
         string WhyTypeModuleWontDo(string typeModule)
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
             if (string.IsNullOrWhiteSpace(typeModule)) return null;
 
             return ModuleQualifier.NotLoaded(typeModule, LoadedModuleNames());
@@ -991,8 +1027,6 @@ namespace VsDbgMcp.Host
         /// </summary>
         IDebugProgram2 ReadingProgram()
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
             var thread = CurrentThreadObject();
             if (thread != null && thread.GetProgram(out var theirs) == VSConstants.S_OK && theirs != null)
                 return theirs;
@@ -1006,8 +1040,6 @@ namespace VsDbgMcp.Host
         /// </summary>
         List<string> LoadedModuleNames()
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
             var names = new List<string>();
             foreach (var module in NativeReader.Enumerate(ReadingProgram()))
             {
@@ -1033,10 +1065,8 @@ namespace VsDbgMcp.Host
             return result;
         }
 
-        public Task<VarsResult> VarsAsync(string scope, int depth, string filter, bool sharedAddresses, CancellationToken ct = default) => UIAsync(() =>
+        public Task<VarsResult> VarsAsync(string scope, int depth, string filter, bool sharedAddresses, CancellationToken ct = default) => DebuggeeAsync(() =>
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
             var chosen = CurrentFrame();
             if (chosen.Refusal != null) return new VarsResult { Message = chosen.Refusal, Failed = true };
 
@@ -1052,10 +1082,8 @@ namespace VsDbgMcp.Host
         /// the source are read at all, which nobody does until a value has already
         /// misled them.
         /// </summary>
-        public Task<FrameReport> FrameAsync(int? thread, int? frame, int maxVariables, CancellationToken ct = default) => UIAsync(() =>
+        public Task<FrameReport> FrameAsync(int? thread, int? frame, int maxVariables, CancellationToken ct = default) => DebuggeeAsync(() =>
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
             // Naming a thread here does what select would have done, and leaves it
             // chosen afterwards, because reading one frame of a worker is nearly always
             // followed by reading something else in it.
@@ -1124,8 +1152,6 @@ namespace VsDbgMcp.Host
         VarSection Section(ChosenFrame chosen, string scope, int max, string named,
             List<VarNode> alreadyShown)
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
             var read = ExpressionEval.Scope(chosen.Frame, scope, 1, null, true);
             var nodes = Excluding(read.Nodes, alreadyShown);
             var section = new VarSection { Name = named, Nodes = nodes };
@@ -1197,8 +1223,6 @@ namespace VsDbgMcp.Host
         /// </summary>
         VarNode ThisObject(ChosenFrame chosen)
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
             var read = Evaluate(chosen, new EvalOptions { Expression = "this" });
             if (read == null) return null;
 
@@ -1244,8 +1268,6 @@ namespace VsDbgMcp.Host
         /// </summary>
         void DescribeWhereTheCodeCameFrom(FrameReport report)
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
             var file = report.Frame?.File;
 
             // Describing every module means a file time each, and on a process with
@@ -1321,7 +1343,6 @@ namespace VsDbgMcp.Host
         /// </summary>
         ModuleInfo ModuleTheFrameNamed(string name)
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
             if (string.IsNullOrEmpty(name)) return null;
 
             // A frame names its module by full path and the module list names it by file
@@ -1349,10 +1370,8 @@ namespace VsDbgMcp.Host
             return cut < 0 ? path : path.Substring(cut + 1);
         }
 
-        public Task<VarsResult> ExpandAsync(string reference, int depth, string typeModule, int? index, string key, CancellationToken ct = default) => UIAsync(() =>
+        public Task<VarsResult> ExpandAsync(string reference, int depth, string typeModule, int? index, string key, CancellationToken ct = default) => DebuggeeAsync(() =>
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
             var chosen = CurrentFrame();
             if (chosen.Refusal != null) return new VarsResult { Message = chosen.Refusal, Failed = true };
 
@@ -1371,10 +1390,8 @@ namespace VsDbgMcp.Host
 
         // ---------------------------------------------------------------- native
 
-        public Task<MemoryResult> MemoryAsync(string addressOrExpression, int size, string format, CancellationToken ct = default) => UIAsync(() =>
+        public Task<MemoryResult> MemoryAsync(string addressOrExpression, int size, string format, CancellationToken ct = default) => DebuggeeAsync(() =>
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
             var chosen = CurrentFrame();
             if (chosen.Refusal != null)
                 return new MemoryResult { Address = addressOrExpression, Length = size, Error = chosen.Refusal };
@@ -1385,10 +1402,8 @@ namespace VsDbgMcp.Host
             return memory;
         });
 
-        public Task<RegistersResult> RegistersAsync(string group, CancellationToken ct = default) => UIAsync(() =>
+        public Task<RegistersResult> RegistersAsync(string group, CancellationToken ct = default) => DebuggeeAsync(() =>
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
             var chosen = CurrentFrame();
             if (chosen.Refusal != null) return new RegistersResult { Message = chosen.Refusal };
 
@@ -1400,10 +1415,8 @@ namespace VsDbgMcp.Host
             };
         });
 
-        public Task<DisasmResult> DisasmAsync(string address, int count, CancellationToken ct = default) => UIAsync(() =>
+        public Task<DisasmResult> DisasmAsync(string address, int count, CancellationToken ct = default) => DebuggeeAsync(() =>
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
             var chosen = CurrentFrame();
             if (chosen.Refusal != null) return new DisasmResult { Message = chosen.Refusal };
 
@@ -1415,12 +1428,10 @@ namespace VsDbgMcp.Host
             };
         });
 
-        public Task<ModulesResult> ModulesAsync(string filter, CancellationToken ct = default) => UIAsync(() =>
+        public Task<ModulesResult> ModulesAsync(string filter, CancellationToken ct = default) => DebuggeeAsync(BreakpointProjects, projects =>
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
             var loaded = NativeReader.ReadModules(ReadingProgram());
-            MarkSourcesNewerThanBinaries(loaded);
+            MarkSourcesNewerThanBinaries(loaded, projects);
 
             return new ModulesResult
             {
@@ -1431,12 +1442,10 @@ namespace VsDbgMcp.Host
                 Filter = filter,
                 Process = ProcessIdentity.Of(ReadingProgram()).Describe()
             };
-        });
+        }, "ModulesAsync");
 
-        public Task<SymbolResult> SymbolsAsync(string module, bool load, CancellationToken ct = default) => UIAsync(() =>
+        public Task<SymbolResult> SymbolsAsync(string module, bool load, CancellationToken ct = default) => DebuggeeAsync(() =>
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
             // Symbols belong to a module and a module belongs to a process, so this
             // follows the caller's pick the way modules does. Reading the process that
             // stopped answered about a different program's copy of the same name, and
@@ -1492,10 +1501,8 @@ namespace VsDbgMcp.Host
 
         // ---------------------------------------------------------------- scratch
 
-        public Task<ScratchResult> ScratchAsync(int bytes, string type, CancellationToken ct = default) => UIAsync(() =>
+        public Task<ScratchResult> ScratchAsync(int bytes, string type, CancellationToken ct = default) => DebuggeeAsync(() =>
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
             var chosen = CurrentFrame();
             if (chosen.Refusal != null) return Held(chosen.Refusal);
 
@@ -1511,28 +1518,26 @@ namespace VsDbgMcp.Host
             var block = Scratch.Allocate(chosen.Frame, bytes, type, out var error);
             if (block == null) return Held(error);
 
-            _scratch.Add(block);
-            return new ScratchResult { Block = block, Outstanding = _scratch.ToList() };
+            lock (_scratch) _scratch.Add(block);
+            return new ScratchResult { Block = block, Outstanding = Outstanding() };
         });
 
-        public Task<ScratchResult> ScratchFreeAsync(string address, CancellationToken ct = default) => UIAsync(() =>
+        public Task<ScratchResult> ScratchFreeAsync(string address, CancellationToken ct = default) => DebuggeeAsync(() =>
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
-            if (_scratch.Count == 0) return Held("Nothing is allocated.");
+            if (Outstanding().Count == 0) return Held("Nothing is allocated.");
 
             var chosen = CurrentFrame();
             if (chosen.Refusal != null) return Held(chosen.Refusal);
 
             var everything = string.Equals(address, "all", StringComparison.OrdinalIgnoreCase);
-            var wanted = _scratch.Where(b => everything || SameAddress(b.Address, address)).ToList();
+            var wanted = Outstanding().Where(b => everything || SameAddress(b.Address, address)).ToList();
             if (wanted.Count == 0)
                 return Held("No block at " + address + " came from scratch. Free one it handed out, or all.");
 
             var stuck = new List<string>();
             foreach (var block in wanted)
             {
-                if (Scratch.Free(chosen.Frame, block, out var error)) _scratch.Remove(block);
+                if (Scratch.Free(chosen.Frame, block, out var error)) lock (_scratch) _scratch.Remove(block);
                 else stuck.Add(block.Address + ": " + error);
             }
 
@@ -1540,12 +1545,21 @@ namespace VsDbgMcp.Host
             {
                 Freed = wanted.Count - stuck.Count,
                 Error = stuck.Count == 0 ? null : "Could not free " + string.Join("; ", stuck),
-                Outstanding = _scratch.ToList()
+                Outstanding = Outstanding()
             };
         });
 
         /// <summary>A refusal that still says what is outstanding, so a failed call does not read as an empty session.</summary>
-        ScratchResult Held(string error) => new ScratchResult { Error = error, Outstanding = _scratch.ToList() };
+        ScratchResult Held(string error) => new ScratchResult { Error = error, Outstanding = Outstanding() };
+
+        /// <summary>
+        /// The blocks still allocated. Reads add and free them off the UI thread while the
+        /// end of a session clears them on it, so every touch takes the list's lock.
+        /// </summary>
+        List<ScratchBlock> Outstanding()
+        {
+            lock (_scratch) return _scratch.ToList();
+        }
 
         /// <summary>
         /// The same address written two ways. A caller reads one out of a reply and may
@@ -1568,14 +1582,14 @@ namespace VsDbgMcp.Host
         /// breakpoint in. Reading that here costs a line; finding it out from a
         /// breakpoint that never binds costs a session.
         /// </summary>
-        void MarkSourcesNewerThanBinaries(List<ModuleInfo> modules)
+        static void MarkSourcesNewerThanBinaries(List<ModuleInfo> modules, Dictionary<string, string> projects)
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
             if (modules.Count == 0) return;
 
-            foreach (var file in BreakpointFiles())
+            foreach (var pair in projects)
             {
-                var owner = OwningModule(file, modules);
+                var file = pair.Key;
+                var owner = OwningModule(pair.Value, modules);
                 if (owner == null || !string.IsNullOrEmpty(owner.NewerSource)) continue;
 
                 var newer = SourceFreshness.WrittenAfter(
@@ -1584,19 +1598,20 @@ namespace VsDbgMcp.Host
             }
         }
 
-        /// <summary>Each file a breakpoint sits in, once.</summary>
-        List<string> BreakpointFiles() => Read(() =>
+        /// <summary>Each file a breakpoint sits in, once, with the project that holds it.</summary>
+        Dictionary<string, string> BreakpointProjects() => Read(() =>
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            var files = new List<string>();
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var projects = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (Breakpoint breakpoint in _dte.Debugger.Breakpoints)
             {
                 var file = breakpoint.File;
-                if (!string.IsNullOrEmpty(file) && seen.Add(file)) files.Add(file);
+                if (string.IsNullOrEmpty(file) || projects.ContainsKey(file)) continue;
+                var project = ProjectOf(file);
+                if (!string.IsNullOrEmpty(project)) projects[file] = project;
             }
-            return files;
-        }, new List<string>(), "the files breakpoints are in");
+            return projects;
+        }, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase), "the files breakpoints are in");
 
         /// <summary>
         /// Which loaded module a source file was built into.
@@ -1607,20 +1622,24 @@ namespace VsDbgMcp.Host
         /// answers only when exactly one module matches, because naming the wrong module
         /// in a breakpoint's failure message is worse than naming none.
         /// </summary>
-        ModuleInfo OwningModule(string file, List<ModuleInfo> modules)
+        static ModuleInfo OwningModule(string project, List<ModuleInfo> modules)
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-            if (string.IsNullOrEmpty(file) || modules.Count == 0) return null;
-
-            var project = Read(() => _dte.Solution.FindProjectItem(file)?.ContainingProject?.Name,
-                null, "the project holding " + file);
-            if (string.IsNullOrEmpty(project)) return null;
+            if (string.IsNullOrEmpty(project) || modules.Count == 0) return null;
 
             var named = modules.Where(m => string.Equals(Stem(m), project, StringComparison.OrdinalIgnoreCase)).ToList();
             if (named.Count == 0)
                 named = modules.Where(m => Stem(m).IndexOf(project, StringComparison.OrdinalIgnoreCase) >= 0).ToList();
 
             return named.Count == 1 ? named[0] : null;
+        }
+
+        /// <summary>The project holding this file, as the shell knows it.</summary>
+        string ProjectOf(string file)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (string.IsNullOrEmpty(file)) return null;
+            return Read(() => _dte.Solution.FindProjectItem(file)?.ContainingProject?.Name,
+                null, "the project holding " + file);
         }
 
         /// <summary>
@@ -1635,10 +1654,8 @@ namespace VsDbgMcp.Host
 
         // ---------------------------------------------------------------- triage
 
-        public Task<string> TriageAsync(CancellationToken ct = default) => UIAsync(() =>
+        public Task<string> TriageAsync(CancellationToken ct = default) => DebuggeeAsync(() =>
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
             if (CurrentMode != DebugModes.Break)
                 return "Nothing to triage: the debugger is not stopped. Current mode: " + CurrentMode + ".";
 

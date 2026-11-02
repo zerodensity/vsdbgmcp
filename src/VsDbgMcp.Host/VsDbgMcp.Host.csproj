@@ -82,6 +82,7 @@
 
   <ItemGroup>
     <Compile Include="Activity.cs" />
+    <Compile Include="ComRelease.cs" />
     <Compile Include="HostOperations.cs" />
     <Compile Include="..\VsDbgMcp.Core\RetentionPolicy.cs" Link="Core\RetentionPolicy.cs" />
     <Compile Include="..\VsDbgMcp.Core\ProfileArtifacts.cs" Link="Core\ProfileArtifacts.cs" />
@@ -100,9 +101,11 @@
     <Compile Include="DebugServer.cs" />
     <Compile Include="ExpressionEval.cs" />
     <Compile Include="FocusGuard.cs" />
+    <Compile Include="MessageFilter.cs" />
+    <Compile Include="PaneTail.cs" />
+    <Compile Include="DebuggeeThread.cs" />
     <Compile Include="FrameReader.cs" />
     <Compile Include="InstanceDirectory.cs" />
-    <Compile Include="MessageFilter.cs" />
     <Compile Include="NativeReader.cs" />
     <Compile Include="PipeServer.cs" />
     <Compile Include="SecurePipe.cs" />

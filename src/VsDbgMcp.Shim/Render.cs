@@ -14,6 +14,26 @@ namespace VsDbgMcp.Shim
     /// </summary>
     public static partial class Render
     {
+        /// <summary>
+        /// An Output pane read, with the part of the pane it covered. A search of a long
+        /// pane reads only its end, and a pattern found nowhere there must not read as
+        /// a line the program never printed.
+        /// </summary>
+        public static string Pane(OutputResult result, string pane)
+        {
+            if (result == null) return "No output.";
+
+            var searched = result.SearchedFromLine == null
+                ? ""
+                : "(read from line " + result.SearchedFromLine.Value.ToString(CultureInfo.InvariantCulture) +
+                  " to the end of the pane; earlier lines were not read)\n";
+
+            if (string.IsNullOrWhiteSpace(result.Text)) return searched + "Pane '" + pane + "' has no matching output.";
+
+            var shown = result.Truncated ? "(showing the last " + result.Lines + " matching lines)\n" : "";
+            return searched + shown + result.Text;
+        }
+
         public static string Instances(IReadOnlyList<HostLink> links, string cwd, string sticky)
         {
             if (links == null || links.Count == 0)

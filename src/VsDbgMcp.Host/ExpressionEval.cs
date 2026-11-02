@@ -194,36 +194,44 @@ namespace VsDbgMcp.Host
             var inScope = 0;
 
             var rows = Drain(enumerator, 500, out var listing);
-            foreach (var info in rows)
+            ComRelease.Release(enumerator);
+            try
             {
-                inScope++;
-                if (!string.IsNullOrEmpty(filter) &&
-                    (info.bstrName == null ||
-                     info.bstrName.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0))
+                foreach (var info in rows)
                 {
-                    continue;
+                    inScope++;
+                    if (!string.IsNullOrEmpty(filter) &&
+                        (info.bstrName == null ||
+                         info.bstrName.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0))
+                    {
+                        continue;
+                    }
+
+                    var node = ToNode(info);
+                    if (depth > 1 && node.HasChildren)
+                    {
+                        node.Children = Children(info.pProperty, depth - 1, out var deeper);
+                        node.Note = deeper;
+                    }
+                    nodes.Add(node);
+                    properties.Add(info.pProperty);
                 }
 
-                var node = ToNode(info);
-                if (depth > 1 && node.HasChildren)
+                if (nodes.Count == 0 && inScope > 0 && !string.IsNullOrEmpty(filter))
                 {
-                    node.Children = Children(info.pProperty, depth - 1, out var deeper);
-                    node.Note = deeper;
+                    result.Message = "No variable's name contains '" + filter + "'. " + inScope +
+                                     " were read in this frame; drop the filter to see them.";
                 }
-                nodes.Add(node);
-                properties.Add(info.pProperty);
-            }
 
-            if (nodes.Count == 0 && inScope > 0 && !string.IsNullOrEmpty(filter))
+                result.Message = Also(result.Message, listing);
+
+                if (sharedAddresses) MarkSharedAddresses(nodes, properties);
+                return result;
+            }
+            finally
             {
-                result.Message = "No variable's name contains '" + filter + "'. " + inScope +
-                                 " were read in this frame; drop the filter to see them.";
+                foreach (var info in rows) ComRelease.Release(info.pProperty);
             }
-
-            result.Message = Also(result.Message, listing);
-
-            if (sharedAddresses) MarkSharedAddresses(nodes, properties);
-            return result;
         }
 
         /// <summary>
@@ -640,7 +648,9 @@ namespace VsDbgMcp.Host
                 return nodes;
             }
 
-            foreach (var info in Drain(enumerator, MaxChildren, out note))
+            var rows = Drain(enumerator, MaxChildren, out note);
+            ComRelease.Release(enumerator);
+            foreach (var info in rows)
             {
                 var node = ToNode(info);
                 if (depth > 1 && node.HasChildren)
@@ -649,6 +659,7 @@ namespace VsDbgMcp.Host
                     node.Note = deeper;
                 }
                 nodes.Add(node);
+                ComRelease.Release(info.pProperty);
             }
 
             return nodes;

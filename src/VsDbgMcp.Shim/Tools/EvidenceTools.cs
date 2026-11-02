@@ -21,7 +21,7 @@ namespace VsDbgMcp.Shim.Tools
             => On(instance, ct, async link => await link.Debug.TriageAsync(ct).ConfigureAwait(false));
 
         [McpServerTool(Name = "capture", ReadOnly = true)]
-        [Description("Screenshot the window of the program being debugged. Works while it is stopped at a breakpoint and while the window is behind others, so it answers what was on screen when this went wrong. Returns native MCP PNG image content and a short dimensions summary. Requires a visible top-level window.")]
+        [Description("Screenshot the window of the program being debugged, also while the window is behind others. The window draws itself for the capture, which a program stopped in the debugger often cannot do: then this returns an error after 10 seconds, and capturing while it runs works. Returns native MCP PNG image content and a short dimensions summary. Requires a visible top-level window.")]
         public async Task<CallToolResult> Capture(
             [Description("Region as x,y,width,height in pixels relative to the window's top-left corner. Omit to capture the whole window.")] string region = null,
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Debugger.Interop;
 using Microsoft.VisualStudio.Shell.Interop;
@@ -64,44 +65,63 @@ namespace VsDbgMcp.Host
         /// A thread pointer outlives the process it came from, so one process ending
         /// while another stays stopped leaves a pointer behind that still answers
         /// questions. Asking here is how a reader tells that apart from a live frame.
+        ///
+        /// The comparison asks the engine, and from a reader's thread that call is
+        /// carried out on the UI thread. Making it while holding the lock would leave
+        /// the UI thread, arriving here with the next debug event, waiting on a reader
+        /// that waits on the UI thread. So the list is copied and compared outside.
         /// </summary>
         public bool Knows(IDebugProgram2 program)
         {
             if (program == null) return false;
-            lock (_programGate)
+            foreach (var known in Programs)
             {
-                foreach (var known in _programs)
-                {
-                    if (ReferenceEquals(known, program)) return true;
-                    if (SameProgram(known, program)) return true;
-                }
-                return false;
+                if (ReferenceEquals(known, program)) return true;
+                if (SameProgram(known, program)) return true;
             }
+            return false;
         }
+
+        /// <summary>
+        /// Whether the process with this id is one being debugged in this session. Asked on
+        /// the UI thread at every mode change, so it is answered from ids read when each
+        /// program arrived rather than by asking the engine, which for a remote target
+        /// means the network.
+        /// </summary>
+        public bool Debugs(int pid)
+        {
+            if (pid == 0) return false;
+            lock (_programGate) return _pids.ContainsValue(pid);
+        }
+
+        readonly Dictionary<IDebugProgram2, int> _pids = new Dictionary<IDebugProgram2, int>();
 
         void Remember(IDebugProgram2 program)
         {
             if (program == null) return;
+            if (Knows(program)) return;
+            var pid = ProcessIdentity.Of(program).Pid;
             lock (_programGate)
             {
                 foreach (var known in _programs)
                 {
                     if (ReferenceEquals(known, program)) return;
-                    if (SameProgram(known, program)) return;
                 }
                 _programs.Add(program);
+                _pids[program] = pid;
             }
         }
 
         void Forget(IDebugProgram2 program)
         {
             if (program == null) return;
+            var gone = Programs.Where(known => ReferenceEquals(known, program) || SameProgram(known, program)).ToList();
             lock (_programGate)
             {
-                for (var i = _programs.Count - 1; i >= 0; i--)
+                foreach (var known in gone)
                 {
-                    if (ReferenceEquals(_programs[i], program) || SameProgram(_programs[i], program))
-                        _programs.RemoveAt(i);
+                    _programs.Remove(known);
+                    _pids.Remove(known);
                 }
             }
         }

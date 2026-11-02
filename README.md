@@ -157,7 +157,9 @@ line, which process. The reply is selectable.
   starts, resumes or steps the program, instead of letting Visual Studio come forward.
   Stops you cause yourself are not affected: the guard arms only on an agent command that
   resumes execution, fires once, and disarms when the program next stops. Without that
-  distinction it would pull focus away every time you pressed F10.
+  distinction it would pull focus away every time you pressed F10. A window of a program
+  being debugged gets the focus back only while that program runs: stopped, its threads
+  are suspended and it could not take it.
 - The list holds the last 200 calls, newest first, with how long each took; failures are
   marked in red. Rows left unfolded stay unfolded as new calls arrive.
 
@@ -193,7 +195,9 @@ Notes on a few:
   content with a short dimensions summary. `region: "x,y,width,height"` requests a
   crop in window-relative pixels; the summary identifies the requested region and
   actual output dimensions. Image-capable clients can pass the screenshot to the
-  model directly. Failures return text with `isError: true`.
+  model directly. Failures return text with `isError: true`. A program stopped in the
+  debugger often cannot draw its window; the capture then fails after 10 seconds and
+  says so, rather than waiting for it.
 
 - **`wait`** — `instance: "any"` returns as soon as any connected window stops, which is
   how to debug a client and a server at once. `for:` widens what it waits for beyond a

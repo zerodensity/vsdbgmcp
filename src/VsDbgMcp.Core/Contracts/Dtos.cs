@@ -871,6 +871,12 @@ namespace VsDbgMcp.Contracts
         public string Text { get; set; }
         public int Lines { get; set; }
         public bool Truncated { get; set; }
+
+        /// <summary>
+        /// The first pane line the read looked at, counting from 1, when the pane was
+        /// longer than one read covers. Null when the whole pane was read.
+        /// </summary>
+        public int? SearchedFromLine { get; set; }
     }
 
     public sealed class CaptureResult

@@ -56,6 +56,7 @@ namespace VsDbgMcp.Host
             if (TestUiGate != null) await TestUiGate();
             return body();
         }
+        Task<T> DebuggeeAsync<T>(Func<T> body, string caller) => UIAsync(body);
         void Mark(string kind) { lock (_historyGate) _interventions.Add(new Intervention { Kind = kind, TimestampUtc = DateTime.UtcNow }); }
         List<ModuleInfo> ProfileModules(int pid) => TestReadModules == null ? TestModules : TestReadModules();
         string DevenvPath() => "not-used";

@@ -181,16 +181,50 @@ namespace VsDbgMcp.Host
             }
         }
 
+        /// <summary>
+        /// Writes each reply straight to the pipe. The Newtonsoft formatter first builds
+        /// the whole reply as a tree of JSON objects: a thread listing became megabytes
+        /// of them inside Visual Studio's process, which its garbage collector seldom
+        /// reclaims, so Visual Studio grew by that much with every call.
+        ///
+        /// The JSON on the wire stays what the shim's Newtonsoft formatter writes and
+        /// reads: property names as declared, matched without regard to case, nulls left
+        /// out. Stated explicitly because the two ends of this pipe are built against
+        /// different StreamJsonRpc versions, whose defaults need not agree.
+        /// </summary>
+        static IJsonRpcMessageTextFormatter AvailableFormatter()
+        {
+            try
+            {
+                return Formatter();
+            }
+            catch (Exception ex) when (ex is TypeLoadException || ex is System.IO.FileNotFoundException || ex is MissingMethodException)
+            {
+                // An early Visual Studio 2022 ships a StreamJsonRpc without the System.Text.Json
+                // formatter. The Newtonsoft one writes the same JSON, and costs memory.
+                var formatter = new JsonMessageFormatter();
+                formatter.JsonSerializer.NullValueHandling = NullValueHandling.Ignore;
+                return formatter;
+            }
+        }
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        internal static SystemTextJsonFormatter Formatter() => new SystemTextJsonFormatter
+        {
+            JsonSerializerOptions = new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNamingPolicy = null,
+                PropertyNameCaseInsensitive = true,
+                DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+                NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals
+            }
+        };
+
         void Accept(NamedPipeServerStream stream, string client)
         {
             var connection = new Connection { Stream = stream };
 
-            // Stated explicitly because the two ends of this pipe are built against
-            // different StreamJsonRpc versions, whose defaults need not agree.
-            var formatter = new JsonMessageFormatter();
-            formatter.JsonSerializer.NullValueHandling = NullValueHandling.Ignore;
-
-            var rpc = new JsonRpc(new HeaderDelimitedMessageHandler(stream, stream, formatter));
+            var rpc = new JsonRpc(new HeaderDelimitedMessageHandler(stream, stream, AvailableFormatter()));
             connection.Rpc = rpc;
 
             rpc.AddLocalRpcTarget<IDebugHost>(_debug, new JsonRpcTargetOptions { AllowNonPublicInvocation = false });

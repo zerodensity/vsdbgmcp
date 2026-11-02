@@ -14,11 +14,8 @@ namespace VsDbgMcp.Host
 {
     partial class DebugHost
     {
-        public Task<ConsoleResult> ConsoleReadAsync(int tailLines, CancellationToken ct = default) => UIAsync(() =>
+        public Task<ConsoleResult> ConsoleReadAsync(int tailLines, CancellationToken ct = default) => DebuggeeAsync(FirstDebuggedPid, pid =>
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
-            var pid = FirstDebuggedPid();
             if (pid == 0)
                 return new ConsoleResult { Error = "Nothing is being debugged, so there is no console to read." };
 
@@ -30,17 +27,14 @@ namespace VsDbgMcp.Host
                 result.Text = string.Join("\n", lines.Skip(lines.Length - tailLines));
 
             return result;
-        });
+        }, "ConsoleReadAsync");
 
-        public Task<OpResult> ConsoleSendAsync(string text, string keys, CancellationToken ct = default) => UIAsync(() =>
+        public Task<OpResult> ConsoleSendAsync(string text, string keys, CancellationToken ct = default) => DebuggeeAsync(FirstDebuggedPid, pid =>
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
-            var pid = FirstDebuggedPid();
             if (pid == 0) return OpResult.Bad("Nothing is being debugged.");
 
             return ConsoleBridge.Send(pid, text, keys);
-        });
+        }, "ConsoleSendAsync");
 
         int FirstDebuggedPid()
         {
@@ -88,12 +82,8 @@ namespace VsDbgMcp.Host
                     return result;
                 }
 
-                var document = target.TextDocument;
-                var selection = document.Selection;
-                selection.StartOfDocument(false);
-                selection.EndOfDocument(true);
-                var text = selection.Text ?? "";
-                selection.StartOfDocument(false);
+                var text = PaneTail.Read(target, out var firstLine);
+                result.SearchedFromLine = firstLine;
 
                 var lines = text.Replace("\r\n", "\n").Split('\n').ToList();
 
@@ -135,14 +125,13 @@ namespace VsDbgMcp.Host
             }
         }
 
-        public Task<CaptureResult> CaptureAsync(int[] region, CancellationToken ct = default) => UIAsync(() =>
+        public Task<CaptureResult> CaptureAsync(int[] region, CancellationToken ct = default) => DebuggeeAsync(FirstDebuggedPid, pid =>
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
-            var pid = FirstDebuggedPid();
             if (pid == 0) return new CaptureResult { Error = "Nothing is being debugged." };
 
-            return WindowCapture.Capture(pid, region);
-        });
+            return WindowCapture.Capture(pid, region, CaptureLimit);
+        }, "CaptureAsync");
+
+        static readonly TimeSpan CaptureLimit = TimeSpan.FromSeconds(10);
     }
 }
