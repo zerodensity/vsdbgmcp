@@ -46,3 +46,8 @@ as the primary product interface.
   automated suite and `build.ps1` for host/shim packaging. Live validation is in
   `tests/live/run.ps1`; use its dedicated experimental profile and data directory.
 - Do not modify unrelated worktrees or normal running VS instances during tests.
+
+## How we work
+Before designing, changing or reviewing code here, read the team's rules: `read_skill` with
+`file: skills/knowledge-base/references/how-we-work.md` on the `knowledge-base` MCP server. This file adds to them
+and wins where they differ.
