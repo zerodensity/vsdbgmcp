@@ -32,6 +32,12 @@ second. Retrying with the same
 remain available for each invocation, and diagnostic counts describe the captured build
 output, so an old Error List entry cannot decide whether the new build succeeded.
 
+**Visual Studio stays usable while an agent reads.** Stacks, variables, evaluation,
+memory and modules are read on a thread of the extension's own, so the Visual Studio
+window keeps responding during them. Only the commands Visual Studio accepts nowhere
+else, such as go, step and build, run on its UI thread. Visual Studio's memory levels
+off instead of growing with each read.
+
 **One configuration, every window.** The agent launches the shim in its working
 directory; the shim finds the Visual Studio that has the matching solution open and
 connects. No ports, no per-project setup. When the choice is ambiguous the error names
@@ -122,7 +128,8 @@ the agent was given back, as selectable text.
 - **Pause** is a kill switch. Every tool then refuses with an explanation telling the
   agent a person stopped it, until Resume.
 - **Don't steal focus** puts the window you were using back in front when an *agent*
-  starts, resumes or steps the program. Stops you cause yourself are never touched.
+  starts, resumes or steps the program. Stops you cause yourself are never touched. A
+  window of the program being debugged gets the focus back only while that program runs.
 
 ## What it exposes
 
@@ -213,6 +220,10 @@ missing, `profile_start` says so and names what to install.
 - A function breakpoint must match how the symbol is actually named; one in an anonymous
   namespace does not bind under its bare name. The reply says it did not bind and where
   to look.
+- `capture` of a program stopped in the debugger often fails, because its suspended
+  threads cannot draw the window. It gives up after 10 seconds and says so.
+- `output` and `build_output` read the last 20,000 lines of a pane, and say so when the
+  pane is longer.
 - Only clients in the same Windows session can use this, because the client spawns the
   server itself. WSL, dev containers and remote agents cannot.
 

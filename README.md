@@ -402,7 +402,9 @@ Known gaps:
   where to look.
 - **CMake and Open Folder workspaces** are not supported for build or launch. `attach`
   works regardless, so the inspection surface is available there.
-- `capture` needs a window; a console program has none, and it says so.
+- `capture` needs a window; a console program has none, and it says so. A program
+  stopped in the debugger often cannot draw its window, because its threads are
+  suspended; the capture gives up after 10 seconds and says so.
 - **Only clients in the same Windows session can use this**, because the client has to
   spawn the shim. WSL, dev containers and remote agents cannot. See the HTTP transport
   entry in [docs/design.md](docs/design.md#13-deferred).
