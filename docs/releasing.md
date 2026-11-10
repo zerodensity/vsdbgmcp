@@ -26,7 +26,7 @@ otherwise fails silently, which is why it is checked rather than assumed.
 
 ## Publish to the Marketplace
 
-Publishing the listing is separate from cutting a release, and a release can ship
-without touching it. See [marketplace.md](marketplace.md) for the listing itself, what
+The tag also publishes the package to the Marketplace, after the GitHub release and
+after approval in the `production` environment. See [marketplace.md](marketplace.md) for the listing itself, what
 has to change in it when the product changes, and what cannot be taken back once
 uploaded.

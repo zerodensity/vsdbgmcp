@@ -74,3 +74,45 @@ jobs:
           gh release create '${{ github.ref_name }}' '${{ steps.package.outputs.path }}' `
             --title 'vsdbgmcp ${{ steps.version.outputs.version }}' `
             --notes-file release-notes.md
+
+  # Uploads the package of the GitHub release, so the Marketplace gets exactly what
+  # was released. Signs in by trusted publishing: the Marketplace publisher has a
+  # policy for this repository, this workflow file and the production environment,
+  # and no token is stored. An uploaded version cannot be replaced; when this job
+  # fails, rerun it rather than retagging.
+  marketplace:
+    needs: release
+    runs-on: windows-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download the released package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download '${{ github.ref_name }}' --pattern '*.vsix' --dir artifacts/release
+
+      # The first VsixPublisher with -oidc ships in this package; earlier ones have
+      # only -personalAccessToken.
+      - name: Get VsixPublisher
+        shell: pwsh
+        run: |
+          $version = '18.12.465'
+          $url = "https://api.nuget.org/v3-flatcontainer/microsoft.vssdk.buildtools/$version/microsoft.vssdk.buildtools.$version.nupkg"
+          Invoke-WebRequest $url -OutFile buildtools.zip
+          Expand-Archive buildtools.zip -DestinationPath buildtools
+
+      - name: Publish to the Marketplace
+        shell: pwsh
+        run: |
+          $package = Get-ChildItem artifacts/release -Filter *.vsix | Select-Object -First 1
+          & buildtools/tools/vssdk/bin/VsixPublisher.exe publish `
+            -payload $package.FullName `
+            -publishManifest marketplace/publishManifest.json `
+            -oidc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

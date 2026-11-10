@@ -12,9 +12,9 @@ the same commit as the thing it describes, and is reviewed the same way.
 
 ## When the product changes
 
-Publishing is not part of cutting a release — a release can ship without touching the
-listing. What must not happen is the listing describing a version that no longer exists,
-so this is the check list for whether it still tells the truth.
+Every release tag publishes the listing as it is in the tagged commit, so check it
+before tagging. What must not happen is the listing describing a version that no longer
+exists; this is the check list for whether it still tells the truth.
 
 - **A tool was added or removed.** `overview.md` says how many tools there are and
   groups them. Both are in the *Tools* section, and the count is also in
@@ -41,23 +41,28 @@ so this is the check list for whether it still tells the truth.
 
 ## Publishing it
 
-The version in the manifest is what the Marketplace shows. Take the `.vsix` from the
-GitHub release the tag produced — see [releasing.md](releasing.md) — so that what is
-published is what was built and tested, not a local rebuild.
+The version in the manifest is what the Marketplace shows. The `marketplace` job of
+`.github/workflows/release.yml` uploads the `.vsix` of the GitHub release the tag
+produced (see [releasing.md](releasing.md)), so what is published is what was built and
+tested, not a local rebuild.
+
+The job signs in by trusted publishing; no token is stored. It needs two settings
+outside the repository:
+
+- **A Trusted Publishing policy** in the publisher's management page on the Marketplace,
+  for repository owner `zerodensity`, repository `vsdbgmcp`, workflow `release.yml` and
+  environment `production`.
+- **The `production` environment** in the repository's settings. Its required reviewers
+  decide who approves each upload; without any, every tag publishes at once.
+
+The job runs `VsixPublisher.exe` with `-oidc`, which first ships in
+`Microsoft.VSSDK.BuildTools` 18.12.465. When the job fails, rerun it; a version cannot be
+uploaded twice, so do not retag.
 
 **The first time**, use the web form at
 [marketplace.visualstudio.com/manage](https://marketplace.visualstudio.com/manage). The
 categories, overview and Q&A setting are only editable there, and the extension is not
 public until **Make Public** is pressed afterwards.
-
-**After that**, from a Developer PowerShell:
-
-```powershell
-& "${env:VSINSTALLDIR}\VSSDK\VisualStudioIntegration\Tools\Bin\VsixPublisher.exe" publish `
-    -payload  "src\VsDbgMcp.Host\bin\Release\VsDbgMcp.Host.vsix" `
-    -publishManifest "marketplace\publishManifest.json" `
-    -personalAccessToken $env:VSMARKETPLACE_PAT
-```
 
 ## What cannot be taken back
 
