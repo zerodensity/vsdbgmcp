@@ -55,9 +55,11 @@ outside the repository:
 - **The `production` environment** in the repository's settings. Its required reviewers
   decide who approves each upload; without any, every tag publishes at once.
 
-The job runs `VsixPublisher.exe` with `-oidc`, which first ships in
-`Microsoft.VSSDK.BuildTools` 18.12.465. When the job fails, rerun it; a version cannot be
-uploaded twice, so do not retag.
+The job runs `VsixPublisher.exe` with `-oidc`: the runner's Visual Studio SDK copy if it
+accepts the option, otherwise the one in `Microsoft.VSSDK.BuildTools` 18.12.465, the first
+package with it. When the job fails, rerun it; a version cannot be uploaded twice, so do
+not retag. A rerun uses the workflow file of the tagged commit, so a fix to the workflow
+reaches the Marketplace only with the next tag.
 
 **The first time**, use the web form at
 [marketplace.visualstudio.com/manage](https://marketplace.visualstudio.com/manage). The

@@ -1,10 +1,17 @@
 # Changelog
 
+## 0.10.8
+
+- The Marketplace upload uses the build machine's Visual Studio SDK when its
+  VsixPublisher supports trusted publishing, instead of failing while the
+  Microsoft.VSSDK.BuildTools package that adds it is not on nuget.org. This is meant to
+  be the first version on the Marketplace since 0.10.3, carrying the changes of 0.10.4
+  to 0.10.7 there. Nothing changes in Visual Studio.
+
 ## 0.10.7
 
-- Releases are published to the Visual Studio Marketplace by the release workflow. This
-  is the first version there since 0.10.3, so it also carries the changes of 0.10.4 to
-  0.10.6 to the Marketplace. Nothing changes in Visual Studio.
+- Releases are published to the Visual Studio Marketplace by the release workflow.
+  Nothing changes in Visual Studio.
 
 ## 0.10.6
 

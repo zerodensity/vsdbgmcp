@@ -97,21 +97,42 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release download '${{ github.ref_name }}' --pattern '*.vsix' --dir artifacts/release
 
-      # The first VsixPublisher with -oidc ships in this package; earlier ones have
-      # only -personalAccessToken.
-      - name: Get VsixPublisher
+      # Older VsixPublishers have only -personalAccessToken. The runner's Visual
+      # Studio SDK is tried first; Microsoft.VSSDK.BuildTools 18.12.465 is the first
+      # package with -oidc, and is used when the runner's copy rejects it.
+      - name: Find a VsixPublisher with -oidc
+        id: publisher
         shell: pwsh
         run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -prerelease -property installationPath
+          $candidates = @(Join-Path $vs 'VSSDK\VisualStudioIntegration\Tools\Bin\VsixPublisher.exe')
+
           $version = '18.12.465'
           $url = "https://api.nuget.org/v3-flatcontainer/microsoft.vssdk.buildtools/$version/microsoft.vssdk.buildtools.$version.nupkg"
-          Invoke-WebRequest $url -OutFile buildtools.zip
-          Expand-Archive buildtools.zip -DestinationPath buildtools
+          try {
+            Invoke-WebRequest $url -OutFile buildtools.zip
+            Expand-Archive buildtools.zip -DestinationPath buildtools
+            $candidates += (Resolve-Path buildtools/tools/vssdk/bin/VsixPublisher.exe).Path
+          } catch {
+            Write-Host "Microsoft.VSSDK.BuildTools $version is not available: $($_.Exception.Message)"
+          }
+
+          foreach ($exe in $candidates) {
+            if (-not (Test-Path $exe)) { continue }
+            $help = (& $exe publish -oidc 2>&1 | Out-String)
+            Write-Host "$exe`n$(($help -split "`n")[0])"
+            if ($help -notmatch "'-oidc' is an invalid argument") {
+              "path=$exe" >> $env:GITHUB_OUTPUT
+              exit 0
+            }
+          }
+          throw 'No VsixPublisher with -oidc found.'
 
       - name: Publish to the Marketplace
         shell: pwsh
         run: |
           $package = Get-ChildItem artifacts/release -Filter *.vsix | Select-Object -First 1
-          & buildtools/tools/vssdk/bin/VsixPublisher.exe publish `
+          & '${{ steps.publisher.outputs.path }}' publish `
             -payload $package.FullName `
             -publishManifest marketplace/publishManifest.json `
             -oidc
