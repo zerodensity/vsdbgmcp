@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.7
+
+- Releases are published to the Visual Studio Marketplace by the release workflow. This
+  is the first version there since 0.10.3, so it also carries the changes of 0.10.4 to
+  0.10.6 to the Marketplace. Nothing changes in Visual Studio.
+
 ## 0.10.6
 
 - The extension manifest marks the extension public for the Marketplace
