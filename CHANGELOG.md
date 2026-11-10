@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.6
+
+- The extension manifest marks the extension public for the Marketplace
+  (`GalleryFlags`), as Marketplace support asked while the extension's page returned
+  404. Nothing changes in Visual Studio.
+
 ## 0.10.5
 
 - Visual Studio no longer freezes after an agent pauses or steps a program whose window
