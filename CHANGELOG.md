@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.10.9
+## 0.10.10
 
 - Agents no longer wait on Visual Studio dialogs. After a source edit while the program
   was paused, the next `go` or `step` opened a Hot Reload dialog ("The target assembly
@@ -20,6 +20,20 @@
 - The Marketplace upload uses the VsixPublisher of Microsoft.VSSDK.BuildTools 18.12.1606.
   The copy in the runner's Visual Studio 18.11 failed to sign in by trusted publishing.
   Nothing changes in Visual Studio.
+- `build_diagnostics` reads binary logs written by MSBuild 18.12 (.NET SDK 11, Visual
+  Studio 18.12), which failed with "The log file format version is 28 ... only supports
+  versions up to 26". A log from a newer MSBuild is read as far as the reader
+  understands it, and the coverage note says how many records it skipped. The counts
+  are marked incomplete only when a skipped record is an error, a warning, a project
+  start or a build boundary.
+- A build started while Visual Studio is still finishing a cancelled build reports
+  "Nothing was built" and says to start the build again, instead of a failed build with
+  no errors. Visual Studio reports a cancelled build done before its MSBuild has stopped.
+
+## 0.10.9
+
+- Tagged but not released: its release run failed on the binary log reading fixed in
+  0.10.10, which carries its changes.
 
 ## 0.10.8
 
