@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.12
+
+- The extension's description is under 280 characters, which the Marketplace upload
+  requires; at 283 it stopped the 0.10.11 upload. Nothing else changes.
+
 ## 0.10.11
 
 - The Marketplace upload does the trusted-publishing token exchange itself and passes
