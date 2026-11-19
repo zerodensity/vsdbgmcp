@@ -55,12 +55,19 @@ outside the repository:
 - **The `production` environment** in the repository's settings. Its required reviewers
   decide who approves each upload; without any, every tag publishes at once.
 
-The job runs `VsixPublisher.exe` with `-oidc`: the one in `Microsoft.VSSDK.BuildTools`
-18.12.1606, or the runner's Visual Studio SDK copy when that package cannot be downloaded.
-The copy in Visual Studio 18.11 accepts `-oidc` but its token exchange fails ("No
-api-version was supplied"). When the job fails, rerun it; a version cannot be uploaded
-twice, so do not retag. A rerun uses the workflow file of the tagged commit, so a fix to the workflow
-reaches the Marketplace only with the next tag.
+The job does the trusted-publishing exchange itself: it asks GitHub for an OIDC token
+for the audience `marketplace.visualstudio.com`, exchanges it at
+`https://marketplace.visualstudio.com/_apis/gallery/token?api-version=7.2-preview.1`
+for a short-lived credential, and passes that to the runner's `VsixPublisher.exe` with
+`-personalAccessToken`. VsixPublisher's own `-oidc` would do the same, but every
+published version (18.11 on the runner, 18.12.1606 on nuget.org) sends the exchange
+without an `api-version`, which the Marketplace rejects with `VsixPub0047`
+([microsoft/vsmarketplace#2310](https://github.com/microsoft/vsmarketplace/issues/2310)).
+Return to `-oidc` once a published VsixPublisher passes it.
+
+When the job fails, rerun it; a version cannot be uploaded twice, so do not retag. A
+rerun uses the workflow file of the tagged commit, so a fix to the workflow reaches the
+Marketplace only with the next tag.
 
 **The first time**, use the web form at
 [marketplace.visualstudio.com/manage](https://marketplace.visualstudio.com/manage). The
