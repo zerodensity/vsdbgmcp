@@ -267,6 +267,9 @@ namespace VsDbgMcp.Host
                 Diagnostics = diagnostics.GroupBy(BuildDiagnostics.Key).Select(g => g.First()).Take(100).ToList(),
                 EvidenceSource = source, LogPath = operation.LogPath,
                 Message = operation.Message };
+            var nothingBuilt = result.State == "failed" ? BuildDiagnostics.NothingBuilt(_buildLog) : null;
+            if (nothingBuilt != null)
+                result.Message = nothingBuilt + (string.IsNullOrEmpty(result.Message) ? "" : " " + result.Message);
             HostOperations.Store.Update(id, o => { o.State = result.State; o.Build = result; o.EvidenceSource = source; }, true);
             _activeBuild = null;
         }

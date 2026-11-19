@@ -160,6 +160,21 @@ namespace VsDbgMcp.Tests
         }
 
         [Fact]
+        public void A_build_refused_behind_an_earlier_one_says_nothing_was_built()
+        {
+            // As Visual Studio logged it when a rebuild started 0.1 s after a cancelled one.
+            var log = "Rebuild started at 12:47 PM...\r\n" +
+                      "1>------ Rebuild All started: Project: DebugTarget, Configuration: Debug x64 ------\r\n" +
+                      "2>------ Rebuild All started: Project: DebugPlugin, Configuration: Debug x64 ------\r\n" +
+                      "2>Cannot start a build because a build is already in progress.\r\n" +
+                      "2>Error: Cannot start a build because a build is already in progress.\r\n";
+            Assert.Empty(BuildDiagnostics.Parse(log, "build-3", "Debug|x64", DateTime.UtcNow));
+            Assert.StartsWith("Nothing was built", BuildDiagnostics.NothingBuilt(log));
+            Assert.Contains("Start the build again", BuildDiagnostics.NothingBuilt(log));
+            Assert.Null(BuildDiagnostics.NothingBuilt("1>foo.cpp(3): error C2065: 'x': undeclared identifier"));
+        }
+
+        [Fact]
         public void Unknown_diagnostic_coverage_is_never_rendered_as_a_definitive_zero()
         {
             var report = Render.Build(new BuildResult { Succeeded = true, OperationId = "build-1", DiagnosticsComplete = false });

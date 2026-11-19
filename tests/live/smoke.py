@@ -195,6 +195,17 @@ def main():
             cancelled = complete(cancel_id)
             assert field(cancelled, 'state') == 'cancelled', cancelled
 
+            # Visual Studio reports a cancelled build done before its MSBuild has finished.
+            # A build started meanwhile builds nothing and must say so; start again until one runs.
+            for attempt in range(10):
+                probe = complete(operation_id(call('build', requestId='live-after-cancel-%d' % attempt, waitSeconds=0)))
+                if field(probe, 'state') == 'succeeded':
+                    break
+                assert 'Nothing was built' in json.dumps(probe), probe
+                time.sleep(1)
+            else:
+                raise AssertionError('Visual Studio refused every build after the cancel')
+
             reply = call('build', mode='rebuild', requestId='live-follow-action', waitSeconds=0)
             follow_id = operation_id(reply)
             pending = data(call('operation_status', operationId=follow_id))

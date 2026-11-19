@@ -27,6 +27,21 @@ namespace VsDbgMcp
             }
             return result;
         }
+        /// <summary>
+        /// MSBuild refuses a build while an earlier one is still running. Visual Studio
+        /// reports a cancelled build done before its MSBuild has finished, so a build
+        /// started straight after one ends this way, with nothing built and no error
+        /// in the form the parser counts.
+        /// </summary>
+        const string EarlierBuildRunning = "Cannot start a build because a build is already in progress.";
+
+        /// <summary>What a failed build's log says when nothing was built for that reason, or null.</summary>
+        public static string NothingBuilt(string log) =>
+            log != null && log.Contains(EarlierBuildRunning)
+                ? "Nothing was built: Visual Studio was still finishing an earlier build (\"" + EarlierBuildRunning +
+                  "\"). Start the build again."
+                : null;
+
         public static string Key(BuildDiagnostic d) => string.Join("|", d.Severity, d.Code, d.File, d.Line, d.Column, d.Text, d.Project);
         public static int Unique(IEnumerable<BuildDiagnostic> diagnostics, string severity) =>
             diagnostics.Where(d => d.Severity == severity).Select(Key).Distinct(StringComparer.Ordinal).Count();
