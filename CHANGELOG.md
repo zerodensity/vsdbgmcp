@@ -1,9 +1,16 @@
 # Changelog
 
-## 0.10.12
+## 0.10.13
 
 - The extension's description is under 280 characters, which the Marketplace upload
-  requires; at 283 it stopped the 0.10.11 upload. Nothing else changes.
+  requires; at 283 it stopped the 0.10.11 upload. Nothing else changes in Visual Studio.
+- A unit test no longer fails when a timestamp in the reply it checks happens to
+  contain the digits of a process id.
+
+## 0.10.12
+
+- Tagged but not released: its release run failed on the unit test fixed in 0.10.13,
+  which carries its change.
 
 ## 0.10.11
 
