@@ -97,17 +97,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release download '${{ github.ref_name }}' --pattern '*.vsix' --dir artifacts/release
 
-      # Older VsixPublishers have only -personalAccessToken. The runner's Visual
-      # Studio SDK is tried first; Microsoft.VSSDK.BuildTools 18.12.465 is the first
-      # package with -oidc, and is used when the runner's copy rejects it.
+      # Older VsixPublishers have only -personalAccessToken, and the one in Visual
+      # Studio 18.11 accepts -oidc but fails the token exchange. Microsoft.VSSDK.BuildTools
+      # 18.12.1606 is tried first; the runner's Visual Studio SDK only when that package
+      # cannot be downloaded.
       - name: Find a VsixPublisher with -oidc
         id: publisher
         shell: pwsh
         run: |
-          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -prerelease -property installationPath
-          $candidates = @(Join-Path $vs 'VSSDK\VisualStudioIntegration\Tools\Bin\VsixPublisher.exe')
-
-          $version = '18.12.465'
+          $candidates = @()
+          $version = '18.12.1606'
           $url = "https://api.nuget.org/v3-flatcontainer/microsoft.vssdk.buildtools/$version/microsoft.vssdk.buildtools.$version.nupkg"
           try {
             Invoke-WebRequest $url -OutFile buildtools.zip
@@ -116,6 +115,9 @@ jobs:
           } catch {
             Write-Host "Microsoft.VSSDK.BuildTools $version is not available: $($_.Exception.Message)"
           }
+
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -prerelease -property installationPath
+          $candidates += Join-Path $vs 'VSSDK\VisualStudioIntegration\Tools\Bin\VsixPublisher.exe'
 
           foreach ($exe in $candidates) {
             if (-not (Test-Path $exe)) { continue }
