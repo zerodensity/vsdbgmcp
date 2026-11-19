@@ -97,7 +97,9 @@ namespace VsDbgMcp.Tests
 
             Assert.Contains("timeout", text);
             Assert.DoesNotContain("exited", text);
-            Assert.DoesNotContain("1724", text);
+            // The process name, not its pid: the instance is named after the test process,
+            // whose pid can be 1724 too.
+            Assert.DoesNotContain("host.exe", text);
         }
 
         /// <summary>
