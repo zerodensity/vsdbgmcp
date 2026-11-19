@@ -82,7 +82,27 @@ namespace VsDbgMcp.Host
             _sink = sink;
             _jtf = jtf;
             _log = log ?? (_ => { });
+
+            ThreadHelper.ThrowIfNotOnUIThread();
+            _dialog = ShellDialog.OfCurrentThread();
         }
+
+        /// <summary>Whether Visual Studio is showing a modal dialog, which blocks every command.</summary>
+        readonly ShellDialog _dialog;
+
+        /// <summary>How often a call waiting on Visual Studio checks whether a dialog opened.</summary>
+        static readonly TimeSpan DialogPoll = TimeSpan.FromMilliseconds(200);
+
+        static string NotRun(string tool, string dialog) =>
+            "Visual Studio is showing a dialog (\"" + dialog + "\"), so " + tool + " was not run. Do not try to close " +
+            "it; ask the user to answer it in Visual Studio. debug_state shows whether it is still open; call " +
+            tool + " again once it is gone.";
+
+        static string Held(string tool, string dialog) =>
+            "Visual Studio opened a dialog (\"" + dialog + "\") while running " + tool + ", so " + tool + " has not " +
+            "finished and its outcome is unknown. Do not try to close it; ask the user to answer it in Visual Studio. " +
+            "Do not repeat " + tool + " before checking its effect: debug_state shows the debugger mode and whether " +
+            "the dialog is still open.";
 
         /// <summary>
         /// The tools whose effect is that the debuggee starts running again, which is
@@ -166,12 +186,72 @@ namespace VsDbgMcp.Host
             Mark("mode:" + mode);
             _reportedMode = mode;
             TaskCompletionSource<string> waiter;
+            List<TaskCompletionSource<bool>> ended = null;
             lock (_modeGate)
             {
                 waiter = _modeWaiter;
                 _modeWaiter = null;
+                if (mode == DebugModes.Design)
+                {
+                    ended = _sessionEndWaiters;
+                    _sessionEndWaiters = new List<TaskCompletionSource<bool>>();
+                }
             }
             waiter?.TrySetResult(mode);
+            ended?.ForEach(w => w.TrySetResult(true));
+        }
+
+        List<TaskCompletionSource<bool>> _sessionEndWaiters = new List<TaskCompletionSource<bool>>();
+
+        /// <summary>Completes when the debugger next enters design mode. Taken before the command that ends the session.</summary>
+        TaskCompletionSource<bool> WatchSessionEnd()
+        {
+            var waiter = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            lock (_modeGate) _sessionEndWaiters.Add(waiter);
+            return waiter;
+        }
+
+        void StopWatchingSessionEnd(TaskCompletionSource<bool> waiter)
+        {
+            lock (_modeGate) _sessionEndWaiters.Remove(waiter);
+        }
+
+        /// <summary>How long stop or detach waits to see the session end before saying it has not yet.</summary>
+        static readonly TimeSpan SessionEndWait = TimeSpan.FromSeconds(15);
+
+        /// <summary>
+        /// Issues a command that ends the debug session, and reports the end only once
+        /// the debugger is seen in design mode. The automation call returns as soon as
+        /// the request is made, so its return alone does not show the session ended.
+        /// </summary>
+        async Task<OpResult> EndSessionAsync(Func<OpResult> command, string ended, string caller)
+        {
+            var tool = Name(caller);
+            var waiter = WatchSessionEnd();
+            try
+            {
+                var issued = await UIOpAsync(command, caller).ConfigureAwait(false);
+                if (!issued.Ok) return issued;
+
+                var end = waiter.Task;
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                while (await Task.WhenAny(end, Task.Delay(DialogPoll)).ConfigureAwait(false) != end)
+                {
+                    var dialog = _dialog.OpenTitle();
+                    if (end.IsCompleted) break;
+                    if (dialog != null) throw new InvalidOperationException(Held(tool, dialog));
+                    if (clock.Elapsed >= SessionEndWait)
+                        return new OpResult { Ok = false, State = "unknown", Message = tool +
+                            " was requested, but Visual Studio has not ended debugging after " +
+                            (int)SessionEndWait.TotalSeconds + " seconds. Do not repeat " + tool +
+                            "; debug_state shows the debugger mode, and the next reply says when debugging ends." };
+                }
+                return OpResult.Good(ended);
+            }
+            finally
+            {
+                StopWatchingSessionEnd(waiter);
+            }
         }
 
         Task<string> NextModeAsync(TimeSpan timeout)
@@ -200,17 +280,70 @@ namespace VsDbgMcp.Host
         {
             if (Activity.Paused) throw new InvalidOperationException(Activity.PausedMessage);
 
-            await _calls.WaitAsync().ConfigureAwait(false);
-            try
+            var tool = Name(caller);
+            await EnterAsync(tool).ConfigureAwait(false);
+            return await UntilDialogAsync(async () =>
             {
                 await _jtf.SwitchToMainThreadAsync();
                 Begin(caller);
                 return body();
+            }, tool).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Takes the call gate. Nothing is run while Visual Studio shows a dialog: a
+        /// command issued then would run inside the dialog's message loop, and the call
+        /// holding the gate may be the one waiting on that dialog.
+        /// </summary>
+        async Task EnterAsync(string tool)
+        {
+            while (true)
+            {
+                var entered = await _calls.WaitAsync(DialogPoll).ConfigureAwait(false);
+                var dialog = _dialog.OpenTitle();
+                if (dialog == null)
+                {
+                    if (entered) return;
+                    continue;
+                }
+
+                if (entered) _calls.Release();
+                throw new InvalidOperationException(NotRun(tool, dialog));
+            }
+        }
+
+        /// <summary>Runs work that was given the call gate, and gives the gate back when the work ends.</summary>
+        async Task<T> HoldAsync<T>(Func<Task<T>> work)
+        {
+            try
+            {
+                return await work().ConfigureAwait(false);
             }
             finally
             {
                 _calls.Release();
             }
+        }
+
+        /// <summary>
+        /// Runs work that was given the call gate and waits for it, unless Visual Studio
+        /// opens a dialog first. The work goes on holding the gate until the dialog is
+        /// answered; the caller is told so instead of waiting on a person who may never come.
+        /// </summary>
+        async Task<T> UntilDialogAsync<T>(Func<Task<T>> work, string tool)
+        {
+            var call = HoldAsync(work);
+            while (await Task.WhenAny(call, Task.Delay(DialogPoll)).ConfigureAwait(false) != call)
+            {
+                var dialog = _dialog.OpenTitle();
+                if (dialog == null || call.IsCompleted) continue;
+
+                Mark(tool + "-held", dialog);
+                _ = call.ContinueWith(t => Mark(tool + "-returned", t.IsFaulted ? t.Exception.GetBaseException().Message : null),
+                    CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+                throw new InvalidOperationException(Held(tool, dialog));
+            }
+            return await call.ConfigureAwait(false);
         }
 
         Task<OpResult> UIOpAsync(Func<OpResult> body, [CallerMemberName] string caller = null) =>
@@ -243,8 +376,9 @@ namespace VsDbgMcp.Host
         {
             if (Activity.Paused) throw new InvalidOperationException(Activity.PausedMessage);
 
-            await _calls.WaitAsync().ConfigureAwait(false);
-            try
+            var tool = Name(caller);
+            await EnterAsync(tool).ConfigureAwait(false);
+            return await UntilDialogAsync(async () =>
             {
                 await _jtf.SwitchToMainThreadAsync();
                 Begin(caller);
@@ -257,11 +391,7 @@ namespace VsDbgMcp.Host
                 if (resumeFails && _callMode.Value == DebugModes.Break && _modeEpoch != epoch)
                     throw new InvalidOperationException(ResumedDuringRead);
                 return result;
-            }
-            finally
-            {
-                _calls.Release();
-            }
+            }, tool).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -381,7 +511,45 @@ namespace VsDbgMcp.Host
             if (shimContractVersion != Names.ContractVersion)
                 _log("contract mismatch: shim " + shimContractVersion + ", host " + Names.ContractVersion);
 
+            TurnOffPrompts();
             return Task.FromResult(Names.ContractVersion.ToString());
+        }
+
+        /// <summary>
+        /// Debugger options under which Visual Studio interrupts a command to ask a
+        /// question in a modal dialog. The dialog holds that command, and every call
+        /// after it, until a person answers. Turned off each time a client connects, so
+        /// one turned back on in Tools > Options is off again for the next agent.
+        /// </summary>
+        static readonly (string Page, string Name, string Dialog)[] PromptingOptions =
+        {
+            ("EditAndContinue", "InvokedByCommands", "Hot Reload asking what to do with edits it cannot apply, on go or step"),
+            ("EditAndContinue", "WarnAboutStaleCode", "a warning that the source file changed, at a stop"),
+            ("General", "WarnIfNoSymbols", "a warning that the program has no symbols, on launch"),
+            ("General", "WarnIfNoUserCode", "a warning that the program has no user code, on launch"),
+        };
+
+        void TurnOffPrompts()
+        {
+            _jtf.RunAsync(async () =>
+            {
+                await _jtf.SwitchToMainThreadAsync();
+                foreach (var option in PromptingOptions)
+                {
+                    try
+                    {
+                        var item = _dte.get_Properties("Debugging", option.Page).Item(option.Name);
+                        if (!(bool)item.Value) continue;
+                        item.Value = false;
+                        _log("turned off Debugging > " + option.Page + " > " + option.Name + ", which shows " + option.Dialog);
+                    }
+                    catch (Exception ex)
+                    {
+                        _log("could not turn off Debugging > " + option.Page + " > " + option.Name + ", which shows " +
+                             option.Dialog + ": " + ex.Message);
+                    }
+                }
+            }).FileAndForget("vsdbgmcp/turn-off-prompts");
         }
 
         /// <summary>
@@ -635,39 +803,48 @@ namespace VsDbgMcp.Host
             }
         });
 
-        public Task<OpResult> DetachAsync(int? pid, CancellationToken ct = default) => UIOpAsync(() =>
+        public Task<OpResult> DetachAsync(int? pid, CancellationToken ct = default)
+        {
+            if (!pid.HasValue)
+                return EndSessionAsync(() => WhileDebugging(() => _dte.Debugger.DetachAll()), "Detached.", nameof(DetachAsync));
+
+            return UIOpAsync(() =>
+            {
+                ThreadHelper.ThrowIfNotOnUIThread();
+                return Try(() => DebuggedProcess(pid.Value).Detach(false), "Detached.");
+            });
+        }
+
+        public Task<OpResult> StopAsync(int? pid, CancellationToken ct = default)
+        {
+            if (!pid.HasValue)
+                return EndSessionAsync(() => WhileDebugging(() => _dte.Debugger.Stop(false)), "Stopped.", nameof(StopAsync));
+
+            return UIOpAsync(() =>
+            {
+                ThreadHelper.ThrowIfNotOnUIThread();
+                return Try(() => DebuggedProcess(pid.Value).Terminate(false), "Stopped.");
+            });
+        }
+
+        /// <summary>
+        /// Runs a command that ends the session, refusing in design mode: there the
+        /// command does nothing, and no session end would come to report.
+        /// </summary>
+        OpResult WhileDebugging(Action command)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            return Try(() =>
-            {
-                if (!pid.HasValue) { _dte.Debugger.DetachAll(); return; }
+            if (CurrentMode == DebugModes.Design) return OpResult.Bad("Not debugging; there is no session to end.");
+            return Try(command, null);
+        }
 
-                foreach (EnvDTE.Process process in _dte.Debugger.DebuggedProcesses)
-                {
-                    if (process.ProcessID != pid.Value) continue;
-                    process.Detach(false);
-                    return;
-                }
-                throw new InvalidOperationException("Process " + pid.Value + " is not being debugged.");
-            }, "Detached.");
-        });
-
-        public Task<OpResult> StopAsync(int? pid, CancellationToken ct = default) => UIOpAsync(() =>
+        EnvDTE.Process DebuggedProcess(int pid)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            return Try(() =>
-            {
-                if (!pid.HasValue) { _dte.Debugger.Stop(false); return; }
-
-                foreach (EnvDTE.Process process in _dte.Debugger.DebuggedProcesses)
-                {
-                    if (process.ProcessID != pid.Value) continue;
-                    process.Terminate(false);
-                    return;
-                }
-                throw new InvalidOperationException("Process " + pid.Value + " is not being debugged.");
-            }, "Stopped.");
-        });
+            foreach (EnvDTE.Process process in _dte.Debugger.DebuggedProcesses)
+                if (process.ProcessID == pid) return process;
+            throw new InvalidOperationException("Process " + pid + " is not being debugged.");
+        }
 
         public Task<OpResult> RestartAsync(CancellationToken ct = default) => UIOpAsync(() =>
         {

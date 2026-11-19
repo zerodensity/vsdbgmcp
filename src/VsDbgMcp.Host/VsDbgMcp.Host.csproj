@@ -101,6 +101,7 @@
     <Compile Include="DebugServer.cs" />
     <Compile Include="ExpressionEval.cs" />
     <Compile Include="FocusGuard.cs" />
+    <Compile Include="ShellDialog.cs" />
     <Compile Include="MessageFilter.cs" />
     <Compile Include="PaneTail.cs" />
     <Compile Include="DebuggeeThread.cs" />

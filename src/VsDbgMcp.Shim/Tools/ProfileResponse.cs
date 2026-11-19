@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using VsDbgMcp.Contracts;
 using VsDbgMcp.Shim.Profiling;
@@ -84,6 +85,8 @@ namespace VsDbgMcp.Shim.Tools
         public string EvidenceSource { get; set; }
         public string Error { get; set; }
         public bool? BuildBusy { get; set; }
+        [Description("Title of the modal dialog Visual Studio is showing. Calls that need Visual Studio are refused until a person closes it; do not try to close it yourself. Absent when none is open.")]
+        public string Dialog { get; set; }
         public int SessionGeneration { get; set; }
         public List<ProcessInfo> Processes { get; set; }
         public Intervention LastTransition { get; set; }
@@ -93,7 +96,7 @@ namespace VsDbgMcp.Shim.Tools
         public static DebugStateResponse From(StateObservation state) => new DebugStateResponse
         {
             Mode = state.Mode, TimestampUtc = state.TimestampUtc, EvidenceSource = state.EvidenceSource,
-            Error = state.Error, BuildBusy = state.BuildBusy, SessionGeneration = state.SessionGeneration,
+            Error = state.Error, BuildBusy = state.BuildBusy, Dialog = state.Dialog, SessionGeneration = state.SessionGeneration,
             Processes = state.Processes, LastTransition = state.LastTransition,
             ActiveProfile = ProfileResponse.From(state.ActiveProfile), LastProfile = ProfileResponse.From(state.LastProfile)
         };

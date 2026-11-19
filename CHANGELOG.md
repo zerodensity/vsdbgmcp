@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- Agents no longer wait on Visual Studio dialogs. After a source edit while the program
+  was paused, the next `go` or `step` opened a Hot Reload dialog ("The target assembly
+  does not support applying changes"), and a stop in the edited file opened a warning
+  that the source had changed. The command, and every call after it, including `stop`
+  and `status`, then waited until a person answered. When an MCP client connects, the
+  extension now turns off the debugger options that open these dialogs: Edit and
+  Continue's apply changes on continue and warn about stale code, and the warnings for
+  no symbols or no user code on launch. They stay off after the agent disconnects. A
+  dialog that opens anyway makes the call return at once with the dialog's title and an
+  unknown outcome. Calls made while it is open are refused without running, and
+  `debug_state` reports its title.
+- `stop` and `detach` without a pid answer "Stopped." or "Detached." only once Visual
+  Studio has left debug mode. If it has not after 15 seconds, they reply that the
+  outcome is unknown, and the next reply reports when debugging ends. In design mode
+  they refuse, because there is no session to end.
+
 ## 0.10.8
 
 - The Marketplace upload uses the build machine's Visual Studio SDK when its

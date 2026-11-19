@@ -1132,7 +1132,8 @@ namespace VsDbgMcp.Shim
         public static Reply Op(OpResult r, string success)
         {
             if (r == null) return Reply.Bad("No result.");
-            var message = r.Ok ? (string.IsNullOrEmpty(r.Message) ? success : r.Message) : "Failed: " + (r.Message ?? "no reason given");
+            var message = r.Ok ? (string.IsNullOrEmpty(r.Message) ? success : r.Message)
+                : (r.State == "unknown" ? "Outcome unknown: " : "Failed: ") + (r.Message ?? "no reason given");
             if (r.OperationId != null) message += "\nOperation: " + r.OperationId + ", " + (r.Pending ? "pending (" + r.State + ")" : r.State) + ".";
             return r.Ok ? (Reply)message : Reply.Bad(message);
         }

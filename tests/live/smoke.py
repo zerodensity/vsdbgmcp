@@ -1,5 +1,7 @@
 """Real stdio MCP checks, restricted to the fixture's dedicated VS instance."""
 import argparse
+import ctypes
+from ctypes import wintypes
 import json
 import os
 from pathlib import Path
@@ -8,6 +10,30 @@ import re
 import subprocess
 import threading
 import time
+
+
+# Debugging options, as Page.Name, that the extension turns off when a client connects.
+PROMPTING_OPTIONS = ['EditAndContinue.InvokedByCommands', 'EditAndContinue.WarnAboutStaleCode',
+                     'General.WarnIfNoSymbols', 'General.WarnIfNoUserCode']
+
+
+def close_window(pid, title):
+    """Closes the visible window of process pid with this title, as a person would."""
+    user32 = ctypes.windll.user32
+    found = []
+
+    def visit(window, _):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(window, ctypes.byref(owner))
+        text = ctypes.create_unicode_buffer(512)
+        user32.GetWindowTextW(window, text, 512)
+        if owner.value == pid and user32.IsWindowVisible(window) and text.value == title:
+            found.append(window)
+        return True
+
+    user32.EnumWindows(ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)(visit), 0)
+    assert found, 'No window titled ' + title
+    user32.PostMessageW(found[0], 0x0010, 0, 0)  # WM_CLOSE
 
 
 def main():
@@ -95,6 +121,14 @@ def main():
 
     def field(value, key):
         return next((v for k, v in value.items() if k.lower() == key.lower()), None)
+
+    def dte_command(*arguments):
+        return [os.path.expandvars(r'%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe'), '-NoProfile',
+                '-ExecutionPolicy', 'Bypass', '-File', str(Path(__file__).with_name('dte.ps1')), '-VsPid', args.pid,
+                *arguments]
+
+    def dte(*arguments):
+        return subprocess.run(dte_command(*arguments), capture_output=True, text=True, check=True, timeout=60).stdout
 
     def complete(operation):
         deadline = time.monotonic() + 120
@@ -208,6 +242,40 @@ def main():
         repeated = json.loads(text(call('wait', timeoutSeconds=1, structured=True)))
         assert repeated['outcome'] == 'already-stopped'
         call('operation_status', operationId=operation)
+
+        # A connected client turns off the debugger options that open dialogs mid-debugging.
+        options = dte('-Options', ','.join(PROMPTING_OPTIONS)).split()
+        assert options == [name + '=False' for name in PROMPTING_OPTIONS], options
+
+        # A source edit while stopped made the next step open a Hot Reload dialog, and the
+        # stop in the edited file a stale-source warning; either held every later call.
+        try:
+            source.write_text(original.replace('mesh.vertices[i] * scale', 'mesh.vertices[i] * scale + 1'))
+            time.sleep(3)
+            assert 'stopped' in text(call('step'))
+            time.sleep(3)
+            assert field(data(call('debug_state')), 'dialog') is None
+        finally:
+            source.write_text(original)
+
+        # A dialog that is open anyway refuses calls instead of holding them.
+        opener_log = open(Path(args.output).with_name('dialog-opener.log'), 'w', encoding='utf-8')
+        opener = subprocess.Popen(dte_command('-Show', '-Command', 'Debug.AttachtoProcess'), stdout=opener_log,
+                                  stderr=subprocess.STDOUT, text=True)
+        try:
+            deadline = time.monotonic() + 30
+            while (dialog := field(data(call('debug_state')), 'dialog')) is None:
+                assert time.monotonic() < deadline, 'Attach to Process dialog did not open'
+                time.sleep(0.5)
+            refused = request('tools/call', dict(name='status', arguments=dict(instance=instance)))
+            assert refused.get('isError') and 'was not run' in text(refused), refused
+            close_window(int(args.pid), dialog)
+            opener.wait(timeout=30)
+        finally:
+            if opener.poll() is None:
+                opener.kill()
+            opener_log.close()
+        call('status')
         if args.profiles:
             assert 'Collecting capture' in text(call('profile_start', retainRaw=True))
             profile = field(data(call('debug_state')), 'activeProfile')

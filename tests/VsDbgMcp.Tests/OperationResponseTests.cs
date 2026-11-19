@@ -79,5 +79,28 @@ namespace VsDbgMcp.Tests
             Assert.Contains("VS unavailable", response.Message);
             Assert.Contains("disk full", response.Message);
         }
+
+        [Fact]
+        public void An_unknown_outcome_is_not_rendered_as_a_failure()
+        {
+            var unknown = VsDbgMcp.Shim.Render.Op(new OpResult { Ok = false, State = "unknown", Message = "stop was requested" }, "Stopped.");
+            Assert.True(unknown.Failed);
+            Assert.StartsWith("Outcome unknown: stop was requested", unknown.Text);
+
+            var failed = VsDbgMcp.Shim.Render.Op(OpResult.Bad("Not debugging"), "Stopped.");
+            Assert.StartsWith("Failed: Not debugging", failed.Text);
+        }
+
+        [Fact]
+        public void Debug_state_names_an_open_dialog_and_omits_none()
+        {
+            var options = new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
+
+            var open = DebugStateResponse.From(new StateObservation { Mode = "break", Dialog = "Hot Reload - Not supported by project" });
+            Assert.Equal("Hot Reload - Not supported by project", open.Dialog);
+
+            var none = DebugStateResponse.From(new StateObservation { Mode = "break" });
+            Assert.DoesNotContain("Dialog", JsonSerializer.Serialize(none, options));
+        }
     }
 }

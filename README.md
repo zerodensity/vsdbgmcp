@@ -166,6 +166,26 @@ line, which process. The reply is selectable.
 There is also a `vsdbgmcp` pane in the Output window carrying the pipe name, each client
 process that connected or was refused, and anything that went wrong inside the extension.
 
+## Dialogs
+
+Unreleased. A modal dialog that Visual Studio opens during a command holds that command,
+and every call after it, until a person answers. Agents do not answer dialogs, so:
+
+- When an MCP client connects, the extension turns off the debugger options that open a
+  dialog in the middle of debugging, and turns them off again on every later connection.
+  They are your Visual Studio settings and stay off after the agent disconnects. The
+  Output pane names each one it changed.
+  - Edit and Continue, apply changes on continue. After a source edit, `go` or `step`
+    opened a Hot Reload dialog when the edit could not be applied. Edits are now applied
+    only by Debug → Apply Code Changes (Alt+F10).
+  - Edit and Continue, warn about stale code: "This source file has changed" at a stop.
+  - Warn if no symbols on launch, and warn if no user code on launch.
+- A dialog that opens anyway makes the waiting call return at once, naming the dialog
+  and saying its outcome is unknown. Calls made while it is open are refused without
+  running. `debug_state` shows its title in `dialog`. The dialog is left for a person.
+- `stop` and `detach` without a pid reply once debugging has ended. If it has not after
+  15 seconds, the reply says the outcome is unknown.
+
 ## Tools
 
 60 tools.

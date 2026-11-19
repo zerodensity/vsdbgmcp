@@ -57,8 +57,16 @@ namespace VsDbgMcp.Host
         // No watches, expression evaluation, stack walking, or target pauses.
         readonly object _observationGate = new object();
         Task<StateObservation> _pendingObservation;
-        public Task<StateObservation> ObserveAsync(CancellationToken ct = default)
+        /// <summary>
+        /// How long an observation waits for the UI thread. Shorter than the second the
+        /// shim gives debug_state, so a UI thread that does not answer still leaves time
+        /// to say which dialog is open, which Win32 tells from any thread.
+        /// </summary>
+        static readonly TimeSpan ObservationWait = TimeSpan.FromMilliseconds(700);
+
+        public async Task<StateObservation> ObserveAsync(CancellationToken ct = default)
         {
+            Task<StateObservation> pending;
             lock (_observationGate)
             {
                 if (_pendingObservation == null || _pendingObservation.IsCompleted)
@@ -69,15 +77,23 @@ namespace VsDbgMcp.Host
                     _ = _pendingObservation.ContinueWith(t => { var ignored = t.Exception; },
                         CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
                 }
-                return _pendingObservation;
+                pending = _pendingObservation;
             }
+
+            if (await Task.WhenAny(pending, Task.Delay(ObservationWait, ct)).ConfigureAwait(false) == pending)
+                return await pending.ConfigureAwait(false);
+
+            ct.ThrowIfCancellationRequested();
+            return new StateObservation { Mode = "unknown", TimestampUtc = DateTime.UtcNow, SessionGeneration = _sessionGeneration,
+                Dialog = _dialog.OpenTitle(), Error = "Visual Studio's UI thread did not answer within " +
+                    (int)ObservationWait.TotalMilliseconds + " ms; only the open dialog, if any, was read." };
         }
         StateObservation LiveObservation()
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             var observation = new StateObservation { TimestampUtc = DateTime.UtcNow, SessionGeneration = _sessionGeneration,
                 LastTransition = _lastTransition, ActiveProfile = _activeProfile == null ? null : HostOperations.Copy(_activeProfile),
-                LastProfile = _lastProfile == null ? null : HostOperations.Copy(_lastProfile) };
+                LastProfile = _lastProfile == null ? null : HostOperations.Copy(_lastProfile), Dialog = _dialog.OpenTitle() };
             try
             {
                 var mode = _dte.Debugger.CurrentMode;

@@ -40,7 +40,7 @@ namespace VsDbgMcp.Shim.Tools
         }
 
         [McpServerTool(Name = "debug_state", ReadOnly = true, UseStructuredContent = true)]
-        [Description("Bounded, read-only debugger/process/profile snapshot without watches, stack inspection or expression evaluation. A live process can outlive debugger detachment. Unknown fields do not establish absence.")]
+        [Description("Bounded, read-only debugger/process/profile snapshot without watches, stack inspection or expression evaluation. Answers while Visual Studio shows a dialog, and names it. A live process can outlive debugger detachment. Unknown fields do not establish absence.")]
         public async Task<DebugStateResponse> Observe(string instance = null, CancellationToken ct = default)
         {
             var link = await Sessions.ResolveAsync(instance, ct).ConfigureAwait(false);

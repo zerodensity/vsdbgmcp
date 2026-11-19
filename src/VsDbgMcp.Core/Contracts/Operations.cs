@@ -26,6 +26,7 @@ namespace VsDbgMcp.Contracts
         public string EvidenceSource { get; set; }
         public string Error { get; set; }
         public bool? BuildBusy { get; set; }
+        public string Dialog { get; set; }
         public int SessionGeneration { get; set; }
         public List<ProcessInfo> Processes { get; set; }
         public Intervention LastTransition { get; set; }

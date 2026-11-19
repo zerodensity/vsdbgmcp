@@ -54,7 +54,8 @@ namespace VsDbgMcp.Host
                         done.TrySetException(new InvalidOperationException(
                             "Visual Studio turned away calls from the debugger for 30 seconds, so this read is " +
                             "incomplete and nothing from it is returned. A dialog open in Visual Studio does " +
-                            "this; close it and call again."));
+                            "this; do not try to close it, ask the user to. debug_state shows whether one " +
+                            "is open; call again once none is."));
                     else
                         done.TrySetResult(result);
                 }

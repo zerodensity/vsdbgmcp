@@ -112,7 +112,7 @@ namespace VsDbgMcp.Shim.Tools
         }
 
         [McpServerTool(Name = "status", ReadOnly = true)]
-        [Description("Where the debugger is right now: solution, debugger mode (design, run, break), current thread and frame, the top of the call stack, any pending exception, debugged processes, and the pinned watch values. Call this first when you do not know the state; it is cheap and always works. It also lists what has happened recently in this window - stops, exits, builds finishing, debugging starting or ending.")]
+        [Description("Where the debugger is right now: solution, debugger mode (design, run, break), current thread and frame, the top of the call stack, any pending exception, debugged processes, and the pinned watch values. Call this first when you do not know the state; it is cheap. While Visual Studio shows a dialog it is refused, and debug_state answers instead. It also lists what has happened recently in this window - stops, exits, builds finishing, debugging starting or ending.")]
         public Task<string> Status(
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
             CancellationToken ct = default)
@@ -214,7 +214,7 @@ namespace VsDbgMcp.Shim.Tools
                 nameRegex ?? pid?.ToString());
 
         [McpServerTool(Name = "detach")]
-        [Description("Detach the debugger and leave the process running. Pass a pid to detach from one process of a multi-process session.")]
+        [Description("Detach the debugger and leave the process running. Pass a pid to detach from one process of a multi-process session. Without a pid it replies once debugging has ended, or says the outcome is unknown if that takes more than 15 seconds; it is refused when nothing is being debugged.")]
         public Task<string> Detach(
             [Description("Process to detach from. Omit to detach from everything.")] int? pid = null,
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
@@ -230,7 +230,7 @@ namespace VsDbgMcp.Shim.Tools
             });
 
         [McpServerTool(Name = "stop", Destructive = true)]
-        [Description("Stop debugging and terminate the debuggee (Shift+F5). Pass a pid to terminate one process of a multi-process session.")]
+        [Description("Stop debugging and terminate the debuggee (Shift+F5). Pass a pid to terminate one process of a multi-process session. Without a pid it replies once debugging has ended, or says the outcome is unknown if that takes more than 15 seconds; it is refused when nothing is being debugged.")]
         public Task<string> Stop(
             [Description("Process to terminate. Omit to stop the whole session.")] int? pid = null,
             [Description("Instance id. Omit to use the default for this session.")] string instance = null,
