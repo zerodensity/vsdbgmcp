@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.11
+
+- The Marketplace upload does the trusted-publishing token exchange itself and passes
+  the short-lived credential to VsixPublisher. Every published VsixPublisher builds its
+  own `-oidc` exchange without an `api-version`, which the Marketplace rejects. Nothing
+  changes in Visual Studio.
+
 ## 0.10.10
 
 - Agents no longer wait on Visual Studio dialogs. After a source edit while the program
