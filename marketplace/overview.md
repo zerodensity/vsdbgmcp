@@ -133,8 +133,8 @@ the agent was given back, as selectable text.
 
 ## Dialogs
 
-Unreleased. A Visual Studio dialog holds the command that opened it, and every call after
-it, until a person answers. When an agent connects, the extension turns off the debugger
+A Visual Studio dialog holds the command that opened it, and every call after it, until
+a person answers. When an agent connects, the extension turns off the debugger
 options that open a dialog in the middle of debugging: Edit and Continue's apply changes
 on continue and warn about stale code, and the warnings for no symbols or no user code
 on launch. These are your settings and stay off after the agent disconnects. After a
@@ -174,7 +174,7 @@ Worth knowing about:
   This offline tool does not rebuild or require a running Visual Studio instance.
 - **`debug_state`** — a bounded snapshot of debugger mode, registered processes,
   session generation, and active and retained captures, without evaluating watches.
-  It answers while a dialog is open, and names the dialog (unreleased).
+  It answers while a dialog is open, and names the dialog.
 - **`frame`** — the current location, source and module checks, arguments, locals,
   and suspect values in one reply. It takes a second reading of doubtful values before
   reporting what could not be established.

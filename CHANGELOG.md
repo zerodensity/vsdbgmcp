@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.10.9
 
 - Agents no longer wait on Visual Studio dialogs. After a source edit while the program
   was paused, the next `go` or `step` opened a Hot Reload dialog ("The target assembly
@@ -17,6 +17,9 @@
   Studio has left debug mode. If it has not after 15 seconds, they reply that the
   outcome is unknown, and the next reply reports when debugging ends. In design mode
   they refuse, because there is no session to end.
+- The Marketplace upload uses the VsixPublisher of Microsoft.VSSDK.BuildTools 18.12.1606.
+  The copy in the runner's Visual Studio 18.11 failed to sign in by trusted publishing.
+  Nothing changes in Visual Studio.
 
 ## 0.10.8
 

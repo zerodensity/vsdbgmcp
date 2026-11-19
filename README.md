@@ -168,8 +168,8 @@ process that connected or was refused, and anything that went wrong inside the e
 
 ## Dialogs
 
-Unreleased. A modal dialog that Visual Studio opens during a command holds that command,
-and every call after it, until a person answers. Agents do not answer dialogs, so:
+A modal dialog that Visual Studio opens during a command holds that command, and every
+call after it, until a person answers. Agents do not answer dialogs, so:
 
 - When an MCP client connects, the extension turns off the debugger options that open a
   dialog in the middle of debugging, and turns them off again on every later connection.
