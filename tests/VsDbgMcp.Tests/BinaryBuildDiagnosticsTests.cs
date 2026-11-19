@@ -41,7 +41,7 @@ namespace VsDbgMcp.Tests
                 }
                 File.Delete(project); // Reading must not require or execute the project.
                 var result = BinaryBuildDiagnostics.Read(log, null, null, 100, CancellationToken.None);
-                Assert.Null(result.Error);
+                Assert.True(result.Error == null, result.Error);
                 Assert.True(result.EventStreamComplete);
                 Assert.Equal("failed", result.Outcome);
                 Assert.Equal(2, result.Warnings);

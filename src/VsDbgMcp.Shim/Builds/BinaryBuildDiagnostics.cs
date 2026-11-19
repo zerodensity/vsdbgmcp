@@ -45,9 +45,19 @@ namespace VsDbgMcp.Shim.Builds
             var projects = new Dictionary<string, (string Path, string Config)>();
             var unique = new HashSet<string>(StringComparer.Ordinal);
             var limit = Math.Max(1, Math.Min(maxDiagnostics, 1000));
-            var replay = new BinaryLogReplayEventSource { AllowForwardCompatibility = false };
-            bool readError = false;
-            replay.RecoverableReadError += _ => readError = true;
+            // A log from a newer MSBuild is read as far as this reader understands it,
+            // which the format allows when the file's minimum reader version is met.
+            // Records it cannot read are skipped and reported; only a skipped record of
+            // a kind counted here makes the counts incomplete.
+            var replay = new BinaryLogReplayEventSource { AllowForwardCompatibility = true };
+            bool lostCounted = false;
+            var skipped = new SortedDictionary<string, int>(StringComparer.Ordinal);
+            replay.RecoverableReadError += e =>
+            {
+                var kind = Enum.IsDefined(e.RecordKind) ? e.RecordKind.ToString() : "kind " + (int)e.RecordKind;
+                skipped[kind] = skipped.TryGetValue(kind, out var n) ? n + 1 : 1;
+                if (e.ErrorType != ReaderErrorType.UnknownEventData && Counted.Contains(e.RecordKind)) lostCounted = true;
+            };
             replay.BuildStarted += (_, e) => report.StartedUtc = e.Timestamp.ToUniversalTime();
             replay.BuildFinished += (_, e) => { report.FinishedUtc = e.Timestamp.ToUniversalTime(); report.Outcome = e.Succeeded ? "succeeded" : "failed"; };
             replay.ProjectStarted += (_, e) =>
@@ -86,8 +96,15 @@ namespace VsDbgMcp.Shim.Builds
                 // Replay emits events; it never evaluates projects or runs build tasks.
                 using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
                 replay.Replay(stream, ct);
-                report.EventStreamComplete = !readError && report.StartedUtc != null && report.FinishedUtc != null;
+                report.EventStreamComplete = !lostCounted && report.StartedUtc != null && report.FinishedUtc != null;
                 if (!report.EventStreamComplete) report.Error = "Build boundaries or events are missing; the log's outcome is not established.";
+                if (skipped.Count > 0)
+                {
+                    var count = skipped.Values.Sum();
+                    report.Coverage += " The log was written by a newer MSBuild than this reader knows; it skipped " +
+                        count + (count == 1 ? " record" : " records") + " it could not read (" +
+                        string.Join(", ", skipped.Select(s => s.Key + ": " + s.Value)) + ").";
+                }
             }
             catch (Exception ex) when (!(ex is OperationCanceledException)) { report.Error = ex.Message; }
             if (!report.EventStreamComplete) report.Outcome = "unknown";
@@ -95,6 +112,13 @@ namespace VsDbgMcp.Shim.Builds
             report.Truncated = report.MatchingDiagnostics > report.Diagnostics.Count;
             return report;
         }
+
+        /// <summary>The records the report is built from: build boundaries, project ownership, errors and warnings.</summary>
+        static readonly HashSet<BinaryLogRecordKind> Counted = new HashSet<BinaryLogRecordKind>
+        {
+            BinaryLogRecordKind.BuildStarted, BinaryLogRecordKind.BuildFinished, BinaryLogRecordKind.ProjectStarted,
+            BinaryLogRecordKind.Error, BinaryLogRecordKind.Warning
+        };
 
         static string Key(BuildEventContext context) => context == null ? "unknown" : context.NodeId + ":" + context.ProjectContextId;
         static bool Matches(string value, string filter) => string.IsNullOrWhiteSpace(filter) ||
